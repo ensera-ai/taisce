@@ -1,6 +1,7 @@
 -- ── What extraction refused, kept with the model's own words ──────────────────────────────────
 --
---  Two things stop a proposal from becoming a fact, and both of them are silent.
+--  Two things stop a proposal from becoming a fact, and both of them are silent. (A third was added
+--  in 0008: a relation this message has already asserted. The reasoning is there.)
 --
 --  A relation outside the closed vocabulary is refused because admitting one makes the set
 --  advisory. A quote that is not in the message is refused because there is nothing to cite.
@@ -53,7 +54,7 @@ CREATE TABLE {schema}.rejected_claim (
     data_subject_id       text,
     recorded_at           timestamptz NOT NULL DEFAULT now(),
 
-    -- Closed, because a third reason would be a third thing this table means. Adding one is a
+    -- Closed, so a reason no reader knows about cannot be written. Widening it is a
     -- migration and a decision, which is the right weight for changing what "refused" covers.
     CONSTRAINT rejected_claim_reason_chk
         CHECK (reason = ANY (ARRAY['unmapped_relation', 'unlocatable_quote'])),

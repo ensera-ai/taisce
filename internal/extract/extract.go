@@ -82,6 +82,19 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 	}
 
 	var out Result
+	// What this message has already produced. A model asked about one message can report the same
+	// relation twice — once from each sentence that states it, or simply twice — and each copy would
+	// become its own fact, its own evidence row and its own place in a bundle that is cut in rows.
+	//
+	// The key is what identity is made of downstream: the relation, and the two ends normalised the
+	// way entity resolution normalises them. Two claims differing only in the casing of a name
+	// resolve to one entity pair, so they are one fact whether or not this notices.
+	//
+	// Scoped to one message, deliberately. The same relation asserted in two different messages is
+	// two people, or one person twice, saying a thing — which is corroboration rather than
+	// repetition, and reconciling it is supersession's problem, not extraction's.
+	seen := make(map[string]struct{}, len(proposals))
+
 	for _, p := range proposals {
 		predicate, admitted := e.vocabulary.Lookup(p.Predicate)
 		if !admitted {
@@ -94,6 +107,15 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 			out.Rejected = append(out.Rejected, reject(p, domain.ReasonUnlocatableQuote, message.Ordinal))
 			continue
 		}
+
+		// After the quote is located, not before: a repeat whose quote cannot be found is
+		// uncitable, which is the more specific defect and the one worth recording.
+		identity := p.Predicate + "\x00" + domain.NormalizeName(p.Subject) + "\x00" + domain.NormalizeName(p.Object)
+		if _, already := seen[identity]; already {
+			out.Rejected = append(out.Rejected, reject(p, domain.ReasonDuplicateClaim, message.Ordinal))
+			continue
+		}
+		seen[identity] = struct{}{}
 
 		objectType := p.ObjectType
 		if objectType == "" {

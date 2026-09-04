@@ -276,3 +276,89 @@ func TestAQuoteThatChangedCaseIsRefused(t *testing.T) {
 		t.Fatalf("expected an unlocatable-quote rejection, got %+v", got.Rejected)
 	}
 }
+
+// ── #74 ───────────────────────────────────────────────────────────────────────────────────────
+//
+// One message asserting the same relation twice is one fact, and the repeat is recorded rather than
+// dropped.
+//
+// Nothing downstream collapses these. The fact table has no uniqueness past its primary key — it
+// cannot have, because a superseded fact and its replacement share the triple — so a second copy
+// would become a second fact, a second evidence row, and one of the rows a bundle is cut to.
+func TestARelationAssertedTwiceInOneMessageIsOneClaim(t *testing.T) {
+	content := "I work at Ensera. Yes, Ensera — I work at Ensera."
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera."},
+	}}, vocabulary(t)).Extract(context.Background(), message(content))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	if len(result.Claims) != 1 {
+		t.Fatalf("got %d claims, wanted the relation once", len(result.Claims))
+	}
+	if len(result.Rejected) != 1 {
+		t.Fatalf("got %d refusals, wanted the repeat written down", len(result.Rejected))
+	}
+	if result.Rejected[0].Reason != domain.ReasonDuplicateClaim {
+		t.Fatalf("the repeat was refused as %q", result.Rejected[0].Reason)
+	}
+	// The first one survives, with its span intact — the refusal must not disturb what it follows.
+	if got := content[result.Claims[0].ByteStart:result.Claims[0].ByteEnd]; got != result.Claims[0].Quote {
+		t.Fatalf("span gives %q, quote is %q", got, result.Claims[0].Quote)
+	}
+}
+
+// Identity is what identity is downstream. Entities resolve by normalised name, so two claims
+// differing only in casing or spacing are one fact whether or not extraction notices — and if it
+// does not, the second one is a duplicate row nobody asked for.
+func TestARepeatIsFoundThroughTheSameNormalisationEntitiesUse(t *testing.T) {
+	content := "I work at Ensera. I work at  ENSERA  as it happens."
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "i", Predicate: "works_at", Object: "  ENSERA  ", Quote: "I work at  ENSERA "},
+	}}, vocabulary(t)).Extract(context.Background(), message(content))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Claims) != 1 {
+		t.Fatalf("got %d claims; casing and spacing do not make a second fact", len(result.Claims))
+	}
+}
+
+// Two relations sharing a subject are not a repeat, and neither are two objects under one relation.
+// A dedupe that swallowed either would be silently losing facts, which is worse than the defect.
+func TestDifferentRelationsAndDifferentEndsAreNotRepeats(t *testing.T) {
+	content := "I work at Ensera, I live in Dublin, and I work at Acme too."
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "lives_in", Object: "Dublin", Quote: "I live in Dublin"},
+		{Subject: "I", Predicate: "works_at", Object: "Acme", Quote: "I work at Acme"},
+	}}, vocabulary(t)).Extract(context.Background(), message(content))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Claims) != 3 {
+		t.Fatalf("got %d claims, wanted 3", len(result.Claims))
+	}
+	if len(result.Rejected) != 0 {
+		t.Fatalf("got %d refusals, wanted none: %+v", len(result.Rejected), result.Rejected)
+	}
+}
+
+// A repeat whose quote cannot be found is uncitable, which is the more specific defect. Order
+// matters here: reporting it as a duplicate would hide that the model invented a quote.
+func TestARepeatWithAnInventedQuoteIsRefusedAsUncitable(t *testing.T) {
+	content := "I work at Ensera."
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "employed by Ensera"},
+	}}, vocabulary(t)).Extract(context.Background(), message(content))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != domain.ReasonUnlocatableQuote {
+		t.Fatalf("wanted one uncitable refusal, got %+v", result.Rejected)
+	}
+}

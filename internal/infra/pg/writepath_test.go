@@ -628,3 +628,49 @@ func TestACitationResolvesAgainstTheMessageItsEvidenceNames(t *testing.T) {
 		t.Fatalf("the span resolved to %q but the quote is %q", resolved, storedQuote)
 	}
 }
+
+// ── #74 ───────────────────────────────────────────────────────────────────────────────────────
+//
+// The reasons a claim can be refused are closed by the schema, and the closed set is the one the Go
+// constants name.
+//
+// Two definitions of a closed set is two places for it to drift, and the one that drifts is whichever
+// is not enforced. Here the constraint is enforced, so a constant the schema has never heard of
+// surfaces as a failed insert at the moment a refusal is recorded — which is inside the transaction
+// that was forming a turn.
+func TestEveryRefusalReasonTheCodeNamesIsOneTheSchemaAdmits(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_reasons")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	for _, reason := range []string{
+		domain.ReasonUnmappedRelation,
+		domain.ReasonUnlocatableQuote,
+		domain.ReasonDuplicateClaim,
+	} {
+		if err := facts.Reject(ctx, schema, "p1", stored.ID, "subject-1", domain.RejectedClaim{
+			Predicate: "works_at", Statement: "The user works at Ensera.",
+			Quote: "I work at Ensera", Reason: reason,
+		}); err != nil {
+			t.Fatalf("the schema refused %q, which the code will write: %v", reason, err)
+		}
+	}
+
+	// And the other direction. Without this the constraint could have been dropped rather than
+	// widened, and every test above would still pass.
+	if err := facts.Reject(ctx, schema, "p1", stored.ID, "subject-1", domain.RejectedClaim{
+		Predicate: "works_at", Statement: "The user works at Ensera.",
+		Quote: "I work at Ensera", Reason: "because_i_said_so",
+	}); err == nil {
+		t.Fatal("a reason no reader knows about was accepted; the set is not closed")
+	}
+}

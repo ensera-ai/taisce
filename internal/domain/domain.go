@@ -288,8 +288,9 @@ func (o Ontology) Len() int { return len(o.ordered) }
 
 // ── What extraction refused ───────────────────────────────────────────────────────────────────
 
-// Why a proposed claim did not become a fact. The set is closed, and a third reason would be a
-// third thing the record means.
+// Why a proposed claim did not become a fact. The set is closed by a check constraint in the schema,
+// so a reason no reader knows about cannot be written — and each member has to mean a genuinely
+// different thing, because a record whose reasons overlap cannot be counted.
 const (
 	// ReasonUnmappedRelation — the relation is not in the vocabulary. The claim may well be true;
 	// there is simply no edge type for it, and admitting one relation outside the set makes the set
@@ -298,6 +299,10 @@ const (
 	// ReasonUnlocatableQuote — the quote is not in the message. Usually a paraphrase, occasionally
 	// an invention. Either way there is nothing to cite.
 	ReasonUnlocatableQuote = "unlocatable_quote"
+	// ReasonDuplicateClaim — the same relation between the same two ends, already produced by this
+	// message. The claim is not wrong and not uncitable; it is already recorded, and admitting it
+	// again would spend one of a bundle's rows on a repeat of a fact the caller already has.
+	ReasonDuplicateClaim = "duplicate_claim"
 )
 
 // RejectedClaim is a proposal that did not become a fact, kept with the words that were proposed.
