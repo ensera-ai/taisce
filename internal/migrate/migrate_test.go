@@ -54,13 +54,33 @@ func TestTheMigrationApplies(t *testing.T) {
 	tenant := freshTenant(t, pool)
 	schema, _ := NewSchema(tenant)
 
-	var version int
+	// Asserted against what is embedded rather than against a literal: a literal makes every new
+	// migration fail this test for the wrong reason, which trains people to update the number
+	// without reading what broke.
+	all, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	want := all[len(all)-1].Version
+
+	var got int
 	if err := pool.QueryRow(context.Background(),
-		schema.SQL(`SELECT max(version) FROM {schema}.schema_migration`)).Scan(&version); err != nil {
+		schema.SQL(`SELECT max(version) FROM {schema}.schema_migration`)).Scan(&got); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("expected schema version 1, got %d", version)
+	if got != want {
+		t.Fatalf("schema is at version %d; the embedded set goes to %d", got, want)
+	}
+
+	// Every embedded migration recorded itself. A migration that ran without recording would be
+	// re-applied on the next deploy, and most of these are not idempotent.
+	var recorded int
+	if err := pool.QueryRow(context.Background(),
+		schema.SQL(`SELECT count(*) FROM {schema}.schema_migration`)).Scan(&recorded); err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if recorded != len(all) {
+		t.Fatalf("%d migrations recorded, %d embedded", recorded, len(all))
 	}
 }
 

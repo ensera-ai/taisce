@@ -1,26 +1,25 @@
-package migrate
+// Package pg holds the PostgreSQL adapters. Every statement is a package-level const with {schema}
+// where the tenant goes, so which tenant a query reads is answerable by reading the call site.
+package pg
 
 import (
 	"fmt"
 	"strings"
 )
 
-// Schema is a validated PostgreSQL schema identifier, and a tenant is one.
+// Schema is a validated schema identifier, and a tenant is one.
 //
-// # Why this is a type rather than a convention
-//
-// The tenant boundary is HARD: a cross-tenant read is impossible because the other tenant's name is
-// not in the statement, not because a predicate excluded it. That guarantee rests entirely on the
-// identifier being trustworthy at the point it is interpolated — and a schema name cannot be a bind
-// parameter, because PostgreSQL parameters are values and never identifiers.
+// The tenant boundary is hard: a cross-tenant read is impossible because the other tenant's name is
+// not in the statement, not because a predicate excluded it. That rests entirely on the identifier
+// being trustworthy where it is interpolated — and a schema name cannot be a bind parameter, since
+// PostgreSQL parameters are values and never identifiers.
 //
 // So interpolation is unavoidable, which means validation cannot be something each call site
-// remembers. A Schema exists only if it passed NewSchema, and every statement builder takes nothing
-// else. Forgetting to validate is then a compile error rather than an injection.
+// remembers. A Schema exists only if it passed NewSchema, and every builder takes nothing else.
 type Schema string
 
 // PostgreSQL's NAMEDATALEN - 1. A longer name is silently TRUNCATED, which for a tenant identifier
-// means two tenants can collide into one schema — the single worst failure this type can prevent.
+// means two tenants colliding into one schema — the worst failure this type can prevent.
 const maxIdentifierLength = 63
 
 // NewSchema validates a tenant's schema name.
@@ -45,11 +44,7 @@ func NewSchema(name string) (Schema, error) {
 
 func (s Schema) String() string { return string(s) }
 
-// SQL renders a statement template, replacing {schema} with this tenant's schema.
-//
-// Every statement in every store is a const with `{schema}` where the schema goes. That is what
-// makes "which tenant does this query read" answerable by reading the call site rather than by
-// auditing a WHERE clause.
+// SQL renders a statement template for this tenant.
 func (s Schema) SQL(template string) string {
 	return strings.ReplaceAll(template, "{schema}", string(s))
 }

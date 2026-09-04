@@ -17,7 +17,20 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/taisce/taisce/internal/infra/pg"
 )
+
+// Schema and NewSchema live in the pg adapter, which is where every other statement builder needs
+// them. Aliased rather than re-declared: two definitions of a validated identifier is two places
+// for the validation to drift.
+type Schema = pg.Schema
+
+// NewSchema validates a tenant's schema name.
+var NewSchema = pg.NewSchema
+
+// maxIdentifierLength is PostgreSQL's limit, restated for the tests that assert the boundary.
+const maxIdentifierLength = 63
 
 //go:embed sql/*.sql
 var scripts embed.FS
