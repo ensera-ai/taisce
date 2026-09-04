@@ -6,7 +6,7 @@
 SUBSTRATE_VERSION ?= 0.1.0
 TEST_DSN ?= postgres://postgres:taisce@localhost:55432/taisce?sslmode=disable
 
-.PHONY: substrate db-up db-down test build
+.PHONY: substrate db-up db-down test test-inference build
 
 substrate:
 	docker build -t taisce-postgres:$(SUBSTRATE_VERSION) deploy/postgres
@@ -25,6 +25,23 @@ db-down:
 # skipped everything is the failure mode this target exists to prevent.
 test:
 	TAISCE_TEST_DSN="$(TEST_DSN)" go test ./...
+
+# Extraction against a real model. Separate because it costs money and because it sends its fixture
+# text to whichever provider is configured — a deliberate act, so a deliberate command.
+#
+# The test is behind a build tag rather than an environment check, so under this target missing
+# configuration FAILS rather than skips. A target whose whole purpose is to reach a live model, and
+# which passes when it did not, is worse than no target.
+#
+#   TAISCE_INFERENCE_ENDPOINT   base URL of an OpenAI-compatible endpoint
+#   TAISCE_INFERENCE_API_KEY    bearer token, if the endpoint wants one
+#   TAISCE_INFERENCE_EXTRACTOR_MODEL  the model to ask
+#   TAISCE_INFERENCE_ALLOWLIST  hosts permitted to receive message content, comma separated.
+#                               Empty permits nothing: the default has to be closed, because an
+#                               allowlist that opens when unset is one forgotten variable away from
+#                               not being one.
+test-inference:
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v ./internal/infra/inference/
 
 build:
 	go build ./...
