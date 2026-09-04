@@ -446,6 +446,70 @@ measurement justifies them — see G7); ordering by confidence (confidence is wh
 asserted, not what a reader needs, and using it as a rank quietly makes it one); silent truncation
 (the caller cannot tell an exhaustive answer from a cut one, and will assume the wrong one).
 
+### D26 — A projection kind declares where it lives, and an undeclared one cannot be registered
+
+`{schema}.projection_kind` holds every kind of derived row and the table it lives in.
+`projection_dependency.projection_kind` references it.
+
+D9 made erasure walk a registered dependency rather than a list of tables. That leaves one thing
+still held somewhere: a kind and an id do not say which table to delete from. As a switch inside the
+eraser that mapping is a list somebody maintains, and every milestone after this one adds a
+projection — embeddings, community reports, summaries. Producer and eraser drift in one direction
+only: the producer ships and the eraser is updated later, or not at all. What survives is a residual
+count that says zero because it counted the kinds somebody remembered.
+
+As a foreign key, a projection kind that is not declared **cannot be registered at all**. The failure
+moves from "erasure quietly misses it" to "the write fails the first time it runs" — a failure landing
+on the person adding the projection, on the day they add it. And because the eraser iterates the
+declarations rather than a list of its own, a kind declared later is covered without the eraser
+changing.
+
+The table and column names are constrained to `[a-z][a-z0-9_]*` at the source, because they are
+interpolated into a `DELETE`: PostgreSQL parameters are values and never identifiers, so the
+constraint is what makes the interpolation safe where the name is written rather than where it is
+used.
+
+**Rejected:** a switch in the eraser (above); a test asserting the eraser covers every kind seen in
+`projection_dependency` (only fails if the test's write path happens to produce the new kind, so the
+projection most likely to be missed is the one written by a path nobody added to the test); erasure
+by scanning every table for a `data_subject_id` column (an entity has none, and a projection that
+does not carry one would be invisible while looking covered).
+
+### D27 — A projection shared with another subject is kept, and keeping it is not a residual
+
+The deletion predicate removes a projection only when every registration of it belongs to the subject
+being erased. The residual is counted with that same predicate.
+
+An entity is the case that decides it. `Ensera` is registered by every subject who mentioned it, and
+deleting it because one of them asked to be forgotten would take a node out of everybody else's graph
+— an erasure that damages the people who did not request one. Counting it as a residual instead would
+be worse: every erasure would report a non-zero residual for correct behaviour, and the number would
+stop being read.
+
+**Rejected:** deleting every registered projection (damages other subjects' graphs); keeping shared
+projections but counting them as residual (makes a clean erasure indistinguishable from a failed one,
+so the number is ignored); a reference count on the projection row (a second place the truth lives,
+and it drifts the moment a delete happens outside the path that maintains it).
+
+### D28 — The residual is counted before the observations are deleted, in the same transaction
+
+Projections are deleted through their registrations, counted through the **same** registrations, and
+only then are the observations removed.
+
+Deleting the observations first cascades the registrations away, and the count is then made against a
+predicate that selects nothing — a residual of zero meaning "I could not find anything to check"
+rather than "nothing survived". That is the failure mode of a residual count: it is far easier to
+produce a zero that is vacuous than one that is earned.
+
+Counting after the commit would be a separate read of a moving target: a concurrent formation writing
+a new projection for the same subject appears as a residual the erasure did not leave, and two
+concurrent erasures of one subject each report the other's work as their own clean sweep.
+
+**Rejected:** counting after the transaction commits (above); deleting the observation first and
+relying on cascade for everything (the cascade is what makes the count vacuous, and an entity has no
+foreign key to cascade through anyway); a residual in a log line rather than a column (D10 — it is
+the artefact the product is sold on, and a log line is not something a customer can be shown).
+
 ## Method
 
 ### D14 — Nothing is brought in from another codebase unless it is asked for

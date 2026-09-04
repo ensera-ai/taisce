@@ -355,3 +355,34 @@ type Bundle struct {
 	// verdict.
 	Truncated bool
 }
+
+// ── Erasure ───────────────────────────────────────────────────────────────────────────────────
+
+// Erasure is the receipt for a deletion: what was asked, what went, and what survived.
+//
+// The residual is the product. An erasure that reports "done" is a claim; one that reports how many
+// rows matching the same predicate are still there, counted after the delete in the same
+// transaction, is a measurement — and it is the measurement a data protection officer is actually
+// asking for.
+type Erasure struct {
+	RequestID     string
+	Scope         string
+	DataSubjectID string
+	Reason        string
+	CompletedAt   time.Time
+	// Deleted and Residual are per projection kind, and both are needed. Deleted alone cannot
+	// distinguish a thorough erasure from one that found nothing. Residual alone cannot distinguish
+	// a clean sweep from a subject who was never here.
+	Deleted  map[string]int
+	Residual map[string]int
+}
+
+// Clean reports whether nothing that should have gone survived.
+func (e Erasure) Clean() bool {
+	for _, n := range e.Residual {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
+}
