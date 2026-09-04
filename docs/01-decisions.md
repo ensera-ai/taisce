@@ -184,6 +184,64 @@ would have to mean something weaker than it says.
 **Rejected:** a global identity column (above); a timestamp as the watermark (clock skew and equal
 timestamps make "everything up to here" unprovable).
 
+## The graph
+
+### D15 — The predicate vocabulary is closed, and a foreign key is what closes it
+
+Thirty-nine relation types, seeded per tenant into `{schema}.predicate`, with `fact.predicate`
+referencing it. Each carries a **cardinality** (`one` — at most one currently-valid fact per subject
+and predicate; `many` — several coexist), an **object kind**, and a **semantic type**.
+
+An extractor asked for a relation invents one per sentence: `works_at`, `employed_by`,
+`is_employed_at`, `has_employer` — four edge types describing one relation. A traversal asking where
+somebody works matches one and silently misses three quarters of what was extracted, and every row
+involved looks correct. It also makes the stages after it unbuildable: supersession asks "is there a
+current fact with this subject and this predicate", which only reconciles when two assertions chose
+the same word, and a cardinality rule cannot be written for a vocabulary nobody can enumerate.
+
+Cardinality is declared **when the predicate is defined**, because at supersession time all that is
+visible is two rows and the question is no longer answerable. Its enforcer is the exclusion
+constraint in #9; declaring it now is what lets that arrive as a constraint rather than as a redesign.
+
+The size is bounded at 30–50 and asserted by a test. Too small and real relations have nowhere to go.
+Too large and the near-duplicates are back, spread over a set nobody can hold in their head — which
+is harder to see than an open vocabulary, not easier.
+
+**Rejected:** an open vocabulary (above). A list in application code rather than a foreign key — that
+is a convention every write path has to remember, and the path that forgets is the one written last;
+as a constraint an unknown relation cannot be stored by any path, including a hand-written `INSERT`
+during an incident. A generic `has_value` or `has_attribute` — a wildcard makes the closed set
+vacuous, since anything can be phrased as a value of a compound object, and every claim the ontology
+was meant to refuse arrives through it wearing an accepted name. Inverse predicates such as
+`reports_to` alongside `manages` — edges are directed and traversal follows both ends, so an inverse
+is a second spelling of one relation and reintroduces exactly the split this decision prevents. A
+`mentioned` or `co_occurs_with` relation — an edge between two things that appeared near each other
+has no direction and no meaning, so a multi-hop question gets no hops out of it. `ON DELETE CASCADE`
+on the reference — retiring a predicate would delete the memory in order to permit a schema edit, so
+it is `RESTRICT` and the change fails loudly.
+
+### D16 — A relation outside the vocabulary is recorded as unmapped, never admitted as an edge
+
+Not dropped, and not admitted.
+
+Nothing is lost by refusing it, because the refusal is narrower than it looks: the message is already
+stored as a row and retrievable as a passage, so what is refused is **the typed edge**, not the
+memory. This is the same shape as the role policy — an assistant's sentence is still stored, it
+simply does not become something the person is recorded as having said.
+
+Admitting it is what cannot be allowed. One relation admitted outside the set means the set is
+advisory, and an advisory vocabulary is an open one with extra steps.
+
+The unmapped claim is kept with its evidence so the rate is a query rather than an estimate: a high
+unmapped rate is evidence the vocabulary is wrong, and that argument needs a number. The mechanism
+lands with the extractor in #42, which is the only thing that can produce one.
+
+**Rejected:** dropping unmapped claims silently (loses the evidence that the vocabulary is wrong,
+and the failure is invisible precisely when it is worst); admitting them as edges with a flag (a flag
+is a filter every future query has to remember, so the vocabulary is closed only in the queries
+somebody remembered); mapping them onto the nearest admitted relation by similarity (records a
+relation nobody asserted, and the wrongness is unrecoverable because the original wording is gone).
+
 ## Method
 
 ### D14 — Nothing is brought in from another codebase unless it is asked for

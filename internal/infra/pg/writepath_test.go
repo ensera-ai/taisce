@@ -91,7 +91,7 @@ func TestAnAssistantsSentenceDoesNotBecomeTheUsersFact(t *testing.T) {
 
 	// The assistant's inference about the same person is not.
 	_, err = facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleAssistant, "subject-1", domain.Claim{
-		Subject: "user", Predicate: "likes", Object: "Dublin food scene",
+		Subject: "user", Predicate: "prefers", Object: "Dublin food scene",
 		Statement: "The user likes the Dublin food scene.", Confidence: 0.8,
 		Quote: "You must love the Dublin food scene.", ByteStart: 0, ByteEnd: 36, SourceOrdinal: 1,
 	})
@@ -130,19 +130,19 @@ func TestTheSameNameUnderTwoTypesIsOneEntity(t *testing.T) {
 	facts := pg.NewFactStore(pool)
 
 	stored, err := obs.Append(ctx, schema, turnOf(
-		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "The Dublin Office is on Grand Canal. dublin office has 40 desks."},
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "The Dublin Office is on Grand Canal. dublin office is part of Ensera."},
 	))
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
 
 	for _, c := range []domain.Claim{
-		{Subject: "Dublin Office", Predicate: "located_on", Object: "Grand Canal",
+		{Subject: "Dublin Office", Predicate: "located_in", Object: "Grand Canal",
 			Statement: "The Dublin Office is on Grand Canal.", SubjectType: "place",
 			Quote: "The Dublin Office is on Grand Canal", ByteStart: 0, ByteEnd: 35},
-		{Subject: "dublin office", Predicate: "has_desks", Object: "40",
-			Statement: "The Dublin office has 40 desks.", SubjectType: "thing",
-			Quote: "dublin office has 40 desks", ByteStart: 37, ByteEnd: 63},
+		{Subject: "dublin office", Predicate: "part_of", Object: "Ensera",
+			Statement: "The Dublin office is part of Ensera.", SubjectType: "thing",
+			Quote: "dublin office is part of Ensera", ByteStart: 37, ByteEnd: 68},
 	} {
 		if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", c); err != nil {
 			t.Fatalf("assert %q: %v", c.Predicate, err)
@@ -390,5 +390,51 @@ func TestARefusedTurnLeavesNothingBehind(t *testing.T) {
 	}
 	if observations != 0 || watermarks != 0 {
 		t.Fatalf("a refused turn left %d observations and %d watermark rows", observations, watermarks)
+	}
+}
+
+// ── #5's claim, on the write path ─────────────────────────────────────────────────────────────
+//
+// An unmapped relation is refused, and the refusal leaves nothing behind.
+//
+// This matters beyond the constraint itself: `Assert` resolves both entity ends BEFORE it writes
+// the fact, so a predicate rejected at the last statement would otherwise leave two entities and
+// two projection registrations for a fact that does not exist. Erasure would then count residual
+// against rows nothing points at.
+func TestAnUnmappedRelationIsRefusedAndLeavesNothingBehind(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_ontology")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "Marta is employed by Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// A synonym of an admitted relation, which is the realistic failure: not a typo, but a second
+	// spelling that no traversal asking for `works_at` would ever match.
+	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", domain.Claim{
+		Subject: "Marta", Predicate: "employed_by", Object: "Ensera",
+		Statement: "Marta is employed by Ensera.", Quote: "Marta is employed by Ensera",
+		ByteStart: 0, ByteEnd: 27,
+	}); err == nil {
+		t.Fatal("a relation outside the vocabulary was asserted")
+	}
+
+	var entities, facts2, registrations int
+	if err := pool.QueryRow(ctx, schema.SQL(`
+		SELECT (SELECT count(*) FROM {schema}.entity),
+		       (SELECT count(*) FROM {schema}.fact),
+		       (SELECT count(*) FROM {schema}.projection_dependency
+		         WHERE projection_kind IN ('entity', 'fact'))`)).Scan(&entities, &facts2, &registrations); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if entities != 0 || facts2 != 0 || registrations != 0 {
+		t.Fatalf("a refused relation left %d entities, %d facts and %d registrations behind",
+			entities, facts2, registrations)
 	}
 }
