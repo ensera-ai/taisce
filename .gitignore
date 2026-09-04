@@ -1,0 +1,17 @@
+# Build output
+/taisce
+/dist/
+*.test
+*.out
+
+# Local configuration and secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Tooling
+.DS_Store
+node_modules/
+__pycache__/
+.venv/
