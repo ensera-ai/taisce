@@ -23,8 +23,15 @@ db-down:
 
 # No skip-when-absent arm. TAISCE_TEST_DSN unset makes the database tests skip, and a green run that
 # skipped everything is the failure mode this target exists to prevent.
+#
+# Coverage is computed here rather than in a separate target, because a gate nobody runs is not a
+# gate. -coverpkg=./... because the default counts only what a package's own tests reach, which
+# understates a codebase exercised end to end and would let the number fall while looking steady.
+COVER_PROFILE ?= coverage.out
+
 test:
-	TAISCE_TEST_DSN="$(TEST_DSN)" go test ./...
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
+	./scripts/coverage-gate.sh $(COVER_PROFILE)
 
 # Extraction against a real model. Separate because it costs money and because it sends its fixture
 # text to whichever provider is configured — a deliberate act, so a deliberate command.

@@ -15,3 +15,7 @@
 node_modules/
 __pycache__/
 .venv/
+
+# The coverage profile the test target writes. The floor it is checked against is committed;
+# the profile is a build artefact.
+coverage.out
