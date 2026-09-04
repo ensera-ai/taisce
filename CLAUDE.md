@@ -104,6 +104,24 @@ Tests run **against a real deployment**. A mock proves that the mock matches the
 that skips when its dependency is absent is a green run that asserted nothing — so the test target
 has no skip-when-absent arm.
 
+**Coverage is a requirement, and it is not waived for a deadline.** Every behaviour that can refuse
+has a test that makes it refuse. A branch nothing exercises is a branch nobody has ever watched run,
+and it will first run under load on the day it matters. The named test is the deliverable: a test
+called for the property it holds is what a later reader re-runs to find out whether the property
+still holds.
+
+**The number is measured across packages, or it is not the number.** `go test -cover` counts only
+what a package's own tests reach, which understates a codebase whose behaviour is exercised end to
+end — this suite reports 75.4% that way and 78.9% with `-coverpkg=./...`. The second is the honest
+one, and it is the one the build checks.
+
+**The floor is a ratchet, not a target.** It sits at what the suite already achieves and only ever
+moves up. A fixed percentage invites tests written to reach it; a falling one is invisible until
+somebody thinks to look. Uncovered code is permitted in exactly one place — the live-model path
+behind the `inference` build tag, which `make test-inference` covers against a real provider — and
+anything else standing at zero is a defect in the change that introduced it, not a number to be
+argued down.
+
 ## 7. Work is ordered as one journey
 
 Milestones are **one end-to-end journey, deepened in passes** — never breadth-first layers. A
@@ -194,6 +212,53 @@ what would still be better here? If the answer is nothing, the differentiation i
 rather than an architecture, and that is worth knowing early.
 
 **Do not manufacture an advantage.** Only claim one that can be built and defended.
+
+## 13. Know what the market can already do, and be ahead of it
+
+**A capability somebody else already ships is a requirement here until it is deliberately rejected.**
+Not because they chose well — their constraints are not these constraints — but because a developer
+evaluating this will have seen it, and an absence they notice should be one we decided on rather than
+one that happened. Checking is continuous, not a phase before the roadmap: what is possible moves
+faster than the roadmap does.
+
+**What crosses is the capability, never the implementation and never the reasoning.** This is rule 3
+at the edge of the market: name what the thing lets a developer do, re-derive whether it belongs
+here, and build it our way — on our substrate, in our vocabulary, carrying our proof obligations. A
+design justified by *"they have it"* has not been justified.
+
+**Every look outward produces a finding, and findings are issues** (rule 1) — including the ones that
+end in a rejection, because an unrecorded rejection is proposed again by the next person who saw the
+same feature.
+
+**It is written down in a dated market document, kept out of the register.** That document is the one
+place where naming another system is the point (rule 11); it goes stale, so it carries the date it
+was true. The register holds what *this* system decided, and a decision that needs a competitor's
+name to justify it is not finished.
+
+**Ahead is a claim, and it needs evidence.** It is measured on something a developer can name and a
+benchmark can show, never on a feature grid. If matching a capability is the whole of the advantage
+then there is no advantage, and rule 12's question is the one to answer instead: once they have
+copied this, what is still better here?
+
+## 14. A prompt is data, and it lives in a YAML file
+
+**Prompt text goes in YAML, not in a string literal.** A prompt is edited far more often than the
+code around it, and by someone tuning behaviour rather than changing control flow. Inside a Go
+literal it cannot be diffed, reviewed or versioned as the thing it actually is. The file holds the
+text and its identity — a version, and the model contract it was written against. The code holds
+everything carrying a correctness argument: the fence, the vocabulary interpolation, the parse, and
+every refusal.
+
+**The file is compiled in, never read from disk at runtime.** A prompt loaded from the filesystem is
+a path by which anyone who can write next to the binary changes what the system extracts — and
+extraction feeds the write path. `go:embed` keeps the maintenance benefit and closes that. Rule 8's
+fail-closed default applied here: a deployment runs exactly the prompt that was reviewed.
+
+**Editing a prompt is a change to behaviour, and is tested like one.** Moving the text out of code
+makes it cheaper to change, which is the point and also the hazard: a prompt edit here has already
+been measured silently costing a relation. So a prompt file does not change without its regression
+corpus running, and the corpus is what says the edit was an improvement rather than a trade nobody
+priced.
 
 ---
 

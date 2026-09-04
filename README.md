@@ -43,5 +43,10 @@ make db-down
 - **Decisions go in the register with what was rejected**, and the register is the authority.
 - **Proof, not assertion.** Tests run against a real deployment; a mock proves the mock matches the
   assertion.
+- **Coverage is a requirement**, measured with `-coverpkg=./...` and ratcheted by the build. The only
+  code allowed uncovered is the live-model path behind the `inference` tag, which has its own target.
+- **Know what the market already does**, and take the capability rather than the implementation — a
+  dated market document, kept out of the register.
+- **Prompt text lives in embedded YAML**, and does not change without its regression corpus running.
 
 Full text in [`CLAUDE.md`](CLAUDE.md).
