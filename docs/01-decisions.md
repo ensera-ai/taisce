@@ -584,6 +584,106 @@ can also mint, so the memory service could issue itself any authority it liked);
 credential itself in the grant (the memory service would then hold something it could replay against
 the control plane, which is the authority it was deliberately not given).
 
+### D31 — The read audit is append-only, and it holds nothing that could ever need erasing
+
+Who accessed a project, with which credential, when, and how much came back. Not whose memory it was,
+and not what was asked.
+
+**The two properties only fit together because of the second one.** An audit trail an erasure can
+delete is not an audit trail — the record of who read a person's memory would vanish on the request of
+whoever wanted it gone, and that request is the last thing that should be able to do it. An audit
+trail an erasure cannot touch is personal data surviving an erasure, which the product exists to make
+impossible. The way out is to record nothing that an erasure could ever be asked about, which makes
+append-only unconditional rather than a conflict to manage.
+
+So no data subject identifier, and **no query text** — a question is content, sometimes the most
+sensitive content anyone sends, and a hash of a short question is guessable rather than opaque.
+
+**What this can answer:** an unusual volume or pattern against a credential, which is how a
+compromised key is found; and which of a customer's own principals reached which project, when.
+
+**What it cannot answer, stated as a loss rather than omitted:** a data subject asking who read *their*
+memory specifically. Answering that would mean recording, permanently and un-erasably, that a
+particular person's data was read — which is a worse thing to hold than the question is worth
+answering.
+
+**Recorded behind the response, not before it.** Recall is on the critical path of every agent turn,
+and a synchronous insert makes every read wait on a write that no caller is waiting for. The cost is
+that a process dying between the response and the record loses that entry, which is acceptable for a
+trail whose purpose is pattern rather than proof of any single read.
+
+**Rejected:** the subject identifier in the record (above); a pseudonymous or hashed subject (still an
+identifier, and it would be the one un-erasable fact about a person in the system); deleting audit
+records with the subject they name (makes the trail unreliable exactly when it matters); the query
+text or an embedding of it (content, in a log that can never be cleaned).
+
+### D32 — Inside a subscription the customer's clock governs retention. Outside it, ours
+
+`retention_until` is set from a policy the customer configures. We enforce what they set and impose
+nothing. A customer who configures no policy keeps everything.
+
+Retention is their judgement about their own obligations, and those differ by industry, jurisdiction
+and contract in ways no default of ours could be right about. A plan-derived expiry would also change
+what happens to data already stored when somebody changes plan, which means a commercial decision
+silently rewriting a compliance one.
+
+The one clock that is ours is the one that runs when there is no subscription at all — see D33. That
+line is worth stating because it is the whole of it: while they are a customer, nothing of theirs
+expires except on their own terms.
+
+**Rejected:** a retention default derived from the plan (a commercial decision rewriting a compliance
+one, retroactively, on downgrade); a platform maximum (an opinion about somebody else's obligations);
+no retention mechanism at all (three columns carrying an expiry that nothing reads is a cost with no
+mechanism behind it).
+
+### D33 — A lapsed subscription gets a grace period, then the tenant's schema is dropped
+
+Not suspended indefinitely, and not deleted on the day a payment fails.
+
+Storing a customer's memory forever after they stop paying makes the product free to anyone willing to
+let a card expire, and unbounded storage from the cheapest action anybody can take. Deleting at the
+moment of failure destroys a year of somebody's memory because a card expired and a notice went to
+spam. A bounded grace period is the only shape that is neither.
+
+**Export works throughout the grace period, and so does erasure.** Those are rights that do not depend
+on a commercial relationship, and a product that withholds them to collect a debt is holding data
+hostage. The customer is told, more than once, what will be deleted and when — a deletion nobody was
+warned about is the same failure as a deletion nobody asked for.
+
+**The mechanism is dropping the schema, which is the strongest erasure available here.** A tenant is a
+schema, so there is no sweep, no walk over registered projections, and no residual to count: the
+container is gone, so residual is zero by construction rather than by the correctness of a routine.
+
+**Two consequences that follow and should not be discovered later.** Anything held in that schema goes
+with it, including the tenant's own verification log — so a receipt issued to a departing customer
+becomes uncheckable once the tenant is gone, and the export they were urged to take is the only thing
+that survives. And an abandoned account that never paid at all is the same path: signing up is the
+cheapest action anyone can take, and a tenant created and forgotten is a schema, a partition and an
+index sitting in the substrate forever.
+
+**Rejected:** indefinite suspension (unbounded storage from a free action); deletion on first payment
+failure (a card expiring is not a request to be forgotten); withholding export from a non-paying
+customer (holding data hostage); marking rows deleted rather than dropping the schema (leaves the
+residual question open when the answer could have been structural).
+
+### D34 — One verification log per tenant
+
+The log's origin names the tenant, its checkpoints are the tenant's, and the anchor a client retains
+is about their own history and nothing else.
+
+A tenant is a schema and the boundary is that another tenant's name is not in the statement. A single
+log across all customers would be a structure whose size discloses our total governance volume, and
+which any one customer verifying it would learn the rate at which everybody else is erasing. Per
+tenant, a customer's verification tells them everything about themselves and nothing about anyone
+else — which is the same shape as every other boundary here.
+
+The cost is more checkpoints to produce and, if it is ever offered, more for an auditor to hold. That
+is the cost of the boundary and it is the same cost every other table pays.
+
+**Rejected:** one log for the deployment (discloses volume and rate across customers, to any customer
+who checks); a log per project (a project is a permission and not a boundary, so this would multiply
+the structure without separating anything that is not already separated by scope).
+
 ## Method
 
 ### D14 — Nothing is brought in from another codebase unless it is asked for
