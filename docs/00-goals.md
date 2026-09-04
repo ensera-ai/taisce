@@ -120,6 +120,26 @@ customer's graph.
 **Proved by:** the ported test suite, plus benchmark-qed's global classes, which are the only thing
 that measures whether community summaries earn their cost.
 
+### G5b — Three things are embedded, because three surfaces ask different questions
+
+GraphRAG embeds **three artefact classes**, not one, and each answers a different shape of question.
+The same three are needed here, and they line up with the three provider seams an agent framework
+actually exposes (G8):
+
+| GraphRAG embeds | Taisce | Answers | Serves |
+|---|---|---|---|
+| text unit text | `chunk.embedding` | "what passage resembles this" | `TextSearchProvider` |
+| entity + relationship **description** | `entity_embedding`, built from aliases and verbatim evidence (G2) | "what is this thing, whatever it was called" | `ContextProvider` |
+| community report **full content** | report embedding | "what theme bears on this" | `ContextProvider`, global |
+
+**One vector index over passages cannot serve all three.** A thematic question resembles no single
+passage; an entity reference resembles the sentences that mention it rather than the sentences about
+it. memra had only the first and its global lens had nothing of its own to search, which is a large
+part of why that lens never paid.
+
+**Proved by.** Each embedding kind has a retrieval test that fails if the other two are used
+instead — otherwise "three indexes" is three copies of one.
+
 ### G6 — Everything stored about a person is countable, and erasure proves itself
 
 `DELETE` through a registered dependency, then `COUNT(*)` against the same predicate in the same
@@ -147,7 +167,129 @@ multi-hop, AutoE's assertion-based scoring as the headline number. AutoE's pairw
 longer, more synthesised answers, which is a bias against a tight grounded bundle. LongMemEval is
 retained as the regression baseline against memra.
 
+### G8 — The integration surfaces are the product, not a wrapper over it
+
+An agent developer never calls `recall`. They install a context provider, and everything this
+repository does reaches them through three seams that Microsoft Agent Framework defines and every
+comparable framework mirrors:
+
+- **`ContextProvider`** (`AIContextProvider`: `InvokingCoreAsync` / `InvokedCoreAsync`) — memory
+  injected per turn, and the store hook on the way back. This is the main surface.
+- **`TextSearchProvider`** — MAF's own drop-in RAG, the same mechanism wired to a search function.
+  Taisce is the search function, and this is how a passage-RAG user arrives without adopting the
+  memory model first.
+- **`HistoryProvider`** — the conversation turn by turn, which MAF keeps in memory and therefore
+  loses.
+
+Two rules that are not negotiable at this seam, both learned in memra: recall failures are
+**non-fatal** (an agent runs without memory rather than not at all) while write failures are
+**never silent** (a lost turn is invisible until a DSAR); and injected memory arrives as exactly one
+`user` message marked untrusted, never `system`, never `assistant`.
+
+**Proved by.** A conformance suite each SDK runs against a live deployment — not mocks, which prove
+only that the mock matches the assertion.
+
+### G9 — Compaction is a durable strategy inside MAF's framework, not a second framework
+
+**Agent Framework already has compaction**, and it is well specified: a `MessageIndex` of atomic
+`MessageGroup`s (`System`, `User`, `AssistantText`, `ToolCall`, `Summary`), a `CompactionTrigger`
+delegate with a `CompactionTriggers` factory (`TokensExceed`, `TurnsExceed`, `GroupsExceed`,
+`HasToolCalls`, composed with `All`/`Any`), a separate **target** predicate controlling when to stop,
+a `MinimumPreserved` floor, and four built-in strategies composed by a pipeline. Go ships the same
+shape in `agent/compaction`.
+
+**So Taisce contributes a strategy, not a framework.** Anything else is a parallel abstraction the
+customer has to choose between, and they will choose the one their framework ships.
+
+Three constraints inherited from that framework, each of which breaks something if ignored:
+
+- **Groups are atomic.** An assistant message with tool calls and its tool results is one unit;
+  removing half of it is an API error from the model, not a degraded summary. A hierarchical roll-up
+  must align its runs to group boundaries and may never split a `ToolCall` group.
+- **Trigger and target are separate.** When to begin compacting and when to stop are different
+  questions, and collapsing them into one threshold is how a strategy either never fires or compacts
+  everything.
+- **System messages are always preserved.**
+
+**What Taisce's strategy has that the four built-ins do not: it is durable and reversible.**
+`SummarizationCompactionStrategy` replaces messages with a synthetic summary in the in-flight
+context; the original is whatever the history provider happened to keep. Taisce's summary is an
+**observation carrying the observation ids it covers**, so the originals stay in the log, the summary
+is a projection over a contiguous recorded range, and the whole thing re-derives.
+
+That is what makes the roll-up bounded — the same roll-up G5 needs, on the time axis instead of the
+graph axis:
+
+| | truncation | sliding window | summarise-everything | Taisce roll-up |
+|---|---|---|---|---|
+| old context | lost | lost | retained, lossily | retained, compressed, **re-derivable** |
+| cost per turn | O(1) | O(1) | **O(n)** | **amortised O(1)** |
+| erasure blast radius | n/a | n/a | **whole history** | **O(log n) segments** |
+
+The last column is why this may store prose where a community report is contested (#14): a segment
+records the contiguous observation range it covers, so erasing one observation invalidates exactly
+the segments containing it and their ancestors. The residual count is over segments that either
+cover the erased observation or do not. A community report aggregates across subjects and has no
+such bound.
+
+**One registration rule, and it is a correctness rule rather than a preference.** Agent Framework's
+own documentation warns that a `CompactionProvider` registered through `ChatClientAgentOptions` runs
+*before chat history is stored*, so **synthetic summary messages can become part of the persisted
+history**. For Taisce that is model-written prose entering the observation log as though it were
+something a person said — the exact artefact class G6 exists to keep out. Registration is on the
+`ChatClientBuilder` via `UseAIContextProviders`, and a conformance test asserts no synthetic message
+reaches `observe`.
+
+**Proved by.** Compact 10,000 turns and assert model calls are linear in turns rather than
+quadratic. Erase one observation from the middle of a compacted history and assert exactly the
+covering segments regenerated, residual zero, the rest untouched. And a test that a `ToolCall` group
+is never split.
+
+### G10 — The competitor at this seam is `ChatHistoryMemoryProvider`, and its gaps are the pitch
+
+MAF ships `ChatHistoryMemoryProvider`: chat history in a vector store, embedded on write, searched by
+similarity before each invocation, with `storageScope` and `searchScope` (store per session, search
+across a user's sessions). That is the incumbent an agent developer already has, and Taisce has to be
+better on something they can name.
+
+Its own documentation names the gaps:
+
+| `ChatHistoryMemoryProvider` | Taisce |
+|---|---|
+| *"Data from the store is accepted as-is without validation"* — indirect prompt injection | retrieved content returns as data, marked untrusted; asserted by test |
+| *"messages are stored as vectors… may contain PII"*, with no erasure path | erasure by data subject with a residual count per projection kind (G6) |
+| Scope is **metadata on a row**, filtered at query time | scope is the partition, and authorisation is on every read |
+| Similarity over raw messages | entities, typed edges, supersession, communities — the message is evidence, not the unit |
+| No supersession: an old preference and its replacement both match | validity intervals, with counterevidence reported |
+| Requires `Microsoft.Extensions.VectorData` | never implemented — being a vector-store connector discards the governance that is the product |
+
+**Proved by.** A head-to-head on a session set where the answer changed: the incumbent retrieves both
+the stale and the current claim, Taisce returns the current one with the stale one marked superseded.
+That is one demo and it is the whole argument.
+
 ---
+
+### G11 — Two boundaries, and they are not the same kind of thing
+
+**A tenant is a schema. Hard.** A cross-tenant read is impossible because the other tenant's name is
+not in the statement — not because a predicate excluded it. There is no `tenant_id` column to
+forget, and a bug in a `WHERE` clause cannot leak across it. The schema name cannot be a bind
+parameter (PostgreSQL parameters are values, never identifiers), so it is interpolated from a
+validated type that exists only after `NewSchema`: forgetting to validate is a compile error rather
+than an injection.
+
+**A project is a scope. Soft.** Inside one tenant, and cross-project reads are *intended* — a
+principal granted several projects gets one bundle across them. So scope is a column, every read
+carries the authorised set, and the boundary is a permission that is checked rather than a wall that
+cannot be crossed.
+
+Getting this backwards in either direction is a serious defect. Tenancy as a column is one missing
+predicate away from a cross-customer leak; projects as schemas makes a multi-project recall a
+cross-schema union, which cannot be planned as one query.
+
+**Proved by.** Two tenants holding the same project name and the same data-subject reference, where
+a tenant-scoped read returns exactly its own row **with no tenant predicate in the query at all** —
+and a multi-project read inside one tenant returning two of three projects by authorisation.
 
 ## 4. What carries over unchanged
 

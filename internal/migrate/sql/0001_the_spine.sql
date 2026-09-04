@@ -2,8 +2,22 @@
 --  The spine — the smallest schema an observation can be written into and recalled from
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════
 --
---  Six tables. Not a port of a mature schema: everything here is load-bearing for
---  docs/00-goals.md §3, and anything that is not yet needed is not yet here.
+--  Not a port of a mature schema: everything here is load-bearing for docs/00-goals.md §3, and
+--  anything that is not yet needed is not yet here.
+--
+--  ── THE TWO BOUNDARIES, WHICH ARE NOT THE SAME KIND OF THING ─────────────────────────────────
+--
+--  A TENANT IS A SCHEMA. Hard boundary. This file runs once per tenant, inside that tenant's
+--  schema, and `{schema}` is interpolated by a validated identifier type rather than bound as a
+--  parameter — PostgreSQL parameters are values, never identifiers.
+--
+--  That is the whole reason the boundary is hard: a cross-tenant read is impossible because the
+--  other tenant's NAME IS NOT IN THE STATEMENT, not because a predicate excluded it. A bug in a
+--  WHERE clause cannot leak across it. There is no `tenant_id` column here to forget.
+--
+--  A PROJECT IS A SCOPE. Soft boundary, inside one tenant. Cross-project reads are INTENDED — a
+--  principal granted several projects recalls across them in one bundle — so `scope` is a column,
+--  every read carries the authorised set, and the check is a permission rather than a wall.
 --
 --  Two decisions are taken NOW because retrofitting either is a migration rather than an edit —
 --  see the sections marked ── DECIDED HERE ──.
@@ -17,7 +31,7 @@ CREATE SCHEMA IF NOT EXISTS memory;
 -- "rebuild, never repair" possible — after an erasure the next rebuild is derived only from
 -- surviving content, so residual is zero BY CONSTRUCTION rather than by the correctness of a
 -- repair routine.
-CREATE TABLE memory.observation (
+CREATE TABLE {schema}.observation (
     observation_id  uuid        PRIMARY KEY,
     scope           text        NOT NULL,
     -- Contiguous per scope. The freshness watermark is the highest offset with no gap below it, so
@@ -49,7 +63,7 @@ CREATE TABLE memory.observation (
     CONSTRAINT observation_scope_offset_uniq UNIQUE (scope, log_offset)
 );
 
-CREATE INDEX observation_subject_idx ON memory.observation (scope, data_subject_id)
+CREATE INDEX observation_subject_idx ON {schema}.observation (scope, data_subject_id)
     WHERE data_subject_id IS NOT NULL;
 
 -- ── Erasure's index ────────────────────────────────────────────────────────────────────────────
@@ -62,8 +76,8 @@ CREATE INDEX observation_subject_idx ON memory.observation (scope, data_subject_
 -- A projection kind that does not appear here is invisible to erasure. G6's test asserts the set of
 -- kinds registered matches the set of kinds written — so a new projection added in M2..M5 cannot
 -- silently escape.
-CREATE TABLE memory.projection_dependency (
-    source_observation_id uuid        NOT NULL REFERENCES memory.observation (observation_id) ON DELETE CASCADE,
+CREATE TABLE {schema}.projection_dependency (
+    source_observation_id uuid        NOT NULL REFERENCES {schema}.observation (observation_id) ON DELETE CASCADE,
     scope                 text        NOT NULL,
     projection_kind       text        NOT NULL,
     projection_id         text        NOT NULL,
@@ -76,8 +90,8 @@ CREATE TABLE memory.projection_dependency (
     PRIMARY KEY (source_observation_id, projection_kind, projection_id)
 );
 
-CREATE INDEX projection_dependency_kind_idx    ON memory.projection_dependency (scope, projection_kind, projection_id);
-CREATE INDEX projection_dependency_subject_idx ON memory.projection_dependency (scope, data_subject_id)
+CREATE INDEX projection_dependency_kind_idx    ON {schema}.projection_dependency (scope, projection_kind, projection_id);
+CREATE INDEX projection_dependency_subject_idx ON {schema}.projection_dependency (scope, data_subject_id)
     WHERE data_subject_id IS NOT NULL;
 
 -- ── Entities ───────────────────────────────────────────────────────────────────────────────────
@@ -93,7 +107,7 @@ CREATE INDEX projection_dependency_subject_idx ON memory.projection_dependency (
 --
 -- Identity is (scope, normalized_name). Type is an attribute, and a disagreement about type is a
 -- disagreement about one node rather than the creation of a second.
-CREATE TABLE memory.entity (
+CREATE TABLE {schema}.entity (
     entity_id          uuid        PRIMARY KEY,
     scope              text        NOT NULL,
     canonical_name     text        NOT NULL,
@@ -111,7 +125,7 @@ CREATE TABLE memory.entity (
 );
 
 -- The alias lookup a seed resolution issues on every recall.
-CREATE INDEX entity_aliases_idx ON memory.entity USING gin (normalized_aliases);
+CREATE INDEX entity_aliases_idx ON {schema}.entity USING gin (normalized_aliases);
 
 -- ── Facts, which are the edges ─────────────────────────────────────────────────────────────────
 --
@@ -131,7 +145,7 @@ CREATE INDEX entity_aliases_idx ON memory.entity USING gin (normalized_aliases);
 -- Two ranges, two GiST indexes, containment operators. The exclusion constraint that makes
 -- supersession the DATABASE's invariant rather than the worker's discipline lands in M3 (#9); the
 -- columns are shaped for it now so that arrives as a constraint rather than as a rewrite.
-CREATE TABLE memory.fact (
+CREATE TABLE {schema}.fact (
     fact_id           uuid        PRIMARY KEY,
     scope             text        NOT NULL,
 
@@ -172,9 +186,9 @@ CREATE TABLE memory.fact (
 -- is `subject = $1 OR object = $1`, and an OR across two columns defeats a single index — measured
 -- on memra's own query at 4.8 ms against 1.1 ms once split into two index-driven arms under
 -- UNION ALL. The query is written split from the start (#6); these are what it drives.
-CREATE INDEX fact_subject_idx ON memory.fact USING gist (scope, subject_entity_id, valid)
+CREATE INDEX fact_subject_idx ON {schema}.fact USING gist (scope, subject_entity_id, valid)
     WHERE subject_entity_id IS NOT NULL;
-CREATE INDEX fact_object_idx  ON memory.fact USING gist (scope, object_entity_id, valid)
+CREATE INDEX fact_object_idx  ON {schema}.fact USING gist (scope, object_entity_id, valid)
     WHERE object_entity_id IS NOT NULL;
 
 -- ── The supersession lookup, which runs on EVERY append ──────────────────────────────────────
@@ -189,13 +203,13 @@ CREATE INDEX fact_object_idx  ON memory.fact USING gist (scope, object_entity_id
 --
 -- Partial on the open interval, so it holds only currently-valid facts and stays small as history
 -- accumulates rather than growing with every superseded version.
-CREATE INDEX fact_reconcile_idx ON memory.fact (scope, subject_entity_id, predicate)
+CREATE INDEX fact_reconcile_idx ON {schema}.fact (scope, subject_entity_id, predicate)
     WHERE upper_inf(valid) AND subject_entity_id IS NOT NULL;
 
 -- "What was true at T1, as best we knew at T2" — the bitemporal question, as one index.
-CREATE INDEX fact_bitemporal_idx ON memory.fact USING gist (scope, valid, known);
+CREATE INDEX fact_bitemporal_idx ON {schema}.fact USING gist (scope, valid, known);
 
-CREATE INDEX fact_subject_ref_idx ON memory.fact (scope, data_subject_id)
+CREATE INDEX fact_subject_ref_idx ON {schema}.fact (scope, data_subject_id)
     WHERE data_subject_id IS NOT NULL;
 
 -- ── Evidence ───────────────────────────────────────────────────────────────────────────────────
@@ -203,8 +217,8 @@ CREATE INDEX fact_subject_ref_idx ON memory.fact (scope, data_subject_id)
 -- A fact is a claim WITH its receipt: the verbatim span that produced it, located in the source by
 -- byte offset. This is what `resolve_citation` reads, and it is the feature nothing else in the
 -- market has — so it is in the first migration rather than added when somebody asks for it.
-CREATE TABLE memory.fact_evidence (
-    fact_id               uuid    NOT NULL REFERENCES memory.fact (fact_id) ON DELETE CASCADE,
+CREATE TABLE {schema}.fact_evidence (
+    fact_id               uuid    NOT NULL REFERENCES {schema}.fact (fact_id) ON DELETE CASCADE,
     source_observation_id uuid    NOT NULL,
     quote                 text    NOT NULL,
     byte_start            integer NOT NULL,
@@ -236,8 +250,12 @@ CREATE TABLE memory.fact_evidence (
 -- A partition is DDL per project, created when the project is created. That is deliberately not the
 -- pattern rejected for Apache AGE in memra's docs/24: there the DDL was per novel PREDICATE, issued
 -- from concurrent workers on the formation path, unbounded by anything. This is one statement per
--- customer project at a controlled moment, bounded by the customer count.
-CREATE TABLE memory.chunk (
+-- project at a controlled moment.
+--
+-- And because a tenant is a schema, the partition count PER TABLE is bounded by projects-per-tenant
+-- — a handful — rather than by every project on the platform. The catalog grows with tenants
+-- either way; what matters is that no single partitioned table accumulates thousands of children.
+CREATE TABLE {schema}.chunk (
     chunk_id              uuid        NOT NULL,
     scope                 text        NOT NULL,
     source_observation_id uuid        NOT NULL,
@@ -254,9 +272,9 @@ CREATE TABLE memory.chunk (
 -- The default partition catches a scope whose partition was never created. It exists so that a
 -- missing partition is a slow query rather than a failed write — losing a customer's memory because
 -- provisioning missed a step is the worse failure, and a row here is visible to the same erasure.
-CREATE TABLE memory.chunk_unpartitioned PARTITION OF memory.chunk DEFAULT;
+CREATE TABLE {schema}.chunk_unpartitioned PARTITION OF {schema}.chunk DEFAULT;
 
-COMMENT ON TABLE memory.chunk_unpartitioned IS
+COMMENT ON TABLE {schema}.chunk_unpartitioned IS
     'Catches writes for a scope with no partition. Should always be empty; a non-zero count means '
     'provisioning did not create a partition and that project has no ANN index.';
 
@@ -267,7 +285,7 @@ COMMENT ON TABLE memory.chunk_unpartitioned IS
 -- rather than by a global identity sequence: a globally-issued offset has holes in every scope by
 -- construction, so "contiguous" would be unanswerable and the watermark would have to mean
 -- something weaker.
-CREATE TABLE memory.watermark (
+CREATE TABLE {schema}.watermark (
     scope        text        PRIMARY KEY,
     log_offset   bigint      NOT NULL,
     watermark_at timestamptz NOT NULL,
@@ -282,7 +300,7 @@ CREATE TABLE memory.watermark (
 -- A request that has no `completed_at` is an erasure in flight; one with a non-zero residual is an
 -- erasure that did not do what it claimed, and it must be visible as a row rather than as an
 -- absence in a log.
-CREATE TABLE memory.erasure_request (
+CREATE TABLE {schema}.erasure_request (
     request_id     uuid        PRIMARY KEY,
     scope          text        NOT NULL,
     selector       jsonb       NOT NULL,
@@ -297,11 +315,11 @@ CREATE TABLE memory.erasure_request (
         CHECK ((completed_at IS NULL) = (residual IS NULL))
 );
 
-CREATE INDEX erasure_request_open_idx ON memory.erasure_request (scope, requested_at)
+CREATE INDEX erasure_request_open_idx ON {schema}.erasure_request (scope, requested_at)
     WHERE completed_at IS NULL;
 
 -- ── Schema version ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE memory.schema_migration (
+CREATE TABLE {schema}.schema_migration (
     version    integer     PRIMARY KEY,
     name       text        NOT NULL,
     applied_at timestamptz NOT NULL DEFAULT now()

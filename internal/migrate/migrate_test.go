@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -25,24 +26,37 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// freshSchema drops and recreates, so every test starts from the state a new customer starts from.
-func freshSchema(t *testing.T, pool *pgxpool.Pool) {
+// freshTenant drops and re-provisions, so every test starts where a new customer starts. The name is
+// per-test so tests cannot see each other's data — which is also the property under test.
+func freshTenant(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), `DROP SCHEMA IF EXISTS memory CASCADE`); err != nil {
+	tenant := "t_" + strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '_'
+	}, strings.ToLower(t.Name()))
+	if len(tenant) > maxIdentifierLength {
+		tenant = tenant[:maxIdentifierLength]
+	}
+	if _, err := pool.Exec(context.Background(),
+		`DROP SCHEMA IF EXISTS `+pgx.Identifier{tenant}.Sanitize()+` CASCADE`); err != nil {
 		t.Fatalf("drop schema: %v", err)
 	}
-	if _, err := Apply(context.Background(), pool); err != nil {
-		t.Fatalf("apply: %v", err)
+	if err := ProvisionTenant(context.Background(), pool, tenant); err != nil {
+		t.Fatalf("provision tenant: %v", err)
 	}
+	return tenant
 }
 
 func TestTheMigrationApplies(t *testing.T) {
 	pool := testPool(t)
-	freshSchema(t, pool)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
 
 	var version int
 	if err := pool.QueryRow(context.Background(),
-		`SELECT max(version) FROM memory.schema_migration`).Scan(&version); err != nil {
+		schema.SQL(`SELECT max(version) FROM {schema}.schema_migration`)).Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
 	if version != 1 {
@@ -54,9 +68,10 @@ func TestTheMigrationApplies(t *testing.T) {
 // normal case rather than the exception.
 func TestApplyingTwiceChangesNothing(t *testing.T) {
 	pool := testPool(t)
-	freshSchema(t, pool)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
 
-	applied, err := Apply(context.Background(), pool)
+	applied, err := Apply(context.Background(), pool, schema)
 	if err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
@@ -72,32 +87,33 @@ func TestApplyingTwiceChangesNothing(t *testing.T) {
 func TestTheVectorSearchPrunesToOnePartitionAndUsesItsIndex(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
-	freshSchema(t, pool)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
 
 	for _, scope := range []string{"projecta", "projectb"} {
-		if err := ProvisionScope(ctx, pool, scope); err != nil {
+		if err := ProvisionScope(ctx, pool, tenant, scope); err != nil {
 			t.Fatalf("provision %s: %v", scope, err)
 		}
 	}
 	// Enough rows that a sequential scan is not simply the cheapest option regardless.
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO memory.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role, embedding)
+	if _, err := pool.Exec(ctx, schema.SQL(`
+		INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role, embedding)
 		SELECT gen_random_uuid(),
 		       CASE WHEN i % 2 = 0 THEN 'projecta' ELSE 'projectb' END,
 		       gen_random_uuid(), 'chunk ' || i, now(), 'user',
 		       (SELECT array_agg(random())::vector FROM generate_series(1, 1024))
-		  FROM generate_series(1, 2000) i`); err != nil {
+		  FROM generate_series(1, 2000) i`)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `ANALYZE memory.chunk`); err != nil {
+	if _, err := pool.Exec(ctx, schema.SQL(`ANALYZE {schema}.chunk`)); err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
 
-	plan := explain(t, pool, `
-		SELECT chunk_id FROM memory.chunk
+	plan := explain(t, pool, schema.SQL(`
+		SELECT chunk_id FROM {schema}.chunk
 		 WHERE scope = 'projecta'
 		 ORDER BY embedding <=> (SELECT array_agg(0.5)::vector FROM generate_series(1, 1024))
-		 LIMIT 10`)
+		 LIMIT 10`))
 	t.Logf("plan:\n%s", plan)
 
 	// Pruning: the other project's partition must not appear at all.
@@ -138,12 +154,12 @@ func explain(t *testing.T, pool *pgxpool.Pool, query string) string {
 func TestProvisioningTwiceIsANoOp(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
-	freshSchema(t, pool)
+	tenant := freshTenant(t, pool)
 
-	if err := ProvisionScope(ctx, pool, "repeated"); err != nil {
+	if err := ProvisionScope(ctx, pool, tenant, "repeated"); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if err := ProvisionScope(ctx, pool, "repeated"); err != nil {
+	if err := ProvisionScope(ctx, pool, tenant, "repeated"); err != nil {
 		t.Fatalf("second provision should be a no-op, got: %v", err)
 	}
 }
@@ -153,7 +169,7 @@ func TestProvisioningTwiceIsANoOp(t *testing.T) {
 func TestAScopeThatIsNotAnIdentifierIsRefused(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
-	freshSchema(t, pool)
+	tenant := freshTenant(t, pool)
 
 	for _, bad := range []string{
 		`a'; DROP SCHEMA memory CASCADE; --`,
@@ -162,18 +178,19 @@ func TestAScopeThatIsNotAnIdentifierIsRefused(t *testing.T) {
 		``,
 		strings.Repeat("x", 64),
 	} {
-		if err := ProvisionScope(ctx, pool, bad); err == nil {
+		if err := ProvisionScope(ctx, pool, tenant, bad); err == nil {
 			t.Fatalf("scope %q was accepted and must not be", bad)
 		}
 	}
-	// And the schema is still there, which is the assertion that matters.
+	// And the tenant is still there, which is the assertion that matters.
 	var exists bool
 	if err := pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'memory')`).Scan(&exists); err != nil {
+		`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)`,
+		tenant).Scan(&exists); err != nil {
 		t.Fatalf("check schema: %v", err)
 	}
 	if !exists {
-		t.Fatal("the memory schema is gone")
+		t.Fatal("the tenant schema is gone")
 	}
 }
 
@@ -182,20 +199,134 @@ func TestAScopeThatIsNotAnIdentifierIsRefused(t *testing.T) {
 func TestAnUnprovisionedScopeStillAcceptsWrites(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
-	freshSchema(t, pool)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
 
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO memory.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role)
-		VALUES (gen_random_uuid(), 'neverprovisioned', gen_random_uuid(), 'orphan', now(), 'user')`); err != nil {
+	if _, err := pool.Exec(ctx, schema.SQL(`
+		INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role)
+		VALUES (gen_random_uuid(), 'neverprovisioned', gen_random_uuid(), 'orphan', now(), 'user')`)); err != nil {
 		t.Fatalf("write to unprovisioned scope must succeed: %v", err)
 	}
 
 	var n int
 	if err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM memory.chunk_unpartitioned`).Scan(&n); err != nil {
+		schema.SQL(`SELECT count(*) FROM {schema}.chunk_unpartitioned`)).Scan(&n); err != nil {
 		t.Fatalf("count default partition: %v", err)
 	}
 	if n != 1 {
 		t.Fatalf("expected the row in the default partition, found %d", n)
+	}
+}
+
+// THE HARD BOUNDARY. Two tenants, same project name, same data subject. The point is not that a
+// predicate filters one out — it is that the other tenant's rows are NOT ADDRESSABLE from a
+// statement about this one, because the schema name is the only thing that reaches them.
+//
+// This is the test that would fail if tenancy were ever demoted to a column.
+func TestOneTenantCannotAddressAnother(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+
+	for _, tenant := range []string{"acme_hard", "globex_hard"} {
+		if _, err := pool.Exec(ctx,
+			`DROP SCHEMA IF EXISTS `+pgx.Identifier{tenant}.Sanitize()+` CASCADE`); err != nil {
+			t.Fatalf("drop %s: %v", tenant, err)
+		}
+		if err := ProvisionTenant(ctx, pool, tenant); err != nil {
+			t.Fatalf("provision %s: %v", tenant, err)
+		}
+		// The SAME project name in both tenants, which is legal and must stay isolated.
+		if err := ProvisionScope(ctx, pool, tenant, "shared"); err != nil {
+			t.Fatalf("provision scope in %s: %v", tenant, err)
+		}
+		schema, _ := NewSchema(tenant)
+		if _, err := pool.Exec(ctx, schema.SQL(`
+			INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role, data_subject_id)
+			VALUES (gen_random_uuid(), 'shared', gen_random_uuid(), $1, now(), 'user', 'subject-1')`),
+			tenant+" secret"); err != nil {
+			t.Fatalf("seed %s: %v", tenant, err)
+		}
+	}
+
+	// A query written for one tenant sees exactly its own row, with no tenant predicate anywhere in
+	// it — there is nothing to get wrong, which is the property.
+	acme, _ := NewSchema("acme_hard")
+	rows, err := pool.Query(ctx, acme.SQL(`SELECT text FROM {schema}.chunk`))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	defer rows.Close()
+	var seen []string
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		seen = append(seen, text)
+	}
+	if len(seen) != 1 || seen[0] != "acme_hard secret" {
+		t.Fatalf("a tenant-scoped read returned %v; it must return exactly its own row", seen)
+	}
+}
+
+// The soft boundary. Projects live in ONE tenant and a principal may hold several, so a recall
+// spans the authorised set in one query — which is why scope is a column and not a schema.
+func TestProjectsAreASoftBoundaryWithinATenant(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
+
+	for _, scope := range []string{"alpha", "beta", "gamma"} {
+		if err := ProvisionScope(ctx, pool, tenant, scope); err != nil {
+			t.Fatalf("provision %s: %v", scope, err)
+		}
+		if _, err := pool.Exec(ctx, schema.SQL(`
+			INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role)
+			VALUES (gen_random_uuid(), $1, gen_random_uuid(), $2, now(), 'user')`),
+			scope, scope+" content"); err != nil {
+			t.Fatalf("seed %s: %v", scope, err)
+		}
+	}
+
+	// Authorised for two of the three: one query, one bundle, the third excluded by permission.
+	rows, err := pool.Query(ctx,
+		schema.SQL(`SELECT text FROM {schema}.chunk WHERE scope = ANY($1) ORDER BY text`),
+		[]string{"alpha", "gamma"})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	defer rows.Close()
+	var seen []string
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		seen = append(seen, text)
+	}
+	if len(seen) != 2 || seen[0] != "alpha content" || seen[1] != "gamma content" {
+		t.Fatalf("a multi-project recall returned %v; expected alpha and gamma only", seen)
+	}
+}
+
+// A truncated schema name would put two tenants in one schema, which is the worst failure this type
+// can prevent, so the length check is asserted rather than assumed.
+func TestASchemaNameThatWouldCollideIsRefused(t *testing.T) {
+	for _, bad := range []string{
+		"",
+		"9leading_digit",
+		"Uppercase",
+		"has-hyphen",
+		"has space",
+		`quote"injection`,
+		strings.Repeat("a", maxIdentifierLength+1),
+	} {
+		if _, err := NewSchema(bad); err == nil {
+			t.Fatalf("schema name %q was accepted and must not be", bad)
+		}
+	}
+	if _, err := NewSchema(strings.Repeat("a", maxIdentifierLength)); err != nil {
+		t.Fatalf("a name at the limit must be accepted: %v", err)
 	}
 }

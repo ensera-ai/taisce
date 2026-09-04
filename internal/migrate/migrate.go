@@ -72,12 +72,16 @@ func Load() ([]Script, error) {
 	return out, nil
 }
 
-// Apply brings the database up to the latest embedded version.
+// Apply brings ONE TENANT's schema up to the latest embedded version.
+//
+// Per tenant, not per database. The schema is the hard boundary, so migrating is something that
+// happens to a tenant — and a tenant provisioned tomorrow gets the same statements as one
+// provisioned today rather than a schema assembled from whatever migrations existed at the time.
 //
 // Each migration runs in ITS OWN transaction with its version recorded in the same transaction, so
 // a failure half way leaves the database at the last version that fully applied rather than in a
 // state no version describes.
-func Apply(ctx context.Context, pool *pgxpool.Pool) (applied []int, err error) {
+func Apply(ctx context.Context, pool *pgxpool.Pool, schema Schema) (applied []int, err error) {
 	all, err := Load()
 	if err != nil {
 		return nil, err
@@ -86,7 +90,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) (applied []int, err error) {
 	// The bootstrap problem: the table recording which migrations ran is itself created by the
 	// first migration. Asking for its contents before it exists is expected, not an error.
 	current := map[int]bool{}
-	rows, err := pool.Query(ctx, `SELECT version FROM memory.schema_migration`)
+	rows, err := pool.Query(ctx, schema.SQL(`SELECT version FROM {schema}.schema_migration`))
 	if err == nil {
 		for rows.Next() {
 			var v int
@@ -107,12 +111,12 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) (applied []int, err error) {
 			continue
 		}
 		if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			if _, execErr := tx.Exec(ctx, script.SQL); execErr != nil {
+			if _, execErr := tx.Exec(ctx, schema.SQL(script.SQL)); execErr != nil {
 				return fmt.Errorf("migration %d (%s): %w", script.Version, script.Name, execErr)
 			}
-			_, recErr := tx.Exec(ctx,
-				`INSERT INTO memory.schema_migration (version, name) VALUES ($1, $2)
-				 ON CONFLICT (version) DO NOTHING`,
+			_, recErr := tx.Exec(ctx, schema.SQL(
+				`INSERT INTO {schema}.schema_migration (version, name) VALUES ($1, $2)
+				 ON CONFLICT (version) DO NOTHING`),
 				script.Version, script.Name)
 			return recErr
 		}); err != nil {
