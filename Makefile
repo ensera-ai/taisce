@@ -33,8 +33,14 @@ test:
 	TAISCE_TEST_DSN="$(TEST_DSN)" go test -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
 	./scripts/coverage-gate.sh $(COVER_PROFILE)
 
-# Extraction against a real model. Separate because it costs money and because it sends its fixture
-# text to whichever provider is configured — a deliberate act, so a deliberate command.
+# Extraction against a real model: the citability check, and the regression corpus.
+#
+# Separate because it costs money and because it sends its fixture text to whichever provider is
+# configured — a deliberate act, so a deliberate command.
+#
+# The corpus is what says a change to the prompt wording did not silently cost a relation. That has
+# happened once already and nothing noticed, so the prompt's golden test fails with an instruction to
+# run this target: rule 14 is that a prompt file does not change without its corpus running.
 #
 # The test is behind a build tag rather than an environment check, so under this target missing
 # configuration FAILS rather than skips. A target whose whole purpose is to reach a live model, and

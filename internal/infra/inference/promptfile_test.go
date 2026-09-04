@@ -24,8 +24,11 @@ func TestTheComposedPromptIsByteIdenticalToTheTextItReplaced(t *testing.T) {
 	}
 	got := systemPrompt(goldenVocabulary(t))
 	if got != string(want) {
-		t.Fatalf("the composed prompt differs from the text it replaced\n--- got ---\n%s\n--- want ---\n%s",
-			got, want)
+		t.Fatalf("the composed prompt differs from the golden.\n\nIf this change to the wording is "+
+			"deliberate: run `make test-inference` and read what the corpus says the edit did to "+
+			"extraction (#70), then regenerate the golden in the same change. A prompt edit that "+
+			"has not been measured is the failure rule 14 exists to stop.\n\n--- got ---\n%s\n"+
+			"--- want ---\n%s", got, want)
 	}
 }
 
