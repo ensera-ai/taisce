@@ -2,8 +2,8 @@
 
 **Every piece of work has an issue, and the issue is closed with evidence when the work is done.**
 No exceptions, including work that was already finished before anyone thought to open one — that
-gets an issue retroactively (see #32–#34), because an issue list that only records the work someone
-remembered to file is not an account of the project.
+gets an issue retroactively, because an issue list that only records the work someone remembered to
+file is not an account of the project.
 
 ## The rules
 
@@ -23,30 +23,37 @@ and nothing working.
 
 **Findings get issues too.** Something learned that changes a decision — a benchmark, a validation
 against another system, a defect found by reading — is work, and it is often the most valuable work.
-`docs/01-validation-against-engram.md` overturned two arguments and found two schema gaps; it was
-tracked as #34.
 
 **Decisions that need a person are labelled `decision`** and say what has to be decided, with the
 real cost of each option. They are not closed by implementing one of the options — they are closed
 when the decision is written into the register with its rejected alternatives.
-
-## Citing memra
-
-memra is evidence, defect history, and the recorded cost of alternatives. It is **not** authority.
-
-An issue or document may say *"this was measured at 473 ms"*, *"this failed in production because
-the entitlement had no reader"*, or *"AGE was built and benchmarked and here is what it cost."* It
-may not say *"decided in memra, therefore settled here."* Every decision is re-derived from a goal;
-where it lands where memra landed, that is a result and the argument is still given in taisce's own
-terms.
 
 ## Labels
 
 `goal:G1`…`goal:G11` bind an issue to a goal in [`docs/00-goals.md`](docs/00-goals.md). An issue that
 serves no goal is either a missing goal or work that should not be done.
 
-`port` is carried over from memra — work, not thinking. `new` is a new design. `decision` needs a
-person. `docs` is documentation.
+`new` is a new design. `migrate` carries an **idea** from elsewhere. `decision` needs a person before
+code. `docs` is documentation.
+
+## What "migrate" means
+
+**Clone the idea. Rewrite the implementation. Review and validate it here.** Never copy anything as
+it stands.
+
+A `migrate` issue is not less work than a `new` one — it is the same work with a head start on the
+problem statement. What transfers is *what the thing is for*; what does not transfer is its code, its
+schema, its constants, or the reasoning that justified it in a system with different constraints. If
+an issue can be closed by copying a file, it was labelled wrong.
+
+The check that catches this: **every part must have a reader here.** An extension, a column, a
+config key or a dependency that arrived because it was in the original and not because something in
+*this* codebase uses it is a cost with no mechanism behind it — the same defect class G13 names for
+an entitlement nobody enforces. The substrate image is the worked example: two extensions arrived by
+copying and were removed on review because nothing here read them.
+
+**Nothing is brought in at all unless it is explicitly asked for** — not code, not decisions, not
+measurements. A prior system is a place something was tried, not a source of answers here.
 
 ## What is public and what is not
 

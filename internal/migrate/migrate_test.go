@@ -80,10 +80,9 @@ func TestApplyingTwiceChangesNothing(t *testing.T) {
 	}
 }
 
-// ISSUE #1's CLAIM. memra's migration 0021 dropped its HNSW index because every recall carries a
-// scope predicate and the planner therefore never reached the index. This asserts the fix works:
-// the planner prunes to one project's partition FIRST, and the index scan then runs inside a graph
-// holding only that project's vectors.
+// ISSUE #1's CLAIM, and G1's. A single HNSW behind a scope predicate is unreachable — the planner
+// prefers an exact sort. This asserts the fix: the planner prunes to one project's partition FIRST,
+// and the index scan then runs inside a graph holding only that project's vectors.
 func TestTheVectorSearchPrunesToOnePartitionAndUsesItsIndex(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)

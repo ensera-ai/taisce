@@ -56,10 +56,11 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, tenant, scope strin
 
 	// The partition, then the index INSIDE it.
 	//
-	// An index on the partitioned parent would be built across every project in the tenant, which is
-	// the unreachable-behind-a-scope-predicate shape memra's 0021 dropped. Per partition, the planner
-	// prunes to one project and then walks a graph holding only that project's vectors — no
-	// post-filtering, no `ef_search` to tune.
+	// An index on the partitioned parent would be built across every project in the tenant, and a
+	// single graph behind a scope predicate is unreachable: the planner prefers an exact sort, and
+	// post-filtering an approximate result loses recall in proportion to how little of the corpus
+	// belongs to the caller. Per partition, pruning happens first and the walk covers only that
+	// project's vectors.
 	for _, statement := range []string{
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s PARTITION OF %s.chunk FOR VALUES IN ('%s')`,
 			partition, schema, scope),

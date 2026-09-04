@@ -43,10 +43,10 @@ CREATE TABLE {schema}.observation (
 
     -- WHO SAID IT, carried from the first migration rather than added later.
     --
-    -- memra's tool surface took `content` and grew `messages[]` afterwards, so everything written
-    -- through it was `source_role: unknown` and the role policy — an assistant's claim never
-    -- becomes a user's fact — could not be enforced for the surface its own plugin wrote through.
-    -- A role that is optional at the bottom is optional everywhere above it.
+    -- The role policy — an assistant's claim never becomes a user's fact — can only be enforced if
+    -- every write surface carries the speaker. A role that is optional at the bottom becomes
+    -- optional everywhere above it, and the surface that skips it is usually the one written last
+    -- and used most. NOT NULL from the first migration, so there is no surface that can omit it.
     source_role     text        NOT NULL,
     actor           jsonb       NOT NULL DEFAULT '{}'::jsonb,
     payload         jsonb       NOT NULL,
@@ -99,14 +99,14 @@ CREATE INDEX projection_dependency_subject_idx ON {schema}.projection_dependency
 -- Primary, not a side table. This is the whole inversion: retrieval anchors here and expands, so
 -- cost is proportional to a neighbourhood rather than to the corpus (G1).
 --
--- ── ENTITY TYPE IS NOT PART OF IDENTITY, AND THAT IS A FIX ────────────────────────────────────
+-- ── ENTITY TYPE IS NOT PART OF IDENTITY ──────────────────────────────────────────────────────
 --
--- memra's key is (scope, entity_type, normalized_name). "Dublin office" extracted once as `place`
--- and once as `thing` is therefore TWO NODES holding two halves of its facts — a silent under-merge
--- on every hop, invisible because both rows look correct.
+-- Identity is (scope, normalized_name). Type is an attribute.
 --
--- Identity is (scope, normalized_name). Type is an attribute, and a disagreement about type is a
--- disagreement about one node rather than the creation of a second.
+-- Putting the type in the key means "Dublin office" extracted once as `place` and once as `thing`
+-- is TWO NODES holding two halves of its facts — a silent under-merge on every hop, invisible
+-- because both rows look correct on their own. A disagreement about type should be a disagreement
+-- about one node, not the creation of a second.
 CREATE TABLE {schema}.entity (
     entity_id          uuid        PRIMARY KEY,
     scope              text        NOT NULL,
@@ -129,15 +129,15 @@ CREATE INDEX entity_aliases_idx ON {schema}.entity USING gin (normalized_aliases
 
 -- ── Facts, which are the edges ─────────────────────────────────────────────────────────────────
 --
--- One edge list. There is no co-occurrence layer and there will not be one: memra's `concept_edge`
--- joined noun phrases that appeared near each other, which is a similarity signal with no direction
--- and no meaning, and the lens it fed lost to one ordered vector query on the benchmark.
+-- One edge list. There is no co-occurrence layer and there will not be one: an edge between terms
+-- that appeared near each other has no direction and no meaning, so there is nothing to follow and
+-- a multi-hop question has no hops (G3).
 --
 -- ── DECIDED HERE: TIME IS A RANGE, NOT A SENTINEL ─────────────────────────────────────────────
 --
--- memra encodes four bigints where 0 means "open", so every query carries
--- `(invalid_at = 0 OR invalid_at > $3)` and its own migration 0044 notes that `invalid_at` "makes a
--- poor leading column". That is the representation problem surfacing in the index design.
+-- The alternative is a pair of scalar columns per axis with a sentinel for "open", which puts
+-- `(invalid_at = 0 OR invalid_at > $3)` in every query and makes the end column a poor leading key
+-- in every index. That is a representation problem surfacing as an indexing problem.
 --
 --   `valid`  — when the world was this way
 --   `known`  — when we believed it
@@ -183,9 +183,9 @@ CREATE TABLE {schema}.fact (
 );
 
 -- Traversal, both directions. Written as two indexes rather than one because the hop's final join
--- is `subject = $1 OR object = $1`, and an OR across two columns defeats a single index — measured
--- on memra's own query at 4.8 ms against 1.1 ms once split into two index-driven arms under
--- UNION ALL. The query is written split from the start (#6); these are what it drives.
+-- is `subject = $1 OR object = $1`, and an OR across two columns defeats a single index — the
+-- planner falls back to a sequential scan once per traversal. The query is written as two
+-- index-driven arms under UNION ALL from the start (#6); these are what it drives.
 CREATE INDEX fact_subject_idx ON {schema}.fact USING gist (scope, subject_entity_id, valid)
     WHERE subject_entity_id IS NOT NULL;
 CREATE INDEX fact_object_idx  ON {schema}.fact USING gist (scope, object_entity_id, valid)
@@ -231,30 +231,26 @@ CREATE TABLE {schema}.fact_evidence (
 
 -- ── Chunks and their embeddings ────────────────────────────────────────────────────────────────
 --
--- Passages are EVIDENCE for what the traversal found, not the thing retrieval searches. That is the
--- inversion, and it is why this table is last in the file rather than first.
+-- Passages are EVIDENCE for what the traversal found, not the thing retrieval searches (G1). That is
+-- the inversion, and it is why this table is last in the file rather than first.
 --
 -- ── DECIDED HERE: PARTITIONED BY SCOPE, WITH THE INDEX PER PARTITION ──────────────────────────
 --
--- memra's migration 0021 dropped its HNSW index and recorded exactly why: every recall carries a
--- scope predicate, so the planner took the scope btree and sorted by exact distance, and the ANN
--- index was reachable only by a query shape the product never issues. Production paid ~8 ms of
--- index maintenance per insert and read it never. 0021 also named the fix — "partition
--- `embedding` by scope so each partition's graph is reachable after pruning" — and the full-500
--- run then measured the linear cost that predicted: 473 ms p50 at 59k facts, 3.75x the 126 ms at a
--- third of that, and a 50,000-memory ceiling that had to be disabled for the run to finish.
+-- A SINGLE HNSW over every project's vectors is unreachable in this product. Every recall carries a
+-- scope predicate, so the planner takes the scope btree and sorts by exact distance; the ANN index
+-- is reachable only by a query shape that is never issued, and it is maintained on every insert and
+-- read never. Post-filtering an approximate index against a scope predicate is the same problem
+-- from the other side: the index returns its nearest neighbours across all projects and the filter
+-- discards most of them, so recall depends on how much of the corpus belongs to the caller.
 --
--- So: LIST partitioning on scope, HNSW per partition. Pruning happens first and the index scan runs
--- inside one project's graph, which means no post-filter recall problem and no `ef_search` tuning.
+-- LIST partitioning on scope with HNSW per partition removes both. Pruning happens first and the
+-- index scan then runs inside one project's graph — no post-filtering, no `ef_search` to tune, and
+-- an exact-correct result rather than an approximately-filtered one.
 --
--- A partition is DDL per project, created when the project is created. That is deliberately not the
--- pattern rejected for Apache AGE in memra's docs/24: there the DDL was per novel PREDICATE, issued
--- from concurrent workers on the formation path, unbounded by anything. This is one statement per
--- project at a controlled moment.
---
--- And because a tenant is a schema, the partition count PER TABLE is bounded by projects-per-tenant
--- — a handful — rather than by every project on the platform. The catalog grows with tenants
--- either way; what matters is that no single partitioned table accumulates thousands of children.
+-- A partition is DDL per project, created when the project is created: one statement at a
+-- controlled moment, not something issued from a request or a worker. And because a tenant is a
+-- schema (G11), the partition count PER TABLE is bounded by projects-per-tenant — a handful —
+-- rather than by every project on the platform.
 CREATE TABLE {schema}.chunk (
     chunk_id              uuid        NOT NULL,
     scope                 text        NOT NULL,

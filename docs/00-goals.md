@@ -1,485 +1,299 @@
 # Goals
 
-**Adopted 2026-09-04.** This is the first document in the repository and the one every other
-document answers to. It says what Taisce is for, what must be true of it, and — for each goal —
-what would prove it. A goal with no way to be proved wrong is a slogan, and none of those belong
-here.
-
-The predecessor is [`althunibat/memra`](https://github.com/althunibat/memra). It works, it is
-measured, and its numbers are the baseline this has to beat. Nothing here is a criticism of it;
-this exists because of what measuring it revealed.
+**Adopted 2026-09-04.** The first document in the repository and the one every other document answers
+to. It says what Taisce is for, what must be true of it, and — for each goal — what would prove it.
+A goal with no way to be proved wrong is a slogan, and none of those belong here.
 
 ---
 
 ## 1. What Taisce is
 
-Memory for agents. An agent writes what it observes; later it asks a question, and gets back a
-bundle of what is relevant, current, and attributable — with the evidence for each claim, the
-supersession history behind it, and a guarantee that anything erased is gone and can be shown to be
-gone.
+Memory for agents. An agent writes what it observes; later it asks a question and gets back what is
+relevant, current and attributable — with the evidence for each claim, the history behind it, and a
+guarantee that anything erased is gone and can be shown to be gone.
 
-Sold as SaaS, hosted in the EU, on one PostgreSQL substrate.
-
----
-
-## 2. Why a new codebase and not a refactor
-
-One reason, and it is structural rather than aesthetic.
-
-**memra retrieves passages and treats entities as a side table. Taisce retrieves entities and treats
-passages as evidence.** That inverts the read path, the write path, the schema and the budget
-policy. Every one of memra's five lenses, its fusion, its quotas and its packing exist to rank
-passages; none of them survives the inversion intact. A refactor that replaces all of those, one at
-a time, on a live read path, is slower and riskier than starting from the model that is already
-known to be right — and the migration is not lost work, because the parts that were right port
-across directly.
-
-The evidence that forced it, from memra's full 500-question LongMemEval run
-([13-benchmark.md §5](https://github.com/althunibat/memra/blob/main/docs/13-benchmark.md)):
-
-| | value | reading |
-|---|---|---|
-| recall hit rate | 0.985 | retrieval finds the right session almost always |
-| accuracy | 0.770 | and the answer is still wrong a quarter of the time |
-| recall p50 | 473 ms | over 59,196 facts — **3.75× the 126 ms at a third the size** |
-| bundle | 3,978 / 4,000 tokens | every bundle is full; nothing is competing to get in, everything is competing to stay |
-
-Two conclusions. The gap is not retrieval, so more retrieval strategies cannot close it. And the
-cost is **linear in corpus size** — which is why `MEMRA_MAX_PROJECT_MEMORIES` exists at 50,000 and
-why the full run had to disable it to complete. That ceiling is not a safety limit that happens to
-be there; it is the architecture's scaling law showing through.
-
-Entity-anchored retrieval is O(neighbourhood) rather than O(corpus). That is the whole reason for
-this repository.
+A multi-tenant SaaS, hosted in the EU, on one PostgreSQL substrate. The adapters and clients that
+reach it are open source; the service is not.
 
 ---
 
-## 2b. What memra is to this document, and what it is not
+## 2. The shape, in one paragraph
 
-memra appears throughout what follows, and it is worth being exact about in which capacity, because
-getting this wrong is how a rewrite inherits the assumptions it exists to replace.
+**Entities are primary and passages are evidence.** A question resolves to the entities it names,
+the answer is assembled by expanding their neighbourhood, and passages are read to support what the
+traversal found. The alternative — searching passages by similarity and hoping an entity falls out —
+makes retrieval cost proportional to the corpus rather than to the question, and makes a fact about a
+thing unreachable unless the question happens to share vocabulary with the sentence that recorded it.
 
-**It is cited as evidence.** Measurements — 0.770 accuracy against 0.985 hit rate, 473 ms p50 over
-59,196 facts against 126 ms at a third that size — are facts about a real system, and they are the
-reason this repository exists.
+Everything below follows from that sentence or constrains it.
 
-**It is cited as defect history.** An entitlement sold on every plan and read by nothing; dormancy
-set as a state so the notice email told people to do the one thing sign-in refuses; an `OR` join that
-defeated both partial indexes. Specific, cheap to carry, expensive to rediscover.
-
-**It is cited as cost of alternatives.** AGE built and benchmarked; a global HNSW unreachable behind
-a scope predicate; a reranker that demoted gold below the cutoff. *"This was tried and here is what
-happened."*
-
-**It is never cited as authority.** No decision here holds because memra decided it. Taisce's
-constraints differ in every direction that matters — entity-first rather than passage-first, open
-adapters over a closed service, model work as a customer-driven cost centre, compaction in the
-server — so every decision is re-derived from the goals below. Where the answer matches memra's, that
-is a result rather than an inheritance, and the entry in the register still gives the argument in
-taisce's own terms. A decision carried across without re-derivation is one nobody can defend when it
-is challenged, because the argument that produced it was about a different system.
+---
 
 ## 3. The goals
-
-Each states what must be true, and what would prove it.
 
 ### G1 — Retrieval cost does not grow with the corpus
 
 A recall anchors on the entities a question names, expands their neighbourhood, and reads passages
-only as evidence for what the traversal found.
+only as evidence. Cost is proportional to a neighbourhood, not to how much the customer has stored.
 
-**Proved by:** recall p50 measured at 50k, 250k and 1M facts in one project, with the ratio between
-them flat rather than linear. The 50,000-memory ceiling is deleted, not raised.
+This is the goal the architecture exists for. A memory that gets slower as it remembers more has a
+ceiling, and a ceiling is a product limit dressed as a configuration value.
+
+**Proved by.** Recall p50 and p95 measured at 50k, 250k and 1M facts in one project, with the ratio
+between them flat rather than linear. No configured cap on memories per project, because there is
+nothing for one to protect.
 
 ### G2 — An entity is reachable by meaning, not only by its name
 
-"Our Dublin site" must reach the Dublin Office node. Today it does not: resolution is lowercase,
-trim, collapse whitespace, and memra's own code comment concedes the limit.
+"Our Dublin site" must reach the same node as "the Dublin office". Matching on a normalised string
+merges casing and whitespace and nothing else, which leaves one thing as several nodes each holding a
+fraction of what is known about it.
 
-The mechanism is GraphRAG's — a semantic surface per entity, embedded and searched. The surface is
-built from **aliases and the verbatim evidence quotes already stored**, never from model-written
-prose about a person: an embedding over source spans is countable and erasable by construction,
-re-derives on rebuild, and cannot drift from what was actually said.
+The entity carries a semantic surface — an embedding — built from **its aliases and the verbatim
+quotes already stored as evidence**, never from generated prose about it. Source spans are countable,
+erasable, and cannot drift from what was actually said.
 
-**Proved by:** a resolution set of paraphrase pairs — "the Dublin office" / "our site in Dublin" /
-"Dublin HQ" — with a measured merge rate, and a companion set of near-misses that must *not* merge.
-Both reported, because over-merging two people onto one node is a governance failure and
-under-merging is only a recall cost.
+**Proved by.** A resolution set of paraphrase pairs with a measured merge rate, and a near-miss set
+that must **not** merge. Both reported: over-merging two people onto one node is a governance
+failure, under-merging is a recall cost, and that asymmetry sets the threshold.
 
 ### G3 — The graph has typed, directed, temporally-scoped edges, and nothing else
 
-One edge list: the fact. Subject entity, predicate from a **closed ontology**, object entity, valid
-interval, transaction interval. No co-occurrence layer — memra's `concept_edge` connects noun
-phrases that appeared near each other, which is a similarity signal with no direction and no
-meaning, and the benchmark showed the lens it fed losing to one ordered vector query.
+One edge list: the fact. Subject entity, predicate from a closed ontology, object entity, and the
+interval it was true for. No co-occurrence layer — edges between terms that appeared near each other
+have no direction and no meaning, so there is nothing to follow and a multi-hop question has no hops.
 
-**Proved by:** benchmark-qed's data-linked classes (bridge, comparison, intersection, temporal),
-which measure multi-hop directly. memra's relation hop has never had a number because LongMemEval
-contains no entity-bridging question.
+**Proved by.** Multi-hop question classes — bridge, comparison, intersection, temporal — measured
+directly, with the traversal returning the chain rather than only the endpoint.
 
 ### G4 — Time is a first-class type, and supersession is a constraint
 
-Valid time and transaction time as `tstzrange`, GiST-indexed. Cardinality invariants enforced by
-`EXCLUDE USING gist`, not by an application-held lock.
+Valid time (when the world was that way) and transaction time (when we learned it), as ranges with
+GiST indexes. Cardinality invariants enforced by an exclusion constraint, not by a lock the write
+path has to remember to take.
 
-This is the goal that most decides the substrate. Graph engines are built for topology and are
-uniformly weak on intervals; PostgreSQL has range types, GiST, and exclusion constraints. The
-hardest thing memra does — supersession with counterevidence — is a temporal problem, and it should
-be the database's invariant rather than the worker's discipline.
+The hardest question in agent memory is temporal — what is true now, what was true then, what did we
+believe then — and a lock is correct only while every write path remembers it, whereas a constraint
+is correct because the database will not store the violation.
 
-**Proved by:** a concurrency test that asserts conflicting facts from N workers simultaneously and
-shows the constraint rejecting the overlap, with no application lock in the path.
+**Proved by.** A bitemporal test answering all three questions differently and correctly. A
+concurrency test asserting conflicting facts from N workers simultaneously, with no application lock
+in the path, and the constraint rejecting the overlap.
 
 ### G5 — Communities and their summaries follow Microsoft GraphRAG
 
-Hierarchical Leiden, GraphRAG's parameters, GraphRAG's report structure and roll-up. Leiden rather
-than Louvain because its refinement phase guarantees communities are internally connected — a
-bridge node moved out of a Louvain community can leave two pieces no edge joins, and that gets
-summarised as though it were one subject.
+Hierarchical Leiden with GraphRAG's parameters, GraphRAG's report structure, and its bottom-up
+roll-up where sub-community reports substitute for raw context when a parent overflows.
 
-Already ported and tested in the predecessor
-([`internal/app/graph/leiden.go`](https://github.com/althunibat/memra/blob/main/internal/app/graph/leiden.go)),
-including determinism pinned to fixed random vectors so a Go upgrade cannot silently reorganise a
-customer's graph.
+Leiden rather than Louvain because its refinement phase guarantees a community is internally
+connected — a bridge node moved out of a Louvain community can leave two pieces no edge joins, and
+that gets summarised as though it were one subject.
 
-**Proved by:** the ported test suite, plus benchmark-qed's global classes, which are the only thing
-that measures whether community summaries earn their cost.
+**Proved by.** Determinism across runs, input orderings and machines, pinned to fixed random vectors
+so a toolchain upgrade cannot silently reorganise a customer's graph. Connectedness asserted on
+cliques, rings and barbells. And question classes that no single passage can answer.
 
 ### G5b — Three things are embedded, because three surfaces ask different questions
 
-GraphRAG embeds **three artefact classes**, not one, and each answers a different shape of question.
-The same three are needed here, and they line up with the three provider seams an agent framework
-actually exposes (G8):
+| Embedded | Answers | Serves |
+|---|---|---|
+| passage text | "what passage resembles this" | text search |
+| entity surface (G2) | "what is this thing, whatever it was called" | entity-anchored recall |
+| community report content | "what theme bears on this" | thematic recall |
 
-| GraphRAG embeds | Taisce | Answers | Serves |
-|---|---|---|---|
-| text unit text | `chunk.embedding` | "what passage resembles this" | `TextSearchProvider` |
-| entity + relationship **description** | `entity_embedding`, built from aliases and verbatim evidence (G2) | "what is this thing, whatever it was called" | `ContextProvider` |
-| community report **full content** | report embedding | "what theme bears on this" | `ContextProvider`, global |
+One index over passages cannot serve all three. A thematic question resembles no single passage —
+that is what makes it thematic. An entity reference resembles the sentences that mention it rather
+than the sentences about it.
 
-**One vector index over passages cannot serve all three.** A thematic question resembles no single
-passage; an entity reference resembles the sentences that mention it rather than the sentences about
-it. memra had only the first and its global lens had nothing of its own to search, which is a large
-part of why that lens never paid.
-
-**Proved by.** Each embedding kind has a retrieval test that fails if the other two are used
-instead — otherwise "three indexes" is three copies of one.
+**Proved by.** A retrieval test per embedding kind that fails when the other two are substituted.
+Otherwise "three indexes" is three copies of one.
 
 ### G6 — Everything stored about a person is countable, and erasure proves itself
 
-`DELETE` through a registered dependency, then `COUNT(*)` against the same predicate in the same
-transaction. Every projection kind registers, including any that arrive later.
+Delete through a registered dependency, then count against the same predicate in the same
+transaction, per projection kind. Every projection registers, including ones added later.
 
-This is the product's differentiator and it is the one goal that constrains the others rather than
-being traded against them. Where G5 and G6 meet — a community report is model-written prose over
-many subjects, and prose has no residual count — the resolution is a **decision recorded in the
-decision register, not an accident of implementation**: the report generator is a pure function, and
-whether its output is persisted or produced per query is one flag, decided explicitly and with the
-erasure consequence written down.
+This is the differentiator, and it constrains the other goals rather than being traded against them.
+An artefact that cannot be counted after a delete cannot be part of an erasure claim, and that rules
+some designs out regardless of how well they retrieve.
 
-**Proved by:** an erasure test per projection kind asserting a residual of zero, and a test that
-fails when a new projection kind is added without registering one.
+**Proved by.** A residual-zero test per projection kind, and a test that fails when a new projection
+kind is added without registering one.
 
-### G7 — Quality is measured on questions the product actually claims to answer
+### G7 — Quality is measured on the questions the product claims to answer
 
-memra is measured on LongMemEval, which is a needle in one user's fifty sessions. It contains no
-corpus-level question and no entity-bridging question, so two of the three things this architecture
-is for are unmeasured.
+Corpus-level questions and entity-bridging questions are two of the three things this architecture is
+for, and a needle-in-a-haystack benchmark measures neither.
 
-**Proved by:** benchmark-qed (MIT) as the primary harness — AutoQ's four classes plus data-linked
-multi-hop, AutoE's assertion-based scoring as the headline number. AutoE's pairwise metrics
-(comprehensiveness, empowerment) are reported as secondary and never optimised toward: they reward
-longer, more synthesised answers, which is a bias against a tight grounded bundle. LongMemEval is
-retained as the regression baseline against memra.
+**Proved by.** `microsoft/benchmark-qed` as the primary harness — its four query classes plus
+data-linked multi-hop (bridge, comparison, intersection, temporal), with assertion-based scoring as
+the headline number. Its pairwise metrics are secondary and never optimised toward: they reward
+longer, more synthesised answers, which is a bias against a tight grounded bundle.
 
 ### G8 — The adapter is the product. The client is plumbing under it
 
-An agent developer never calls `recall`, and mostly never calls the client either. They install a
-**context provider** into the framework they already use, and everything this repository does reaches
-them through that seam. So the ordering is explicit: **adapters first, clients sized to serve them.**
+An agent developer never calls recall, and mostly never calls the client. They install a context
+provider into the framework they already use. A plain SDK nobody adapts is a REST wrapper — the thing
+a competent team writes in an afternoon and does not pay for.
 
-A plain SDK that nobody adapts is a REST wrapper — the thing a competent team writes in an afternoon
-and does not pay for. The adapter is where the product actually lands, because it is where memory
-becomes something the developer did not have to think about.
+Focus: **Python, Java and .NET**. The seams, whatever a framework calls them — context provider
+(memory injected per turn, with a store hook on the way back), text search (drop-in RAG, the on-ramp
+that requires believing nothing), history and compaction, session and provider state.
 
-**What migrates from memra**, all of it already carrying the name:
+Two rules at every seam: recall failures are **non-fatal** (an agent runs without memory rather than
+not at all) while write failures are **never silent** (a lost turn is invisible until a subject
+access request). And injected memory arrives as exactly one `user` message marked untrusted — never
+`system`, never `assistant`.
 
-| Framework | Adapter | Client beneath it |
-|---|---|---|
-| Microsoft Agent Framework (.NET) | `Taisce.AgentFramework` | `Taisce.Client` |
-| Microsoft Agent Framework (Python) | `taisce_agent_framework` | `taisce` |
-| Microsoft Agent Framework (Go) | `contextprovider` | `sdk/go` |
-| LangGraph | `taisce_langgraph` | `taisce` |
-| LangChain4j | `taisce-langchain4j` | `taisce-client` |
-| Spring AI | `taisce-spring-ai` | `taisce-client` |
-| Claude Code | plugin — skills, hooks, commands | MCP |
-| — *(gap)* | TypeScript has a client and no adapter | `sdk/typescript` |
+**No logic in an adapter.** An adapter that decides things locally is how behaviour forks per
+language, and it forks quietly because each one has its own tests.
 
-That last row is the finding, not an omission to fix quietly: TypeScript is where the agent
-ecosystem is largest and it is the one language where nothing binds the client to a framework.
-
-**The seams, whatever the framework calls them:**
-
-- **Context provider** — memory injected per turn, and a store hook on the way back. MAF names it
-  `AIContextProvider` (`InvokingCoreAsync` / `InvokedCoreAsync`); every comparable framework has the
-  same idea under another name. This is the main surface.
-- **Text search** — MAF's `TextSearchProvider` is drop-in RAG wired to a search function. Taisce is
-  the search function. This is the on-ramp that requires believing nothing.
-- **History and compaction** — the conversation turn by turn, which most frameworks keep in memory
-  and therefore lose. Compaction is a **server operation** (G9); the adapter only translates the
-  framework's seam onto it.
-- **Session and provider state** — what a provider keeps between turns, which frameworks serialize
-  and decline to store.
-
-**Two rules that are not negotiable at any of these seams**, both learned in memra: recall failures
-are **non-fatal** (an agent runs without memory rather than not at all) while write failures are
-**never silent** (a lost turn is invisible until a DSAR); and injected memory arrives as exactly one
-`user` message marked untrusted — never `system`, never `assistant`.
-
-**And no logic in an adapter.** An adapter that starts deciding things locally is how behaviour forks
-per language, and it forks quietly because each one has its own tests. Decisions live in the server;
-the adapter translates.
-
-**Proved by.** One conformance suite, run by **every** adapter against a live deployment, asserting
-the same behaviour from each. Not mocks — a mock proves the mock matches the assertion.
+**Proved by.** One conformance suite, run by every adapter against a live deployment, asserting the
+same behaviour from each. Not mocks — a mock proves the mock matches the assertion.
 
 ### G9 — Compaction is a Taisce operation, and every SDK is a thin client of it
 
-**Compaction lives in the server.** Not in the .NET adapter, not in the Go adapter, once — so a
-LangGraph, Spring AI, LangChain4j, TypeScript, MCP or plain-REST caller gets the same behaviour as a
-Microsoft Agent Framework caller, and a fix lands in one place.
+An agent's history grows without limit and the context window does not. Compaction is the answer
+everywhere; the usual implementations truncate, slide a window, or re-summarise everything, and all
+three either lose data silently or cost time proportional to the history on every turn.
 
-**This is not a packaging preference; it is the only place the differentiator can exist.** The
-property that distinguishes this from every built-in strategy is that a summary is **an observation
-carrying the observation ids it covers**. That requires writing to the log, registering in
-`projection_dependency`, and doing both in the transaction that produced it. A client-side strategy
-cannot do any of it: it can only hand the model a shorter list and forget. So the choice is not
-"where to put the code" — it is between a durable, erasable, re-derivable compaction and a lossy one.
+**It lives in the server**, not in any adapter. The property that distinguishes it is that a summary
+is **an observation carrying the observation ids it covers** — which needs the log, the dependency
+registration, and one transaction around both. A client-side strategy can only hand the model a
+shorter list and forget.
 
-What each side owns:
+The algorithm is hierarchical and it is G5's roll-up on the time axis: recent groups verbatim, a full
+run becomes one level-1 segment, a run of those becomes level-2. Amortised O(1) summarisation per
+turn, O(log n) segments to assemble a context, newest-verbatim and oldest-most-compressed.
 
-| | |
+Two modes: **stateful**, where Taisce holds the history and returns a context under a token budget;
+**stateless**, where the application sends its list — lossy by necessity, but it works before a
+customer has adopted anything else.
+
+**Groups are atomic.** An assistant message with tool calls and its tool results is one unit;
+splitting it is an API error from the model. Because compaction is server-side, the log must carry
+enough structure to reconstruct those groups.
+
+**Erasure stays bounded**, which is what lets this store prose: a segment records the contiguous
+observation range it covers, so erasing one observation invalidates exactly the segments containing
+it and their ancestors.
+
+**Proved by.** 10,000 turns compacted with model calls linear in turns rather than quadratic. One
+observation erased mid-history, with exactly the covering segments regenerated and the rest
+untouched. A tool-call group never split. No synthetic summary message ever reaching the write path.
+
+### G10 — Beat the incumbent on something a developer can name
+
+The frameworks ship their own chat-history memory: messages in a vector store, embedded on write,
+similarity-searched before each invocation. That is what a developer already has, and the argument
+against it has to be concrete.
+
+| Incumbent | Taisce |
 |---|---|
-| **Server** | segment materialisation, the roll-up, group-boundary safety, the erasure binding, the budget fit |
-| **SDK adapter** | translating one framework's compaction seam into the operation. For MAF that is a `CompactionStrategy`; for others, whatever that framework calls the same idea |
+| retrieved content injected without validation | returned as data, marked untrusted, asserted by test |
+| messages stored as vectors, no erasure path | erasure by data subject with a residual count per projection kind |
+| scope is metadata on a row, filtered at query time | scope is the partition; authorisation on every read |
+| similarity over raw messages | entities, typed edges, supersession — the message is evidence |
+| no supersession: a stale claim and its replacement both match | validity intervals, with counterevidence reported |
 
-**Two modes, because not every caller lets Taisce hold the history.**
-
-- **Stateful** — Taisce is the history provider. The caller asks for the context for a session under a
-  token budget and receives the verbatim tail plus the segments covering everything older. The server
-  already has the messages, so nothing is uploaded to be compacted.
-- **Stateless** — the application keeps history elsewhere and sends the message list. The server
-  compacts and returns. Lossy by necessity (there is no log to anchor summaries to) but it is the
-  on-ramp: it works before a customer has adopted anything else.
-
-**The algorithm is hierarchical and it is the roll-up G5 already needs, on the time axis.** Recent
-groups stay verbatim; a full run becomes one level-1 segment; a run of those becomes level-2. Amortised
-O(1) summarisation per turn, O(log n) segments to assemble any context, and a newest-verbatim /
-oldest-most-compressed fidelity gradient that is the right one. Segments are materialised by the
-worker, never on the read path.
-
-**Groups are atomic, and this is a server obligation now.** An assistant message with tool calls and
-its tool results is one unit; splitting it is an API error from the model rather than a degraded
-summary. Because compaction moved server-side, **the observation log has to carry enough structure to
-reconstruct those groups** — role alone is not enough, and that requirement lands in the write path
-(#2) rather than in M7 where compaction is built.
-
-**Erasure stays bounded**, which is why this may store prose where a community report is contested
-(#14): a segment records the contiguous observation range it covers, so erasing one observation
-invalidates exactly the segments containing it and their ancestors — O(log n) regeneration, with a
-residual count over segments that either cover it or do not.
-
-**One rule inherited from Agent Framework, and it is correctness rather than preference.** Their docs
-warn that a `CompactionProvider` registered through `ChatClientAgentOptions` runs *before chat history
-is stored*, so synthetic summary messages can enter the persisted history. Here that would be
-model-written prose landing in the observation log as though a person said it — the exact artefact
-class G6 exists to keep out. The adapter registers on the `ChatClientBuilder`, and a conformance test
-asserts no synthetic message reaches `observe`.
-
-**Proved by.** Compact 10,000 turns and assert model calls are linear in turns, not quadratic. Erase
-one observation mid-history and assert exactly the covering segments regenerated, residual zero, the
-rest untouched. Assert a tool-call group is never split. And run the **same conformance suite across
-every SDK** — if compaction is one implementation, every client must observe the same behaviour, and
-that is the assertion that keeps it from quietly forking.
-
-### G10 — The competitor at this seam is `ChatHistoryMemoryProvider`, and its gaps are the pitch
-
-MAF ships `ChatHistoryMemoryProvider`: chat history in a vector store, embedded on write, searched by
-similarity before each invocation, with `storageScope` and `searchScope` (store per session, search
-across a user's sessions). That is the incumbent an agent developer already has, and Taisce has to be
-better on something they can name.
-
-Its own documentation names the gaps:
-
-| `ChatHistoryMemoryProvider` | Taisce |
-|---|---|
-| *"Data from the store is accepted as-is without validation"* — indirect prompt injection | retrieved content returns as data, marked untrusted; asserted by test |
-| *"messages are stored as vectors… may contain PII"*, with no erasure path | erasure by data subject with a residual count per projection kind (G6) |
-| Scope is **metadata on a row**, filtered at query time | scope is the partition, and authorisation is on every read |
-| Similarity over raw messages | entities, typed edges, supersession, communities — the message is evidence, not the unit |
-| No supersession: an old preference and its replacement both match | validity intervals, with counterevidence reported |
-| Requires `Microsoft.Extensions.VectorData` | never implemented — being a vector-store connector discards the governance that is the product |
-
-**Proved by.** A head-to-head on a session set where the answer changed: the incumbent retrieves both
+**Proved by.** A head-to-head on a session set where the answer changed: the incumbent returns both
 the stale and the current claim, Taisce returns the current one with the stale one marked superseded.
 That is one demo and it is the whole argument.
-
----
 
 ### G11 — Two boundaries, and they are not the same kind of thing
 
 **A tenant is a schema. Hard.** A cross-tenant read is impossible because the other tenant's name is
-not in the statement — not because a predicate excluded it. There is no `tenant_id` column to
-forget, and a bug in a `WHERE` clause cannot leak across it. The schema name cannot be a bind
-parameter (PostgreSQL parameters are values, never identifiers), so it is interpolated from a
-validated type that exists only after `NewSchema`: forgetting to validate is a compile error rather
-than an injection.
+not in the statement — not because a predicate excluded it. There is no tenant column to forget, and
+a bug in a `WHERE` clause cannot cross it. A schema name cannot be a bind parameter, so it is
+interpolated from a validated type that exists only after construction: forgetting to validate is a
+compile error rather than an injection.
 
-**A project is a scope. Soft.** Inside one tenant, and cross-project reads are *intended* — a
+**A project is a scope. Soft.** Inside one tenant, where cross-project reads are *intended* — a
 principal granted several projects gets one bundle across them. So scope is a column, every read
-carries the authorised set, and the boundary is a permission that is checked rather than a wall that
-cannot be crossed.
+carries the authorised set, and the boundary is a permission that is checked.
 
 Getting this backwards in either direction is a serious defect. Tenancy as a column is one missing
-predicate away from a cross-customer leak; projects as schemas makes a multi-project recall a
-cross-schema union, which cannot be planned as one query.
+predicate from a cross-customer leak; projects as schemas makes a multi-project recall a cross-schema
+union that cannot be planned as one query.
 
-**Proved by.** Two tenants holding the same project name and the same data-subject reference, where
-a tenant-scoped read returns exactly its own row **with no tenant predicate in the query at all** —
-and a multi-project read inside one tenant returning two of three projects by authorisation.
+**Proved by.** Two tenants holding the same project name and the same data-subject reference, where a
+tenant-scoped read returns exactly its own row **with no tenant predicate in the query at all** — and
+a multi-project read inside one tenant returning two of three projects by authorisation.
 
 ### G12 — Open client, closed service, and the line between them is the architecture
 
-**Taisce is SaaS.** One multi-tenant service, EU-hosted, with the tenant boundary as a schema and the
-project boundary as a permission (G11). There is no self-hosted edition; the commercial argument is
-not that self-hosting is bad but that the two stories cannot both be told well.
+The adapters and clients are open source. They run inside the customer's process, hold their key, and
+see every observation and every recall on the way past; nobody should take that on trust from a
+binary, and an adapter that cannot be read will not be adopted by anyone whose security team reads
+code.
 
-**The adapters and clients are open source.** They run inside the customer's process, hold their API
-key, and see every observation and every recall on the way past — nobody should have to take that on
-trust from a binary, and an adapter that cannot be read will not be adopted by anyone whose security
-team reads code.
+**The service is not open.** So the line is: **the adapter translates, the service decides.**
+Retrieval, ranking, supersession, communities, compaction and erasure are the service. Message
+filtering, envelope construction and one framework's seam are the adapter. That makes "no logic in an
+adapter" (G8) the boundary between what is given away and what is sold, not merely a consistency
+rule.
 
-**This retroactively decides something that was decided on other grounds.** G9 moved compaction into
-the server because the summary must be an observation, which only the server can write. Open-sourcing
-the adapters means it is also the only placement that keeps the algorithm from being public: **whatever
-lives in an adapter is readable and forkable.** The rule *"no logic in an adapter"* stops being a
-consistency argument and becomes the boundary between what is given away and what is sold.
+Three consequences that are easy to notice too late. The REST contract becomes public the day the
+first package ships. Publishing is irreversible — registries refuse to reuse a version number, and a
+Go module path is permanent — so the organisation and module path are settled before the first
+publish. And every README is public copy making claims about the service.
 
-So the line is: **the adapter translates, the service decides.** Retrieval, ranking, supersession,
-communities, compaction and erasure are the service. Message filtering, envelope construction and one
-framework's seam are the adapter.
-
-**Three consequences that are easy to notice too late:**
-
-- **The REST contract becomes public the day the first package ships.** Anyone can read the client and
-  enumerate every operation, field and error string. That is fine, and it has to be deliberately fine
-  rather than incidentally so (#36).
-- **Publishing is irreversible.** npm and PyPI refuse to reuse a version number even after a yank; a
-  Go module path is permanent. The organisation and module path have to be settled before the first
-  publish, not after (#35).
-- **Every README is public copy**, making claims about the service. memra learned that public copy is
-  governed by a guard test rather than by review; the SDK READMEs fall under the same guard or they
-  drift into promising what the service does not do.
-
-**Proved by.** A test that fails when an operation reaches the dispatch table without appearing in the
-public contract; a guard over the SDK READMEs; and signed, provenanced releases on every registry —
-because an open package running inside a customer's agent is exactly the position memra's D39 refused
-to give a third party, and here we are the publisher.
+**Proved by.** A test that fails when an operation reaches the dispatch table without appearing in
+the public contract; a guard over the SDK READMEs; and signed, provenanced releases on every
+registry.
 
 ### G13 — A bundle constrains to exactly what it promised, in both directions
 
-Taisce sells subscription bundles from a free tier upward, and each constrains a subscription to what
-its bundle promised. Both halves of that are enforceable claims:
+Subscription bundles from a free tier upward. Both halves are enforceable claims: **every promise has
+an enforcer**, or it is an unbounded cost and a number on a public page with nothing behind it; and
+**every enforcer has a promise**, or it is a surprise outage the customer could not have planned for.
 
-- **Every promise has an enforcer.** memra shipped `max_storage_bytes` on every plan, rendered it on
-  the public pricing page, copied it onto every tenant at signup — and nothing read it. A grep found
-  the writers and no reader. That is an unbounded cost on the plan that pays nothing, and a number on
-  a public page with no mechanism behind it.
-- **Every enforcer has a promise.** A limit the code applies but the plan never stated is a surprise
-  outage the customer cannot have planned for.
-
-**Enforcement is one path, not several.** A single view the quota gate already reads, cached per
-tenant, refreshing faster as a tenant nears a ceiling, failing open on a database blip. An entitlement
-that needs new machinery is an entitlement designed wrong. Usage is measured **physically** —
-`pg_total_relation_size` over the tenant's own tables, heap and indexes and TOAST — because the cost
-being bounded is disk, not the length of the strings somebody sent.
+Enforcement is **one path** — a single view the quota gate already reads, cached per tenant,
+refreshing faster as a tenant nears a ceiling, failing open on a database blip. An entitlement that
+needs new machinery is an entitlement designed wrong. Usage is measured **physically**, over the
+tenant's own tables including indexes, because the cost being bounded is disk rather than the length
+of the strings somebody sent.
 
 **The catalogue is copied onto the tenant at subscribe time**, so a published change cannot silently
-re-limit somebody already on the plan. memra cut free storage from 5 GB to 1 GB and that rule is why a
-tenant sitting at 3 GB was untouched.
+re-limit somebody already on a plan.
 
-**Taisce meters something memra did not, and it is the part most likely to be missed.** memra's costs
-were embedding on write and disk, both metered on request paths. Taisce calls a model **on a schedule
-the customer sets rather than on a request they pay for**: compaction summarises whenever a run of
-turns completes (G9), and community reports cost calls per community per rebuild (G5). Neither is
-visible to a recall counter. When that budget is exhausted the degradation is decided rather than
-defaulted — compaction falls back to a non-LLM strategy, because an agent that stops working when a
-quota runs out is an outage while one that compacts more bluntly is a smaller product.
+**The metering that is easy to miss.** Ingest and recall happen on request paths a counter can see.
+Compaction (G9) and community reports (G5) call a model **on a schedule the customer sets** —
+compaction whenever a run of turns completes, reports per community per rebuild. Neither is visible
+to a request counter, and on a free tier that is unbounded spend from an abandoned tenant. When that
+budget is exhausted the degradation is decided rather than defaulted: compaction falls back to a
+non-LLM strategy, because an agent that stops working when a quota runs out is an outage while one
+that compacts more bluntly is a smaller product.
 
-**The free tier is the funnel, and it is shaped further on what a developer feels and tighter on what
-they do not.** Recall is the first ceiling anybody hits and the cheapest to serve; storage is never
-approached while evaluating and never resets.
-
-One number changes meaning here. `MEMRA_MAX_PROJECT_MEMORIES` of 50,000 was never a commercial
-decision — it existed because recall was linear in project size, and the full-500 run had to disable
-it to finish. **G1 removes the linearity, so the memory ceiling becomes a product decision for the
-first time**: how much to give away, rather than how much the architecture survives. Carried across
-unexamined it would be a number with no argument behind it.
-
-**Reclamation is a line item, not an apology.** An empty tenant schema is ~2.5 MB before anything is
-stored and every deployment's migration walks all of them. A product whose whole argument is that it
+**Reclamation is a line item, not an apology.** An empty tenant schema costs storage before anything
+is stored, and every deployment's migration walks all of them. A product whose argument is that it
 can prove what it deleted should be the one vendor that deletes what nobody is using, on a published
-schedule, and shows the residual afterwards. Dormancy is a **clock, not a state**: memra suspended
-dormant tenants and then emailed them to sign in, which sign-in refuses for a suspended tenant.
+schedule, and shows the residual afterwards. Dormancy is a **clock, not a state** — an account that
+has gone quiet must still be able to sign in, or the notice telling it to is an instruction the
+system refuses.
 
-**Proved by.** A test that fails when a plan column exists with no reader — the exact defect above,
-and the only assertion that prevents its recurrence. A test that every model call site lands against a
-meter. And a guard over the feature strings, in the same shape as the one governing public copy,
-because the pricing page **is** public copy and an unenforced feature is the same class of defect as
-an unearned claim.
+**Proved by.** A test that fails when a plan column exists with no reader. A test that every model
+call site lands against a meter. A guard over the feature strings, because a pricing page is public
+copy and an unenforced feature is the same class of defect as an unearned claim.
 
-## 4. What carries over unchanged
+---
 
-These were right and are not being redesigned. Porting them is work, not thinking.
+## 4. Out of scope
 
-- **The append-only observation log** as the erasure root, and projections derived from it.
-- **Rebuild, never repair.** Generations activated atomically; after an erasure the next rebuild is
-  derived only from surviving content, so residual is zero by construction rather than by the
-  correctness of a repair routine.
-- **Facts as claims with evidence** — verbatim quote, byte span, extractor version, supersession
-  chain. `resolve_citation` is the feature nothing else in the market has.
-- **The role policy.** An assistant's claim never becomes a user's fact.
-- **Injection containment.** Retrieved content returns as data, flagged untrusted.
-- **One binary, one substrate.** PostgreSQL is the only required dependency.
-- **Determinism**, everywhere it is cheap, because it is what makes a rebuild a rebuild.
+- **A second datastore of any kind** — vector database, graph engine, broker, cache, object store.
+  PostgreSQL is the only required dependency; each addition is a second place data lives, a second
+  thing to operate, and a second sweep an erasure has to prove it covered.
+- **A self-hosted edition.** Hosted and self-hosted cannot both be told well.
+- **Being a vector-store connector.** That makes Taisce a place to put vectors and discards the
+  governance that is the product.
 
-## 5. What is deliberately dropped
+---
 
-- **The concept graph** — `concept`, `concept_edge`, `concept_mention`. Co-occurrence between noun
-  phrases, written by every rebuild, feeding a lens that loses to flat cosine.
-- **Passage-first fusion.** Five lenses ranked by RRF over passages is the architecture G1 replaces.
-- **Louvain.** Superseded by G5.
-- **Sentinel-encoded time.** Four bigints with zero meaning "open", superseded by G4.
+## 5. How progress is judged
 
-## 6. Explicitly out of scope
-
-- **A graph database.** Evaluated properly, including building Apache AGE against the substrate and
-  benchmarking it: it compiles on Alpine/musl, its label tables are ordinary heap tables so erasure
-  would work, and it is *equivalent* on traversal speed at corpus scale. It fails on a model
-  mismatch — one table per edge label against an open predicate vocabulary — and it helps least at
-  G4, which is the hardest goal. Full evaluation:
-  [`memra/docs/24-graph-substrate-evaluation.md`](https://github.com/althunibat/memra/blob/main/docs/24-graph-substrate-evaluation.md).
-- **Full GraphRAG's indexing pipeline.** Its entity/relationship *descriptions* and community
-  reports are the parts G5 adopts and G6 constrains; its six-phase batch DAG is incompatible with a
-  streaming watermark and is not adopted.
-- **A second datastore of any kind** — vector DB, broker, cache, object store.
-- **An inference gateway.** The adapter seam already exists.
-
-## 7. How progress is judged
-
-Work is ordered as **one end-to-end journey**, never breadth-first: a thin path that an agent can
-actually drive, deepened in passes. A milestone is done when the journey runs against a real
-deployment and its claim has a test that runs — not when the code exists.
+Work is ordered as **one end-to-end journey**, deepened in passes, never breadth-first. A milestone
+is done when the journey runs against a real deployment and its claim has a test that runs — not when
+the code exists.
 
 The roadmap is the issue list on this repository. Issues are the source of truth for scope; this
 document is the source of truth for why.
