@@ -196,3 +196,54 @@ const insertEvidenceSQL = `
 INSERT INTO {schema}.fact_evidence
     (fact_id, source_observation_id, quote, byte_start, byte_end, extractor_version)
 VALUES ($1, $2, $3, $4, $5, $6)`
+
+// ProjectionRejectedClaim is the projection kind a rejected claim registers as.
+//
+// It registers like anything else, because a refused claim still holds somebody's verbatim words. A
+// table of "things we did not store" that turns out to store them is the worst version of this
+// feature, and it is invisible to erasure unless it is here.
+const ProjectionRejectedClaim = "rejected_claim"
+
+// Reject records a proposal that did not become a fact.
+//
+// # Why the refusal is written down rather than counted
+//
+// Both refusals are ordinary — most messages assert nothing, and a model that paraphrases is
+// behaving normally — so neither is an error and neither belongs in an error log. But both are
+// claims about quality that nobody can check without the words: a rate of eleven percent cannot
+// distinguish one missing relation asserted five hundred times, where the vocabulary is wrong and
+// the fix is one row, from five hundred relations asserted once, which is the tail and is noise.
+//
+// # Why it is not part of Assert
+//
+// A rejected claim never reaches Assert: it has no admitted predicate, or no locatable span, so
+// there is no fact to write and no entity to resolve. Folding it in would mean a function whose
+// success case sometimes writes a fact and sometimes writes the reason it did not.
+func (s *FactStore) Reject(ctx context.Context, schema Schema, scope, observationID, dataSubjectID string,
+	rejected domain.RejectedClaim) error {
+
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		id := uuid.New()
+		if _, err := tx.Exec(ctx, schema.SQL(insertRejectedClaimSQL),
+			id, scope, observationID, rejected.SourceOrdinal, rejected.Predicate,
+			rejected.Statement, rejected.Quote, rejected.Reason, ExtractorVersion,
+			nullIfEmpty(dataSubjectID)); err != nil {
+			return fmt.Errorf("record rejected claim: %w", err)
+		}
+		// In the SAME transaction as the row it describes. A projection written now and registered
+		// afterwards is invisible to erasure for as long as the gap lasts, and the gap is exactly
+		// the window in which a process dies.
+		if _, err := tx.Exec(ctx, schema.SQL(registerProjectionSQL),
+			observationID, scope, ProjectionRejectedClaim, id.String(),
+			nullIfEmpty(dataSubjectID)); err != nil {
+			return fmt.Errorf("register rejected claim projection: %w", err)
+		}
+		return nil
+	})
+}
+
+const insertRejectedClaimSQL = `
+INSERT INTO {schema}.rejected_claim
+    (rejected_claim_id, scope, source_observation_id, source_ordinal, predicate, statement, quote,
+     reason, extractor_version, data_subject_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`

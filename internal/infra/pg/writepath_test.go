@@ -438,3 +438,130 @@ func TestAnUnmappedRelationIsRefusedAndLeavesNothingBehind(t *testing.T) {
 			entities, facts2, registrations)
 	}
 }
+
+// ── #42's claim, on the write path ────────────────────────────────────────────────────────────
+//
+// What extraction refused is kept, with the model's own wording, and it registers for erasure.
+//
+// The registration is the part that matters. A rejected claim holds a verbatim quote from somebody's
+// message, so a table of "things we did not store" that is invisible to erasure is the worst version
+// of this feature — it would survive a deletion the residual count reported as complete.
+func TestWhatExtractionRefusedIsKeptAndIsErasable(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_rejected")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I am employed by Ensera and I love it here."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	for _, r := range []domain.RejectedClaim{
+		{Predicate: "employed_by", Statement: "The user is employed by Ensera.",
+			Quote: "I am employed by Ensera", Reason: domain.ReasonUnmappedRelation},
+		{Predicate: "prefers", Statement: "The user likes working at Ensera.",
+			Quote: "I really enjoy working here", Reason: domain.ReasonUnlocatableQuote},
+	} {
+		if err := facts.Reject(ctx, schema, "p1", stored.ID, "subject-1", r); err != nil {
+			t.Fatalf("reject %q: %v", r.Reason, err)
+		}
+	}
+
+	// The words survive, unnormalised. The near-duplicate relations that would justify adding a
+	// predicate are visible only in exactly what was proposed.
+	var predicate, quote string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT predicate, quote FROM {schema}.rejected_claim WHERE reason = 'unmapped_relation'`)).
+		Scan(&predicate, &quote); err != nil {
+		t.Fatalf("read rejection: %v", err)
+	}
+	if predicate != "employed_by" || quote != "I am employed by Ensera" {
+		t.Fatalf("the rejection lost what the model said: %q / %q", predicate, quote)
+	}
+
+	// The refused relation is in a column with no foreign key, which is the whole point: this table
+	// exists to hold the relations the vocabulary will not admit.
+	var admitted int
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT count(*) FROM {schema}.predicate WHERE predicate = 'employed_by'`)).Scan(&admitted); err != nil {
+		t.Fatalf("check vocabulary: %v", err)
+	}
+	if admitted != 0 {
+		t.Fatal("the fixture is wrong: employed_by is in the vocabulary, so nothing was refused")
+	}
+
+	// And every row registered, so erasure reaches them without knowing this table exists.
+	var rows, registered int
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT (SELECT count(*) FROM {schema}.rejected_claim),
+		        (SELECT count(*) FROM {schema}.projection_dependency WHERE projection_kind = $1)`),
+		pg.ProjectionRejectedClaim).Scan(&rows, &registered); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rows != 2 || registered != rows {
+		t.Fatalf("%d rejections but %d registrations — the difference is invisible to erasure", rows, registered)
+	}
+}
+
+// The vocabulary an extractor is given is the one the database enforces.
+//
+// A Go list beside the table would be a second definition of a closed set, and the one that drifts
+// is always the one no constraint enforces — at which point the extractor is told a vocabulary the
+// database will refuse, and the failure surfaces as a foreign key violation on a claim that looked
+// fine.
+func TestTheVocabularyIsReadFromTheTableThatEnforcesIt(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_vocab")
+
+	vocabulary, err := pg.LoadOntology(ctx, pool, schema)
+	if err != nil {
+		t.Fatalf("load vocabulary: %v", err)
+	}
+
+	var rows int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.predicate`)).Scan(&rows); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if vocabulary.Len() != rows {
+		t.Fatalf("the vocabulary has %d relations, the table has %d", vocabulary.Len(), rows)
+	}
+
+	// Every relation carries the two things declaring it was for: what its object is, and how many
+	// of it may be true at once. A zero-valued cardinality reaching supersession would silently mean
+	// "many" and stop a contradiction from ever being closed.
+	for _, p := range vocabulary.All() {
+		if p.Cardinality != domain.CardinalityOne && p.Cardinality != domain.CardinalityMany {
+			t.Fatalf("relation %q has cardinality %q", p.Name, p.Cardinality)
+		}
+		if p.ObjectKind == "" || p.SemanticType == "" || p.Description == "" {
+			t.Fatalf("relation %q is incompletely declared: %+v", p.Name, p)
+		}
+	}
+
+	// A relation the table admits resolves; one it refuses does not.
+	if _, ok := vocabulary.Lookup("works_at"); !ok {
+		t.Fatal("works_at is in the table and must resolve")
+	}
+	if _, ok := vocabulary.Lookup("employed_by"); ok {
+		t.Fatal("employed_by is not in the table and must not resolve")
+	}
+
+	// Stable order, so two extractions of one message are given the same prompt. A prompt whose
+	// vocabulary arrives in a different order is a different prompt, and extraction quality cannot
+	// be compared across runs that were not asked the same question.
+	again, err := pg.LoadOntology(ctx, pool, schema)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	for i, p := range vocabulary.All() {
+		if again.All()[i].Name != p.Name {
+			t.Fatalf("the vocabulary came back in a different order at %d: %q then %q",
+				i, p.Name, again.All()[i].Name)
+		}
+	}
+}

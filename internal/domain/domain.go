@@ -192,3 +192,107 @@ type Entity struct {
 func NormalizeName(name string) string {
 	return strings.ToLower(strings.Join(strings.Fields(name), " "))
 }
+
+// ── The relation vocabulary ───────────────────────────────────────────────────────────────────
+
+// Cardinality is how many facts with one subject and one predicate may be currently valid at once.
+//
+// It is declared when a predicate is defined, because by the time supersession runs all that is
+// visible is two rows and the question is no longer answerable from them.
+type Cardinality string
+
+const (
+	// CardinalityOne means a new fact closes the previous one: a person lives in one place, and
+	// recording the second without closing the first stores a contradiction as two beliefs.
+	CardinalityOne Cardinality = "one"
+	// CardinalityMany means several coexist, and only a repetition of the same object is a
+	// duplicate.
+	CardinalityMany Cardinality = "many"
+)
+
+// Predicate is one relation in the closed vocabulary.
+//
+// The authority is the `predicate` table, which `fact.predicate` references — so this is a copy of
+// what the database already enforces, held in memory because the extractor has to put the vocabulary
+// in a prompt and cannot issue a query per candidate relation.
+type Predicate struct {
+	Name         string
+	SemanticType string
+	Cardinality  Cardinality
+	// ObjectKind is what the object end should be: person, organisation, place, time, value or
+	// thing. What an extractor is told to look for, and what an implausible extraction is judged
+	// against — a `time` object that came back as somebody's name is a bad extraction, not a fact.
+	ObjectKind  string
+	Description string
+}
+
+// Ontology is the vocabulary, in the order the database holds it.
+//
+// There is no constructor from a Go literal, deliberately. Two definitions of a closed set is two
+// places for it to drift, and the one that would drift is whichever is not enforced by a foreign
+// key.
+type Ontology struct {
+	ordered []Predicate
+	byName  map[string]Predicate
+}
+
+// NewOntology builds the vocabulary from rows read out of the predicate table.
+func NewOntology(predicates []Predicate) (Ontology, error) {
+	if len(predicates) == 0 {
+		// An empty vocabulary admits nothing, so every extraction would be refused and the failure
+		// would look like a bad model rather than an unmigrated tenant.
+		return Ontology{}, fmt.Errorf("the relation vocabulary is empty")
+	}
+	byName := make(map[string]Predicate, len(predicates))
+	for _, p := range predicates {
+		if _, dup := byName[p.Name]; dup {
+			return Ontology{}, fmt.Errorf("relation %q appears twice", p.Name)
+		}
+		byName[p.Name] = p
+	}
+	return Ontology{ordered: predicates, byName: byName}, nil
+}
+
+// Lookup returns the predicate a relation names, and whether the vocabulary admits it.
+func (o Ontology) Lookup(name string) (Predicate, bool) {
+	p, ok := o.byName[name]
+	return p, ok
+}
+
+// All returns the vocabulary in a stable order, which is what a prompt is built from. Stable so that
+// two extractions of the same message are given the same list — a prompt that reorders is a prompt
+// that produces different output for the same input, and extraction quality becomes unmeasurable.
+func (o Ontology) All() []Predicate { return o.ordered }
+
+// Len reports how many relations the vocabulary admits.
+func (o Ontology) Len() int { return len(o.ordered) }
+
+// ── What extraction refused ───────────────────────────────────────────────────────────────────
+
+// Why a proposed claim did not become a fact. The set is closed, and a third reason would be a
+// third thing the record means.
+const (
+	// ReasonUnmappedRelation — the relation is not in the vocabulary. The claim may well be true;
+	// there is simply no edge type for it, and admitting one relation outside the set makes the set
+	// advisory.
+	ReasonUnmappedRelation = "unmapped_relation"
+	// ReasonUnlocatableQuote — the quote is not in the message. Usually a paraphrase, occasionally
+	// an invention. Either way there is nothing to cite.
+	ReasonUnlocatableQuote = "unlocatable_quote"
+)
+
+// RejectedClaim is a proposal that did not become a fact, kept with the words that were proposed.
+//
+// Kept rather than dropped because both refusals are silent and both are claims about quality that
+// nobody can check without the text. A rising unmapped rate is the evidence that the vocabulary is
+// wrong. A rising unlocatable rate is the evidence that the model is paraphrasing — which is
+// invisible from the claims that survived, because the survivors all look perfect.
+//
+// It carries somebody's verbatim words, so it is a projection like any other and erasure covers it.
+type RejectedClaim struct {
+	Predicate     string
+	Statement     string
+	Quote         string
+	Reason        string
+	SourceOrdinal int
+}
