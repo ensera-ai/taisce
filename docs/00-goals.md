@@ -167,83 +167,115 @@ multi-hop, AutoE's assertion-based scoring as the headline number. AutoE's pairw
 longer, more synthesised answers, which is a bias against a tight grounded bundle. LongMemEval is
 retained as the regression baseline against memra.
 
-### G8 — The integration surfaces are the product, not a wrapper over it
+### G8 — The adapter is the product. The client is plumbing under it
 
-An agent developer never calls `recall`. They install a context provider, and everything this
-repository does reaches them through three seams that Microsoft Agent Framework defines and every
-comparable framework mirrors:
+An agent developer never calls `recall`, and mostly never calls the client either. They install a
+**context provider** into the framework they already use, and everything this repository does reaches
+them through that seam. So the ordering is explicit: **adapters first, clients sized to serve them.**
 
-- **`ContextProvider`** (`AIContextProvider`: `InvokingCoreAsync` / `InvokedCoreAsync`) — memory
-  injected per turn, and the store hook on the way back. This is the main surface.
-- **`TextSearchProvider`** — MAF's own drop-in RAG, the same mechanism wired to a search function.
-  Taisce is the search function, and this is how a passage-RAG user arrives without adopting the
-  memory model first.
-- **`HistoryProvider`** — the conversation turn by turn, which MAF keeps in memory and therefore
-  loses.
+A plain SDK that nobody adapts is a REST wrapper — the thing a competent team writes in an afternoon
+and does not pay for. The adapter is where the product actually lands, because it is where memory
+becomes something the developer did not have to think about.
 
-Two rules that are not negotiable at this seam, both learned in memra: recall failures are
-**non-fatal** (an agent runs without memory rather than not at all) while write failures are
+**What migrates from memra**, all of it already carrying the name:
+
+| Framework | Adapter | Client beneath it |
+|---|---|---|
+| Microsoft Agent Framework (.NET) | `Taisce.AgentFramework` | `Taisce.Client` |
+| Microsoft Agent Framework (Python) | `taisce_agent_framework` | `taisce` |
+| Microsoft Agent Framework (Go) | `contextprovider` | `sdk/go` |
+| LangGraph | `taisce_langgraph` | `taisce` |
+| LangChain4j | `taisce-langchain4j` | `taisce-client` |
+| Spring AI | `taisce-spring-ai` | `taisce-client` |
+| Claude Code | plugin — skills, hooks, commands | MCP |
+| — *(gap)* | TypeScript has a client and no adapter | `sdk/typescript` |
+
+That last row is the finding, not an omission to fix quietly: TypeScript is where the agent
+ecosystem is largest and it is the one language where nothing binds the client to a framework.
+
+**The seams, whatever the framework calls them:**
+
+- **Context provider** — memory injected per turn, and a store hook on the way back. MAF names it
+  `AIContextProvider` (`InvokingCoreAsync` / `InvokedCoreAsync`); every comparable framework has the
+  same idea under another name. This is the main surface.
+- **Text search** — MAF's `TextSearchProvider` is drop-in RAG wired to a search function. Taisce is
+  the search function. This is the on-ramp that requires believing nothing.
+- **History and compaction** — the conversation turn by turn, which most frameworks keep in memory
+  and therefore lose. Compaction is a **server operation** (G9); the adapter only translates the
+  framework's seam onto it.
+- **Session and provider state** — what a provider keeps between turns, which frameworks serialize
+  and decline to store.
+
+**Two rules that are not negotiable at any of these seams**, both learned in memra: recall failures
+are **non-fatal** (an agent runs without memory rather than not at all) while write failures are
 **never silent** (a lost turn is invisible until a DSAR); and injected memory arrives as exactly one
-`user` message marked untrusted, never `system`, never `assistant`.
+`user` message marked untrusted — never `system`, never `assistant`.
 
-**Proved by.** A conformance suite each SDK runs against a live deployment — not mocks, which prove
-only that the mock matches the assertion.
+**And no logic in an adapter.** An adapter that starts deciding things locally is how behaviour forks
+per language, and it forks quietly because each one has its own tests. Decisions live in the server;
+the adapter translates.
 
-### G9 — Compaction is a durable strategy inside MAF's framework, not a second framework
+**Proved by.** One conformance suite, run by **every** adapter against a live deployment, asserting
+the same behaviour from each. Not mocks — a mock proves the mock matches the assertion.
 
-**Agent Framework already has compaction**, and it is well specified: a `MessageIndex` of atomic
-`MessageGroup`s (`System`, `User`, `AssistantText`, `ToolCall`, `Summary`), a `CompactionTrigger`
-delegate with a `CompactionTriggers` factory (`TokensExceed`, `TurnsExceed`, `GroupsExceed`,
-`HasToolCalls`, composed with `All`/`Any`), a separate **target** predicate controlling when to stop,
-a `MinimumPreserved` floor, and four built-in strategies composed by a pipeline. Go ships the same
-shape in `agent/compaction`.
+### G9 — Compaction is a Taisce operation, and every SDK is a thin client of it
 
-**So Taisce contributes a strategy, not a framework.** Anything else is a parallel abstraction the
-customer has to choose between, and they will choose the one their framework ships.
+**Compaction lives in the server.** Not in the .NET adapter, not in the Go adapter, once — so a
+LangGraph, Spring AI, LangChain4j, TypeScript, MCP or plain-REST caller gets the same behaviour as a
+Microsoft Agent Framework caller, and a fix lands in one place.
 
-Three constraints inherited from that framework, each of which breaks something if ignored:
+**This is not a packaging preference; it is the only place the differentiator can exist.** The
+property that distinguishes this from every built-in strategy is that a summary is **an observation
+carrying the observation ids it covers**. That requires writing to the log, registering in
+`projection_dependency`, and doing both in the transaction that produced it. A client-side strategy
+cannot do any of it: it can only hand the model a shorter list and forget. So the choice is not
+"where to put the code" — it is between a durable, erasable, re-derivable compaction and a lossy one.
 
-- **Groups are atomic.** An assistant message with tool calls and its tool results is one unit;
-  removing half of it is an API error from the model, not a degraded summary. A hierarchical roll-up
-  must align its runs to group boundaries and may never split a `ToolCall` group.
-- **Trigger and target are separate.** When to begin compacting and when to stop are different
-  questions, and collapsing them into one threshold is how a strategy either never fires or compacts
-  everything.
-- **System messages are always preserved.**
+What each side owns:
 
-**What Taisce's strategy has that the four built-ins do not: it is durable and reversible.**
-`SummarizationCompactionStrategy` replaces messages with a synthetic summary in the in-flight
-context; the original is whatever the history provider happened to keep. Taisce's summary is an
-**observation carrying the observation ids it covers**, so the originals stay in the log, the summary
-is a projection over a contiguous recorded range, and the whole thing re-derives.
+| | |
+|---|---|
+| **Server** | segment materialisation, the roll-up, group-boundary safety, the erasure binding, the budget fit |
+| **SDK adapter** | translating one framework's compaction seam into the operation. For MAF that is a `CompactionStrategy`; for others, whatever that framework calls the same idea |
 
-That is what makes the roll-up bounded — the same roll-up G5 needs, on the time axis instead of the
-graph axis:
+**Two modes, because not every caller lets Taisce hold the history.**
 
-| | truncation | sliding window | summarise-everything | Taisce roll-up |
-|---|---|---|---|---|
-| old context | lost | lost | retained, lossily | retained, compressed, **re-derivable** |
-| cost per turn | O(1) | O(1) | **O(n)** | **amortised O(1)** |
-| erasure blast radius | n/a | n/a | **whole history** | **O(log n) segments** |
+- **Stateful** — Taisce is the history provider. The caller asks for the context for a session under a
+  token budget and receives the verbatim tail plus the segments covering everything older. The server
+  already has the messages, so nothing is uploaded to be compacted.
+- **Stateless** — the application keeps history elsewhere and sends the message list. The server
+  compacts and returns. Lossy by necessity (there is no log to anchor summaries to) but it is the
+  on-ramp: it works before a customer has adopted anything else.
 
-The last column is why this may store prose where a community report is contested (#14): a segment
-records the contiguous observation range it covers, so erasing one observation invalidates exactly
-the segments containing it and their ancestors. The residual count is over segments that either
-cover the erased observation or do not. A community report aggregates across subjects and has no
-such bound.
+**The algorithm is hierarchical and it is the roll-up G5 already needs, on the time axis.** Recent
+groups stay verbatim; a full run becomes one level-1 segment; a run of those becomes level-2. Amortised
+O(1) summarisation per turn, O(log n) segments to assemble any context, and a newest-verbatim /
+oldest-most-compressed fidelity gradient that is the right one. Segments are materialised by the
+worker, never on the read path.
 
-**One registration rule, and it is a correctness rule rather than a preference.** Agent Framework's
-own documentation warns that a `CompactionProvider` registered through `ChatClientAgentOptions` runs
-*before chat history is stored*, so **synthetic summary messages can become part of the persisted
-history**. For Taisce that is model-written prose entering the observation log as though it were
-something a person said — the exact artefact class G6 exists to keep out. Registration is on the
-`ChatClientBuilder` via `UseAIContextProviders`, and a conformance test asserts no synthetic message
-reaches `observe`.
+**Groups are atomic, and this is a server obligation now.** An assistant message with tool calls and
+its tool results is one unit; splitting it is an API error from the model rather than a degraded
+summary. Because compaction moved server-side, **the observation log has to carry enough structure to
+reconstruct those groups** — role alone is not enough, and that requirement lands in the write path
+(#2) rather than in M7 where compaction is built.
 
-**Proved by.** Compact 10,000 turns and assert model calls are linear in turns rather than
-quadratic. Erase one observation from the middle of a compacted history and assert exactly the
-covering segments regenerated, residual zero, the rest untouched. And a test that a `ToolCall` group
-is never split.
+**Erasure stays bounded**, which is why this may store prose where a community report is contested
+(#14): a segment records the contiguous observation range it covers, so erasing one observation
+invalidates exactly the segments containing it and their ancestors — O(log n) regeneration, with a
+residual count over segments that either cover it or do not.
+
+**One rule inherited from Agent Framework, and it is correctness rather than preference.** Their docs
+warn that a `CompactionProvider` registered through `ChatClientAgentOptions` runs *before chat history
+is stored*, so synthetic summary messages can enter the persisted history. Here that would be
+model-written prose landing in the observation log as though a person said it — the exact artefact
+class G6 exists to keep out. The adapter registers on the `ChatClientBuilder`, and a conformance test
+asserts no synthetic message reaches `observe`.
+
+**Proved by.** Compact 10,000 turns and assert model calls are linear in turns, not quadratic. Erase
+one observation mid-history and assert exactly the covering segments regenerated, residual zero, the
+rest untouched. Assert a tool-call group is never split. And run the **same conformance suite across
+every SDK** — if compaction is one implementation, every client must observe the same behaviour, and
+that is the assertion that keeps it from quietly forking.
 
 ### G10 — The competitor at this seam is `ChatHistoryMemoryProvider`, and its gaps are the pitch
 
