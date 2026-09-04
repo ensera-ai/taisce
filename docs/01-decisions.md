@@ -233,14 +233,158 @@ Admitting it is what cannot be allowed. One relation admitted outside the set me
 advisory, and an advisory vocabulary is an open one with extra steps.
 
 The unmapped claim is kept with its evidence so the rate is a query rather than an estimate: a high
-unmapped rate is evidence the vocabulary is wrong, and that argument needs a number. The mechanism
-lands with the extractor in #42, which is the only thing that can produce one.
+unmapped rate is evidence the vocabulary is wrong, and that argument needs a number. D18 is where
+that record lives, and it holds the other silent refusal alongside this one.
 
 **Rejected:** dropping unmapped claims silently (loses the evidence that the vocabulary is wrong,
 and the failure is invisible precisely when it is worst); admitting them as edges with a flag (a flag
 is a filter every future query has to remember, so the vocabulary is closed only in the queries
 somebody remembered); mapping them onto the nearest admitted relation by similarity (records a
 relation nobody asserted, and the wrongness is unrecoverable because the original wording is gone).
+
+## Extraction
+
+### D17 — A quote is a search term, never evidence. Whitespace is tolerated and nothing else is
+
+The extractor takes the model's quote, locates it in the message, and stores **the text it found
+there**. Every claim satisfies `content[ByteStart:ByteEnd] == Quote` by construction rather than by
+the model's cooperation, and a claim whose quote cannot be located is discarded — not a weaker claim,
+an uncitable one, in a product whose argument is citation.
+
+Matching is exact first, then whitespace-tolerant, with the span mapped back to the original bytes. A
+model copying text routinely turns a line break inside a sentence into a space; the words are the
+same words, so refusing that discards a correct citation over a formatting artefact. A span into the
+normalised copy would be the same failure from the other side, so it is never returned.
+
+Case is not tolerated. A model that changed the case retyped rather than copied, and a tolerance wide
+enough to match `moved to dublin` against `moved to Dublin` is wide enough to match a sentence the
+model composed.
+
+A quote appearing twice takes the first occurrence: the same words in both places resolve to the same
+text, only the instance differs, and nothing reads the instance.
+
+**Rejected:** trusting the span the model returns (a span that is off by one character resolves to
+the wrong words while looking correct, and there is no way to notice); exact matching only (discards
+correct citations over a newline); case-insensitive or fuzzy matching (no line left to draw once
+retyping is admitted); embedding similarity between quote and message (a threshold nobody can
+justify, applied to the one thing that must be verbatim); storing the model's wording alongside a
+located span (a quote its own span does not reproduce — self-inconsistent, and it looks fine).
+
+### D18 — A claim outside the vocabulary or without a locatable quote is written down, not counted
+
+`{schema}.rejected_claim` keeps both refusals with the model's own wording, and its `predicate`
+column deliberately has no foreign key.
+
+Both refusals are silent and both are claims about quality nobody can check without the text. A rate
+of eleven percent cannot distinguish one missing relation asserted five hundred times — the
+vocabulary is wrong and the fix is one row — from five hundred asserted once, which is the tail and
+is noise. Those need opposite responses.
+
+It registers for erasure like every other projection: a refused claim still carries somebody's words,
+and a table of "things we did not store" that turns out to store them is the worst version of this
+feature.
+
+**Rejected:** a counter per reason (cannot distinguish the two cases above, which is the only reason
+to measure); an error log (both refusals are ordinary, so they would be noise inside the record of
+things that are not); normalising the recorded predicate (the near-duplicates that justify adding a
+relation are visible only in the exact words proposed).
+
+## Formation
+
+### D19 — Forming happens behind the append, and freshness is two numbers
+
+A turn is stored immediately and formed afterwards. Forming means a model call per message; held
+inside the append, an agent's turn would block on its own memory write and the product would be
+slower than having no memory at all.
+
+What that costs is a window where a turn is stored and not yet recallable, so the window has to be
+readable. `watermark.log_offset` advances on append and says the turn was stored — which the caller
+already knows, because the append returned. `watermark.formed_offset` is the highest offset whose
+turn has been through extraction **with nothing unformed below it**, and it is the number a recall
+depends on.
+
+It is derived from the backlog, not incremented per completion. An increment is correct only if
+completions happen in order, and two turns forming concurrently finish in whichever order their model
+calls return — so the number would run past a gap and a caller told "current to 40" would be missing
+turn 12. That is the one failure a freshness number must not have, because it is acted on rather than
+read.
+
+`formed_offset` is NULL until the scope's first turn forms, not -1. Offsets start at zero, so a
+sentinel is a value in the same domain as the data and every comparison carries a clause to exclude
+it that one query eventually forgets.
+
+One worker per scope, held by an advisory lock across the whole drain. Two workers taking the same
+turn would assert every fact twice, and the duplicates would be indistinguishable afterwards from a
+person saying the same thing in two conversations — a lock inside the transaction that picks the turn
+is released before the model call it was meant to protect.
+
+**Rejected:** synchronous formation (correct recall immediately, at the price of an append that waits
+on a model); redefining the single watermark to mean formed (loses the answer to "did you receive
+it", which is what an append is asked to confirm); incrementing the formed offset per completion
+(above); a tenant-wide formation lock (one busy project would starve every quiet one beside it).
+
+### D20 — The role applied to a claim is the message's, never the turn's
+
+Formation passes each message's own speaker to the fact table.
+
+A turn opened by the user does not make an assistant message three positions later speak for the
+principal — and turns opened by the user are most turns, so passing the turn's role would quietly
+promote nearly every model sentence in the system.
+
+Every message is extracted, including ones whose claims will then be refused. Skipping them would
+save a model call and produce identical rows, but only because formation would be applying the role
+policy itself, in a second place, with reasoning that has to stay in step with the first. The policy
+lives on the one road to the fact table so that a path which forgets it does not exist.
+
+Refusals by role are counted and **not** written to `rejected_claim`. Unlike the other two refusals
+this is not a quality signal — it is the policy working as designed, and its rate is already knowable
+from the roles of the messages in the turn.
+
+**Rejected:** the turn's lead role (above); a role on the observation only, with no per-message column
+(the policy would be unenforceable for every message after the first); skipping extraction for
+messages that cannot speak for the principal (duplicates the policy to save a call).
+
+### D22 — Message content leaves only to a host somebody wrote down
+
+`TAISCE_INFERENCE_ALLOWLIST` names the permitted hosts, separately from the endpoint, and a
+disagreement between them is fatal at startup.
+
+Extraction sends a customer's message text to a model. That is an egress of exactly the data this
+product exists to hold, and the destination is a string in an environment variable — one typo, one
+copied deployment file, and the content goes somewhere nobody chose. Unlike most misconfigurations it
+cannot be undone once noticed.
+
+Matched on host **and port**, never by prefix: a prefix match accepts
+`https://inference.example.attacker.test` for a list containing `inference.example`, which is the
+failure an allowlist exists for. Plaintext is refused anywhere but the local machine — listing a host
+says where content may go, not that it may go there in the clear.
+
+An empty allowlist permits nothing. Listing a host is a deliberate act, and that is the whole
+mechanism: it cannot be arrived at by default, only by somebody writing the host down.
+
+**Rejected:** deriving the permitted host from the endpoint (there is then nothing to disagree with,
+so a typo configures its own approval); a warning rather than a refusal (read after the egress it was
+meant to prevent); open when unset (one forgotten variable away from not being a guard); a single
+combined variable (the same string cannot both propose a destination and authorise it).
+
+### D21 — Evidence names the message it indexes, not only the turn
+
+`fact_evidence.source_ordinal`, in the primary key.
+
+A span indexes one message and an observation is a whole turn. Without the ordinal, resolving a
+citation means joining to the turn's messages with nothing to choose between them — and a byte offset
+taken against the wrong message does not fail. It returns a plausible fragment of a different
+sentence and attributes it to the fact as its evidence, and the two disagree only if somebody reads
+them side by side.
+
+In the key rather than beside it, because one fact can be evidenced from two messages and two spans
+starting at the same offset in different messages are different evidence. Outside the key the second
+silently replaces the first.
+
+**Rejected:** the ordinal as a plain column (a duplicate key would drop a citation); one chunk per
+turn so the span indexes the turn (a span into a concatenation that exists nowhere); resolving by
+searching the turn for the quote (the search is what produced the span in the first place, and it
+would find the wrong occurrence exactly when two messages restate each other).
 
 ## Method
 
