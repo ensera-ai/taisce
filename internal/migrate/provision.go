@@ -32,6 +32,11 @@ func ProvisionTenant(ctx context.Context, pool *pgxpool.Pool, tenant string) err
 	if _, err := Apply(ctx, pool, schema); err != nil {
 		return fmt.Errorf("migrate tenant %q: %w", tenant, err)
 	}
+	// After the migrations, so that tables a migration adds later are covered rather than being
+	// unreachable to the memory service until somebody notices.
+	if err := grantTenantToDataPlane(ctx, pool, schema); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -510,6 +510,80 @@ relying on cascade for everything (the cascade is what makes the count vacuous, 
 foreign key to cascade through anyway); a residual in a log line rather than a column (D10 — it is
 the artefact the product is sold on, and a log line is not something a customer can be shown).
 
+## The control plane
+
+### D29 — One database, two schemas, two database identities
+
+The registry — tenants, projects, principals, credentials, plans — lives in its own schema, owned by
+its own login role. The memory service connects as a different role with no privilege there at all.
+
+**Why the boundary is a grant and not a rule.** The memory service serves one tenant per statement,
+and its entire boundary is that another tenant's name is not in the statement it is running. A
+component that can list every customer, read every credential and read every subscription is one bad
+predicate away from crossing that. Expressed in code, "the memory service does not read the registry"
+is something every future query has to remember, and the query that forgets is the one written by
+hand during an incident. Expressed as a grant, no statement can break it.
+
+**Why one database rather than two.** Creating a tenant is a registry row, a `CREATE SCHEMA` and a
+full migration run. DDL is transactional here, so in one database that is one transaction and it
+either all happened or none of it did. Across two databases it is not atomic and needs a reconciler:
+a registry row with no schema is a customer who can authenticate and has nowhere to write, and a
+schema with no row is storage nobody bills and nobody reclaims. Two databases buy a stronger
+isolation than the grant already provides, and they buy it by making the most safety-critical
+operation in the system non-atomic.
+
+**What this boundary does not buy, stated so nobody claims more.** It does not separate tenants from
+each other. One process serves every tenant, so it necessarily holds privilege on every tenant
+schema, and the separation between them remains D8's — the schema name in the statement. It also
+cannot hide the *existence* of other tenants: every role can read the system catalogue, and that is
+not revocable without breaking ordinary tooling.
+
+Neither is a shortfall. A component that already holds every customer's memory learns nothing from
+the list of their names. What the grant protects is a different category — credentials,
+subscriptions, and the people behind the accounts — and none of that is memory.
+
+**Rejected:** one identity with the rule in application code (a convention every query must remember;
+the one that forgets is written under pressure); two databases (above); a single schema with the
+registry beside the tenants (there is then no boundary to grant across, only a naming convention);
+building the registry first and fencing it afterwards (it is readable by the memory service for
+however long that takes, and every query written meanwhile assumed that was allowed).
+
+**Deferred rather than rejected:** running the two planes as separate processes. The grant is what
+makes the guarantee, and process separation adds isolation on top of it without changing the data
+model — so it is a deployment choice that can be made later, and making it now would buy nothing that
+is not already bought.
+
+### D30 — A credential is exchanged for a short-lived signed grant, verified without a round trip
+
+The control plane resolves a credential to a tenant schema, an authorised project set and an
+entitlement set, and issues them as a short-lived signed grant. The memory service verifies the
+signature with a public key and reads nothing.
+
+**Why not ask the control plane per request.** Recall is on the critical path of every agent turn.
+A lookup there puts a network hop on every read and makes the whole product's availability equal to
+the registry's — so a control plane that is down stops every agent that is already working, not just
+the ones trying to sign up. Verifying a signature offline keeps memory serving through an outage,
+and what stops is issuing new grants: the right thing to lose.
+
+**Why not let the memory service read the registry.** D29.
+
+**Why entitlements travel with the grant.** A bundle constrains in both directions, and an enforcer
+that fetches the promise before enforcing it fails open the moment the fetch fails. Carried in the
+grant, enforcement is local and a failed lookup is a failed request rather than an unlimited one.
+
+**The cost, and the thing that bounds it.** Revocation is not instant: a grant remains valid until it
+expires, so the lifetime is the revocation window and it is a number somebody has to choose rather
+than a property to hope about. Where instant matters — a compromised credential, or a subject whose
+erasure must take effect now — the control plane publishes a list of revoked grant identifiers, which
+is small, contains nothing about anybody, and can be replicated to the memory service without giving
+it a single privilege in the registry.
+
+**Rejected:** a lookup per request (above); a long-lived grant (makes the revocation window a
+liability rather than a bound); a shared secret rather than a signature (every party that verifies
+can also mint, so the memory service could issue itself any authority it liked); putting the
+credential itself in the grant (the memory service would then hold something it could replay against
+the control plane, which is the authority it was deliberately not given).
+
 ## Method
 
 ### D14 — Nothing is brought in from another codebase unless it is asked for

@@ -32,8 +32,23 @@ var NewSchema = pg.NewSchema
 // maxIdentifierLength is PostgreSQL's limit, restated for the tests that assert the boundary.
 const maxIdentifierLength = 63
 
-//go:embed sql/*.sql
+//go:embed sql/*.sql control/*.sql
 var scripts embed.FS
+
+// The two migration sets, and the schema each belongs to.
+//
+// They advance independently. A tenant is migrated when its schema is brought up to date, which
+// happens per tenant at a moment somebody chose; the registry is migrated once. One version number
+// over both would make the second wait on the first, or claim a version half its tables had never
+// seen.
+const (
+	tenantScripts  = "sql"
+	controlScripts = "control"
+	// ControlSchema is where the registry lives. Fixed rather than configurable: it is one schema
+	// for the whole deployment, and a name that can vary is a name a grant can be written against
+	// wrongly.
+	ControlSchema Schema = "control"
+)
 
 // Script is one migration, in the order it must be applied.
 type Script struct {
@@ -46,8 +61,13 @@ type Script struct {
 //
 // A duplicate version is an error rather than a last-one-wins, because two files claiming the same
 // version apply in filename order on one machine and in another order on the next.
-func Load() ([]Script, error) {
-	entries, err := fs.ReadDir(scripts, "sql")
+func Load() ([]Script, error) { return load(tenantScripts) }
+
+// LoadControl reads the embedded registry migrations, ordered by version.
+func LoadControl() ([]Script, error) { return load(controlScripts) }
+
+func load(dir string) ([]Script, error) {
+	entries, err := fs.ReadDir(scripts, dir)
 	if err != nil {
 		return nil, fmt.Errorf("read embedded migrations: %w", err)
 	}
@@ -72,7 +92,7 @@ func Load() ([]Script, error) {
 		}
 		seen[version] = name
 
-		body, err := scripts.ReadFile("sql/" + name)
+		body, err := scripts.ReadFile(dir + "/" + name)
 		if err != nil {
 			return nil, fmt.Errorf("read migration %q: %w", name, err)
 		}
@@ -99,6 +119,23 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, schema Schema) (applied []in
 	if err != nil {
 		return nil, err
 	}
+	return apply(ctx, pool, schema, all)
+}
+
+// ApplyControl brings the registry's schema up to the latest embedded version.
+//
+// Separate from Apply because the registry is not a tenant. It is migrated once for the deployment
+// rather than once per customer, and running it through the tenant path would create a tenant that
+// is really the registry — which is exactly the confusion the boundary exists to prevent.
+func ApplyControl(ctx context.Context, pool *pgxpool.Pool) ([]int, error) {
+	all, err := LoadControl()
+	if err != nil {
+		return nil, err
+	}
+	return apply(ctx, pool, ControlSchema, all)
+}
+
+func apply(ctx context.Context, pool *pgxpool.Pool, schema Schema, all []Script) (applied []int, err error) {
 
 	// The bootstrap problem: the table recording which migrations ran is itself created by the
 	// first migration. Asking for its contents before it exists is expected, not an error.
