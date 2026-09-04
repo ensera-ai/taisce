@@ -26,7 +26,11 @@ against another system, a defect found by reading — is work, and it is often t
 
 **Decisions that need a person are labelled `decision`** and say what has to be decided, with the
 real cost of each option. They are not closed by implementing one of the options — they are closed
-when the decision is written into the register with its rejected alternatives.
+when the decision is written into [`docs/01-decisions.md`](docs/01-decisions.md) with its rejected
+alternatives.
+
+**A decision that building forces also goes in the register**, even when no issue asked for it.
+If a later reader would otherwise have to re-derive the choice, it was a decision.
 
 ## Labels
 
