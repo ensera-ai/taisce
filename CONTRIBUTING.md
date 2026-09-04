@@ -57,7 +57,7 @@ an entitlement nobody enforces. The substrate image is the worked example: two e
 copying and were removed on review because nothing here read them.
 
 **Nothing is brought in at all unless it is explicitly asked for** — not code, not decisions, not
-measurements. A prior system is a place something was tried, not a source of answers here.
+measurements. Somewhere something was tried is not a source of answers here.
 
 ## What is public and what is not
 

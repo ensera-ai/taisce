@@ -188,10 +188,9 @@ timestamps make "everything up to here" unprovable).
 
 ### D14 — Nothing is brought in from another codebase unless it is asked for
 
-Not code, not decisions, not measurements. A prior system is a place something was tried, not a
-source of answers here — its decisions were made under constraints that are not these constraints,
-and a decision carried across without being re-derived is one nobody can defend when it is
-challenged.
+Not code, not decisions, not measurements. Somewhere something was tried is not a source of answers
+here: those choices were made under constraints that are not these constraints, and a decision
+carried across without being re-derived is one nobody can defend when it is challenged.
 
 Where something **is** asked for, what transfers is the **idea**: the implementation is rewritten,
 reviewed and validated here. The check that catches a copy is D2's — every part must have a reader in
