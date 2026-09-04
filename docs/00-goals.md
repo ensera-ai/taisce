@@ -54,6 +54,31 @@ this repository.
 
 ---
 
+## 2b. What memra is to this document, and what it is not
+
+memra appears throughout what follows, and it is worth being exact about in which capacity, because
+getting this wrong is how a rewrite inherits the assumptions it exists to replace.
+
+**It is cited as evidence.** Measurements — 0.770 accuracy against 0.985 hit rate, 473 ms p50 over
+59,196 facts against 126 ms at a third that size — are facts about a real system, and they are the
+reason this repository exists.
+
+**It is cited as defect history.** An entitlement sold on every plan and read by nothing; dormancy
+set as a state so the notice email told people to do the one thing sign-in refuses; an `OR` join that
+defeated both partial indexes. Specific, cheap to carry, expensive to rediscover.
+
+**It is cited as cost of alternatives.** AGE built and benchmarked; a global HNSW unreachable behind
+a scope predicate; a reranker that demoted gold below the cutoff. *"This was tried and here is what
+happened."*
+
+**It is never cited as authority.** No decision here holds because memra decided it. Taisce's
+constraints differ in every direction that matters — entity-first rather than passage-first, open
+adapters over a closed service, model work as a customer-driven cost centre, compaction in the
+server — so every decision is re-derived from the goals below. Where the answer matches memra's, that
+is a result rather than an inheritance, and the entry in the register still gives the argument in
+taisce's own terms. A decision carried across without re-derivation is one nobody can defend when it
+is challenged, because the argument that produced it was about a different system.
+
 ## 3. The goals
 
 Each states what must be true, and what would prove it.

@@ -30,6 +30,16 @@ tracked as #34.
 real cost of each option. They are not closed by implementing one of the options — they are closed
 when the decision is written into the register with its rejected alternatives.
 
+## Citing memra
+
+memra is evidence, defect history, and the recorded cost of alternatives. It is **not** authority.
+
+An issue or document may say *"this was measured at 473 ms"*, *"this failed in production because
+the entitlement had no reader"*, or *"AGE was built and benchmarked and here is what it cost."* It
+may not say *"decided in memra, therefore settled here."* Every decision is re-derived from a goal;
+where it lands where memra landed, that is a result and the argument is still given in taisce's own
+terms.
+
 ## Labels
 
 `goal:G1`…`goal:G11` bind an issue to a goal in [`docs/00-goals.md`](docs/00-goals.md). An issue that
