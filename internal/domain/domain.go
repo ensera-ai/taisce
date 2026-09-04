@@ -315,3 +315,43 @@ type RejectedClaim struct {
 	Reason        string
 	SourceOrdinal int
 }
+
+// ── The read side ─────────────────────────────────────────────────────────────────────────────
+
+// Anchor is an entity a question resolved to, with the words that resolved to it.
+//
+// The matched text is carried because an anchor a caller did not expect is the first thing to look
+// at when a bundle is wrong, and without it the only way to find out why an entity was chosen is to
+// re-run the resolution by hand.
+type Anchor struct {
+	Entity  Entity
+	Matched string
+}
+
+// CitedFact is a fact with the receipt for it. There is no uncited variant, and that is deliberate:
+// a fact whose evidence cannot be produced is not something this product returns.
+type CitedFact struct {
+	ID         string
+	Scope      string
+	Subject    string
+	Predicate  string
+	Object     string
+	Statement  string
+	Confidence float32
+	ValidFrom  time.Time
+	Evidence   Evidence
+	// AnchoredOn is the entity that brought this fact into the bundle. A fact can name two anchors;
+	// this is the one it was reached through, which is what makes the path a caller can inspect.
+	AnchoredOn string
+}
+
+// Bundle is what a recall returns.
+type Bundle struct {
+	Anchors []Anchor
+	Facts   []CitedFact
+	// Truncated says the limit cut the result. It matters because the order carries no judgment:
+	// nothing here has ranked the facts, so a truncated bundle is missing arbitrary members rather
+	// than the least relevant ones, and a caller that does not know that will read the cut as a
+	// verdict.
+	Truncated bool
+}

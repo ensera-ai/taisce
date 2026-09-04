@@ -386,6 +386,66 @@ turn so the span indexes the turn (a span into a concatenation that exists nowhe
 searching the turn for the quote (the search is what produced the span in the first place, and it
 would find the wrong occurrence exactly when two messages restate each other).
 
+## Recall
+
+### D23 — Anchors are resolved by windowing the question, not by a model call
+
+Every window of up to four words in the question is normalised the way entity names are and looked up
+against canonical names and aliases.
+
+A model call per question would put a second inference hop in front of every read, on the path a
+caller is waiting on, to answer something a lookup already answers: an entity is in memory or it is
+not, and its name is a string we already hold. Windowing is exact, has no vocabulary of its own, and
+costs one query.
+
+Multi-word windows are what make an entity reachable by the name it is stored under. Single words
+alone leave every two-word entity unreachable. Aliases are matched alongside canonical names because
+a person asks about something the way they mentioned it, and the alias list is exactly the record of
+how they mentioned it.
+
+**Rejected:** named-entity recognition by a model (a second inference hop on the read path, with its
+own vocabulary that can disagree with what is stored); single words only (two-word entities become
+unreachable by name); full-text search over entity names (ranks, and a ranking that nothing measured
+is a stage doing unknown work); trigram or fuzzy name matching (it is D6's over-merge problem moved
+to read time, where it is invisible instead of inspectable).
+
+### D24 — The authorised project set is an argument on every read, and empty returns nothing
+
+A project is a permission inside a tenant, so `scope = ANY($1)` is on every statement and the set
+comes from the caller.
+
+Empty returns nothing rather than everything. The failure being prevented is a read that WIDENS when
+its permission list is missing — the one mistake a permission list exists to stop, and the one that
+is invisible in a test suite where every caller happens to pass a scope.
+
+This is the soft boundary and it is deliberately not the hard one. Cross-project reads are intended:
+a principal granted several projects recalls across them in one bundle. The hard boundary is the
+schema name in the statement, which no predicate can be wrong about.
+
+**Rejected:** a scope held on the reader and defaulted (a default is a decision taken once for every
+future caller); empty meaning all (fails open, and fails open exactly when something upstream
+forgot); a project as a schema (would make the intended cross-project read a cross-schema query).
+
+### D25 — The first recall ranks nothing, and a bundle that was cut says so
+
+Facts come back in a deterministic order that carries no judgment — predicate, then id. Not recency,
+not confidence, not salience.
+
+Each of those is a stage that can only be justified by a measurement it improves. Introduced before
+the plain anchor-and-return path is measured, they make it impossible to say which stage is doing the
+work or which is doing harm — and one of them usually is.
+
+The limit is a cap, not a selection, so `Truncated` is on the bundle. Without it a caller reads the
+cut as a verdict: "these are the important ones" is the one thing this bundle is not claiming.
+
+A fact with no evidence is not returned. That is a product statement rather than an oversight: what
+is sold is a memory that can show its receipt.
+
+**Rejected:** a recency lens, reciprocal rank fusion, a cross-encoder reranker (all deferred until a
+measurement justifies them — see G7); ordering by confidence (confidence is what an extractor
+asserted, not what a reader needs, and using it as a rank quietly makes it one); silent truncation
+(the caller cannot tell an exhaustive answer from a cut one, and will assume the wrong one).
+
 ## Method
 
 ### D14 — Nothing is brought in from another codebase unless it is asked for
