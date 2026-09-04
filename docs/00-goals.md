@@ -361,6 +361,58 @@ public contract; a guard over the SDK READMEs; and signed, provenanced releases 
 because an open package running inside a customer's agent is exactly the position memra's D39 refused
 to give a third party, and here we are the publisher.
 
+### G13 — A bundle constrains to exactly what it promised, in both directions
+
+Taisce sells subscription bundles from a free tier upward, and each constrains a subscription to what
+its bundle promised. Both halves of that are enforceable claims:
+
+- **Every promise has an enforcer.** memra shipped `max_storage_bytes` on every plan, rendered it on
+  the public pricing page, copied it onto every tenant at signup — and nothing read it. A grep found
+  the writers and no reader. That is an unbounded cost on the plan that pays nothing, and a number on
+  a public page with no mechanism behind it.
+- **Every enforcer has a promise.** A limit the code applies but the plan never stated is a surprise
+  outage the customer cannot have planned for.
+
+**Enforcement is one path, not several.** A single view the quota gate already reads, cached per
+tenant, refreshing faster as a tenant nears a ceiling, failing open on a database blip. An entitlement
+that needs new machinery is an entitlement designed wrong. Usage is measured **physically** —
+`pg_total_relation_size` over the tenant's own tables, heap and indexes and TOAST — because the cost
+being bounded is disk, not the length of the strings somebody sent.
+
+**The catalogue is copied onto the tenant at subscribe time**, so a published change cannot silently
+re-limit somebody already on the plan. memra cut free storage from 5 GB to 1 GB and that rule is why a
+tenant sitting at 3 GB was untouched.
+
+**Taisce meters something memra did not, and it is the part most likely to be missed.** memra's costs
+were embedding on write and disk, both metered on request paths. Taisce calls a model **on a schedule
+the customer sets rather than on a request they pay for**: compaction summarises whenever a run of
+turns completes (G9), and community reports cost calls per community per rebuild (G5). Neither is
+visible to a recall counter. When that budget is exhausted the degradation is decided rather than
+defaulted — compaction falls back to a non-LLM strategy, because an agent that stops working when a
+quota runs out is an outage while one that compacts more bluntly is a smaller product.
+
+**The free tier is the funnel, and it is shaped further on what a developer feels and tighter on what
+they do not.** Recall is the first ceiling anybody hits and the cheapest to serve; storage is never
+approached while evaluating and never resets.
+
+One number changes meaning here. `MEMRA_MAX_PROJECT_MEMORIES` of 50,000 was never a commercial
+decision — it existed because recall was linear in project size, and the full-500 run had to disable
+it to finish. **G1 removes the linearity, so the memory ceiling becomes a product decision for the
+first time**: how much to give away, rather than how much the architecture survives. Carried across
+unexamined it would be a number with no argument behind it.
+
+**Reclamation is a line item, not an apology.** An empty tenant schema is ~2.5 MB before anything is
+stored and every deployment's migration walks all of them. A product whose whole argument is that it
+can prove what it deleted should be the one vendor that deletes what nobody is using, on a published
+schedule, and shows the residual afterwards. Dormancy is a **clock, not a state**: memra suspended
+dormant tenants and then emailed them to sign in, which sign-in refuses for a suspended tenant.
+
+**Proved by.** A test that fails when a plan column exists with no reader — the exact defect above,
+and the only assertion that prevents its recurrence. A test that every model call site lands against a
+meter. And a guard over the feature strings, in the same shape as the one governing public copy,
+because the pricing page **is** public copy and an unenforced feature is the same class of defect as
+an unearned claim.
+
 ## 4. What carries over unchanged
 
 These were right and are not being redesigned. Porting them is work, not thinking.
