@@ -38,6 +38,20 @@ serves no goal is either a missing goal or work that should not be done.
 `port` is carried over from memra — work, not thinking. `new` is a new design. `decision` needs a
 person. `docs` is documentation.
 
+## What is public and what is not
+
+This repository is the **service**, and it is private. The adapters and clients are open source and
+live elsewhere (#35 settles where).
+
+The line is not organisational, it is architectural: **the adapter translates, the service decides.**
+Anything in an open adapter is readable and forkable, so retrieval, ranking, supersession,
+communities, compaction and erasure stay server-side — which is the same rule as *"no logic in an
+adapter"*, arrived at from the commercial direction instead of the consistency one.
+
+Two things follow for anyone writing an issue here. A change to an operation's shape is a change to a
+**public contract** the moment an SDK ships against it. And nothing internal — endpoints, peppers,
+topology, a test DSN — belongs in text that will be mirrored into an open repository.
+
 ## Milestones
 
 Ordered as **one end-to-end journey, deepened in passes** — never breadth-first layers. A milestone

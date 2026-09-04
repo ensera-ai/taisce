@@ -323,6 +323,44 @@ cross-schema union, which cannot be planned as one query.
 a tenant-scoped read returns exactly its own row **with no tenant predicate in the query at all** —
 and a multi-project read inside one tenant returning two of three projects by authorisation.
 
+### G12 — Open client, closed service, and the line between them is the architecture
+
+**Taisce is SaaS.** One multi-tenant service, EU-hosted, with the tenant boundary as a schema and the
+project boundary as a permission (G11). There is no self-hosted edition; the commercial argument is
+not that self-hosting is bad but that the two stories cannot both be told well.
+
+**The adapters and clients are open source.** They run inside the customer's process, hold their API
+key, and see every observation and every recall on the way past — nobody should have to take that on
+trust from a binary, and an adapter that cannot be read will not be adopted by anyone whose security
+team reads code.
+
+**This retroactively decides something that was decided on other grounds.** G9 moved compaction into
+the server because the summary must be an observation, which only the server can write. Open-sourcing
+the adapters means it is also the only placement that keeps the algorithm from being public: **whatever
+lives in an adapter is readable and forkable.** The rule *"no logic in an adapter"* stops being a
+consistency argument and becomes the boundary between what is given away and what is sold.
+
+So the line is: **the adapter translates, the service decides.** Retrieval, ranking, supersession,
+communities, compaction and erasure are the service. Message filtering, envelope construction and one
+framework's seam are the adapter.
+
+**Three consequences that are easy to notice too late:**
+
+- **The REST contract becomes public the day the first package ships.** Anyone can read the client and
+  enumerate every operation, field and error string. That is fine, and it has to be deliberately fine
+  rather than incidentally so (#36).
+- **Publishing is irreversible.** npm and PyPI refuse to reuse a version number even after a yank; a
+  Go module path is permanent. The organisation and module path have to be settled before the first
+  publish, not after (#35).
+- **Every README is public copy**, making claims about the service. memra learned that public copy is
+  governed by a guard test rather than by review; the SDK READMEs fall under the same guard or they
+  drift into promising what the service does not do.
+
+**Proved by.** A test that fails when an operation reaches the dispatch table without appearing in the
+public contract; a guard over the SDK READMEs; and signed, provenanced releases on every registry —
+because an open package running inside a customer's agent is exactly the position memra's D39 refused
+to give a third party, and here we are the publisher.
+
 ## 4. What carries over unchanged
 
 These were right and are not being redesigned. Porting them is work, not thinking.
