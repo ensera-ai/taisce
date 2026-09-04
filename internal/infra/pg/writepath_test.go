@@ -219,7 +219,7 @@ func TestAnEvidenceSpanResolvesAgainstItsOwnMessage(t *testing.T) {
 		  FROM {schema}.fact_evidence e
 		  JOIN {schema}.chunk c
 		    ON c.source_observation_id = e.source_observation_id
-		   AND c.source_message_ordinal = 1
+		   AND c.source_message_ordinal = e.source_ordinal
 		 LIMIT 1`)).Scan(&resolved, &storedQuote); err != nil {
 		t.Fatalf("resolve citation: %v", err)
 	}
@@ -563,5 +563,68 @@ func TestTheVocabularyIsReadFromTheTableThatEnforcesIt(t *testing.T) {
 			t.Fatalf("the vocabulary came back in a different order at %d: %q then %q",
 				i, p.Name, again.All()[i].Name)
 		}
+	}
+}
+
+// ── #46's claim ───────────────────────────────────────────────────────────────────────────────
+//
+// Evidence names the message it indexes, and the citation is resolved by that name.
+//
+// The fixture is built so a join that ignores the ordinal returns the WRONG WORDS rather than the
+// same ones by luck: two messages share a prefix and diverge inside the span. That is the realistic
+// shape — a person restating themselves with one detail changed — and it is the case where taking a
+// byte offset against the wrong message of the same turn produces a plausible fragment instead of an
+// error.
+func TestACitationResolvesAgainstTheMessageItsEvidenceNames(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_ordinal")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	first := "Marta works at Ensera in Dublin."
+	second := "Marta works at Ensera in Cork."
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: first},
+		domain.Message{Ordinal: 1, Role: domain.RoleUser, Content: second},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	quote, start, end := "Ensera in Cork", 15, 29
+	if second[start:end] != quote {
+		t.Fatalf("fixture is wrong: %q", second[start:end])
+	}
+	// The same offsets in the other message give different words, which is what makes this test
+	// able to fail.
+	if first[start:end] == quote {
+		t.Fatal("fixture is wrong: both messages give the same text at these offsets, so an ordinal-blind join would pass")
+	}
+
+	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", domain.Claim{
+		Subject: "Marta", Predicate: "works_at", Object: "Ensera",
+		Statement: "Marta works at Ensera in Cork.", Quote: quote,
+		ByteStart: start, ByteEnd: end, SourceOrdinal: 1,
+	}); err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+
+	var resolved, storedQuote string
+	var ordinal int
+	if err := pool.QueryRow(ctx, schema.SQL(`
+		SELECT e.source_ordinal, e.quote,
+		       substring(c.text FROM e.byte_start + 1 FOR e.byte_end - e.byte_start)
+		  FROM {schema}.fact_evidence e
+		  JOIN {schema}.chunk c
+		    ON c.source_observation_id = e.source_observation_id
+		   AND c.source_message_ordinal = e.source_ordinal`)).Scan(&ordinal, &storedQuote, &resolved); err != nil {
+		t.Fatalf("resolve citation: %v", err)
+	}
+	if ordinal != 1 {
+		t.Fatalf("evidence names message %d; the claim came from message 1", ordinal)
+	}
+	if resolved != storedQuote {
+		t.Fatalf("the span resolved to %q but the quote is %q", resolved, storedQuote)
 	}
 }

@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -98,11 +99,12 @@ func (s *ObservationStore) Append(ctx context.Context, schema Schema, turn domai
 		}
 
 		out = domain.Observation{
-			ID:         id.String(),
-			LogOffset:  offset,
-			Scope:      turn.Scope,
-			OccurredAt: turn.OccurredAt,
-			IngestedAt: ingested,
+			ID:            id.String(),
+			LogOffset:     offset,
+			Scope:         turn.Scope,
+			DataSubjectID: turn.DataSubjectID,
+			OccurredAt:    turn.OccurredAt,
+			IngestedAt:    ingested,
 		}
 		return nil
 	})
@@ -182,3 +184,126 @@ SELECT ordinal, role, content, group_ordinal, occurred_at
   FROM {schema}.turn_message
  WHERE observation_id = $1
  ORDER BY ordinal`
+
+// ── Formation state ───────────────────────────────────────────────────────────────────────────
+
+// NextUnformed returns the oldest turn in a scope that extraction has not run over.
+//
+// Oldest first, because forming out of order would let the formed watermark stall behind a turn
+// nothing is working on while newer turns complete past it — and a watermark that reports a scope as
+// behind when it is nearly current is one people learn to ignore.
+func (s *ObservationStore) NextUnformed(ctx context.Context, schema Schema, scope string) (domain.Observation, bool, error) {
+	var out domain.Observation
+	var subject *string
+	err := s.pool.QueryRow(ctx, schema.SQL(selectNextUnformedSQL), scope).
+		Scan(&out.ID, &out.LogOffset, &out.Scope, &subject, &out.OccurredAt, &out.IngestedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Observation{}, false, nil
+	}
+	if err != nil {
+		return domain.Observation{}, false, fmt.Errorf("find unformed turn: %w", err)
+	}
+	if subject != nil {
+		out.DataSubjectID = *subject
+	}
+	return out, true, nil
+}
+
+const selectNextUnformedSQL = `
+SELECT observation_id::text, log_offset, scope, data_subject_id, occurred_at, ingested_at
+  FROM {schema}.observation
+ WHERE scope = $1 AND formed_at IS NULL
+ ORDER BY log_offset
+ LIMIT 1`
+
+// MarkFormed records that extraction has run over a turn, and moves the formed watermark.
+//
+// # Why the watermark is derived rather than incremented
+//
+// An increment per completion is correct only if completions happen in order. They do not: two turns
+// forming concurrently finish in whichever order their model calls return, and an increment would
+// let the number run past a turn that is still unformed. A caller told "current to 40" would then be
+// missing turn 12, which is the one failure a freshness number must not have.
+//
+// So it is recomputed from the backlog: the offset below the lowest unformed turn, or the highest
+// stored offset when there is no backlog at all. Two index lookups against a partial index that
+// holds the backlog rather than the history.
+//
+// # Why the scope's watermark row is locked first
+//
+// The recompute reads the backlog and writes a number derived from it. Two of these interleaving
+// would have one overwrite the other's read, and the loser's turn would be missing from a number
+// that claims to cover it. The lock is the same row an append takes, so the two serialise — cheap,
+// because this is two index probes and not a model call.
+func (s *ObservationStore) MarkFormed(ctx context.Context, schema Schema, observationID string) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var scope string
+		err := tx.QueryRow(ctx, schema.SQL(markFormedSQL), observationID).Scan(&scope)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Already formed, or gone. Not an error: forming is retried after a failure that may
+			// have happened after the mark, and a retry that fails on "already done" turns a
+			// recovered run into a stuck one.
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("mark formed: %w", err)
+		}
+		if _, err := tx.Exec(ctx, schema.SQL(lockScopeWatermarkSQL), scope); err != nil {
+			return fmt.Errorf("lock scope watermark: %w", err)
+		}
+		if _, err := tx.Exec(ctx, schema.SQL(advanceFormedWatermarkSQL), scope); err != nil {
+			return fmt.Errorf("advance formed watermark: %w", err)
+		}
+		return nil
+	})
+}
+
+// Set once and never cleared. Re-forming a turn is a rebuild, which derives from the log rather than
+// repairing rows in place.
+const markFormedSQL = `
+UPDATE {schema}.observation
+   SET formed_at = now()
+ WHERE observation_id = $1 AND formed_at IS NULL
+RETURNING scope`
+
+const lockScopeWatermarkSQL = `SELECT 1 FROM {schema}.watermark WHERE scope = $1 FOR UPDATE`
+
+// NULL when the scope's very first turn is still unformed. Not -1: offsets start at zero, so any
+// sentinel is a value in the same domain as the data, and every comparison then carries a clause to
+// exclude it that one query eventually forgets.
+const advanceFormedWatermarkSQL = `
+UPDATE {schema}.watermark
+   SET formed_offset = (
+        SELECT CASE
+                 WHEN backlog.lowest IS NULL THEN stored.highest
+                 WHEN backlog.lowest = 0     THEN NULL
+                 ELSE backlog.lowest - 1
+               END
+          FROM (SELECT min(log_offset) AS lowest FROM {schema}.observation
+                 WHERE scope = $1 AND formed_at IS NULL) backlog,
+               (SELECT max(log_offset) AS highest FROM {schema}.observation
+                 WHERE scope = $1) stored)
+ WHERE scope = $1`
+
+// Freshness reports what a scope has stored and what of it is in memory.
+//
+// Two numbers, because they answer two questions. An append confirms the first, and the caller
+// already knows it. A recall depends on the second, and it is the one being asked about.
+func (s *ObservationStore) Freshness(ctx context.Context, schema Schema, scope string) (domain.Freshness, error) {
+	out := domain.Freshness{Scope: scope}
+	var formed *int64
+	err := s.pool.QueryRow(ctx, schema.SQL(selectFreshnessSQL), scope).Scan(&out.Stored, &formed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Freshness{}, fmt.Errorf("scope %q has no turns", scope)
+	}
+	if err != nil {
+		return domain.Freshness{}, fmt.Errorf("read freshness: %w", err)
+	}
+	if formed != nil {
+		out.Formed, out.HasFormed = *formed, true
+	}
+	return out, nil
+}
+
+const selectFreshnessSQL = `
+SELECT log_offset, formed_offset FROM {schema}.watermark WHERE scope = $1`

@@ -75,10 +75,12 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 			return fmt.Errorf("insert fact: %w", err)
 		}
 
-		// Evidence names the MESSAGE, not the turn. A byte span against a concatenation that exists
-		// nowhere resolves to the wrong words while looking entirely correct.
+		// Evidence names the MESSAGE, not the turn — which means the ordinal as well as the span. A
+		// byte offset taken against another message of the same turn does not fail; it resolves to
+		// a plausible fragment of the wrong sentence and looks entirely correct.
 		if _, err := tx.Exec(ctx, schema.SQL(insertEvidenceSQL),
-			id, observationID, claim.Quote, claim.ByteStart, claim.ByteEnd, ExtractorVersion); err != nil {
+			id, observationID, claim.SourceOrdinal, claim.Quote, claim.ByteStart, claim.ByteEnd,
+			ExtractorVersion); err != nil {
 			return fmt.Errorf("insert evidence: %w", err)
 		}
 
@@ -194,8 +196,8 @@ VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9)`
 
 const insertEvidenceSQL = `
 INSERT INTO {schema}.fact_evidence
-    (fact_id, source_observation_id, quote, byte_start, byte_end, extractor_version)
-VALUES ($1, $2, $3, $4, $5, $6)`
+    (fact_id, source_observation_id, source_ordinal, quote, byte_start, byte_end, extractor_version)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
 // ProjectionRejectedClaim is the projection kind a rejected claim registers as.
 //

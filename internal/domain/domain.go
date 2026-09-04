@@ -125,10 +125,29 @@ type Observation struct {
 	ID string
 	// LogOffset is contiguous within the scope. The watermark is the highest offset with no gap
 	// below it, which only means something if offsets are dense per scope.
-	LogOffset  int64
-	Scope      string
-	OccurredAt time.Time
-	IngestedAt time.Time
+	LogOffset int64
+	Scope     string
+	// DataSubjectID is who the turn is about, and it travels with the observation because every
+	// projection derived from it inherits the same governance. Carried here rather than looked up
+	// per projection: a lookup is a way to forget.
+	DataSubjectID string
+	OccurredAt    time.Time
+	IngestedAt    time.Time
+}
+
+// Freshness is what a caller checks to know whether a recall would see what they just wrote.
+//
+// Two numbers because they answer two questions. Stored is what an append confirms, and the caller
+// already knows it. Formed is what a recall depends on, and it is the one being asked about.
+type Freshness struct {
+	Scope string
+	// Stored is the highest offset appended in this scope.
+	Stored int64
+	// Formed is the highest offset whose turn has been through extraction, with nothing unformed
+	// below it. Absent until the scope's first turn forms — and absent is not zero, since zero is a
+	// real offset belonging to the first turn.
+	Formed    int64
+	HasFormed bool
 }
 
 // Claim is an extracted triple with the evidence for it, before it has been resolved or stored.

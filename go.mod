@@ -1,6 +1,6 @@
 // Taisce — memory for agents.
 //
-// Go 1.27.0, pinned exactly: a `go` directive plus a `toolchain` line means the version this module
+// Go 1.27.1, pinned exactly: a `go` directive plus a `toolchain` line means the version this module
 // is built with is a decision recorded in the file rather than whatever the builder happens to have.
 module github.com/taisce/taisce
 
