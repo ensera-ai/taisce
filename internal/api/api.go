@@ -37,6 +37,7 @@ const Version = "v1"
 // Server is the HTTP surface over one instance.
 type Server struct {
 	credentials  *credential.Store
+	audit        *pg.AuditStore
 	projects     *pg.ProjectStore
 	observations *pg.ObservationStore
 	eraser       *pg.Eraser
@@ -49,15 +50,63 @@ type Server struct {
 //
 // The credential store is separate from every other argument because it is the only one that reaches
 // the registry connection. That separation is the point: a memory query cannot read a key.
-func NewServer(credentials *credential.Store, projects *pg.ProjectStore,
+func NewServer(credentials *credential.Store, audit *pg.AuditStore, projects *pg.ProjectStore,
 	observations *pg.ObservationStore, eraser *pg.Eraser, recaller *recall.Recaller,
 	schema pg.Schema, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Server{
-		credentials: credentials, projects: projects, observations: observations,
+		credentials: credentials, audit: audit, projects: projects, observations: observations,
 		eraser: eraser, recaller: recaller, schema: schema, log: log,
+	}
+}
+
+// record appends to the ledger, and never fails the request that produced it.
+//
+// A ledger write that could fail an operation would make it a second thing that has to be working
+// for memory to work, and the failure would reach a customer as their write being refused for a
+// reason unrelated to their data. A ledger that takes the system down is one an operator switches
+// off, and a switched-off ledger records nothing at all.
+//
+// So a failure here is logged at ERROR and swallowed. That is a real weakness — a gap in the record
+// is exactly what the record exists to make impossible — and it is the better of the two, on a table
+// whose value is completeness over time rather than atomicity per row.
+func (s *Server) record(r *http.Request, operation string, grant credential.Grant,
+	outcome string, magnitude int) {
+
+	if err := s.audit.Append(r.Context(), domain.AuditEntry{
+		Operation:     operation,
+		Principal:     grant.CredentialID,
+		PrincipalKind: domain.PrincipalCredential,
+		Project:       grant.Project,
+		Magnitude:     magnitude,
+		Outcome:       outcome,
+	}); err != nil {
+		s.log.Error("the audit ledger did not record an operation",
+			"operation", operation, "principal", grant.CredentialID, "error", err)
+	}
+}
+
+// recordRefusedAuth records a credential that did not resolve.
+//
+// The principal is the token's prefix rather than the token, because the token is a secret and the
+// prefix is enough to recognise repeated attempts with one value. A stranger guessing produces a row
+// per attempt, which is what makes a burst of them visible.
+func (s *Server) recordRefusedAuth(r *http.Request, presented string) {
+	principal := "unpresented"
+	if len(presented) >= 12 {
+		principal = presented[:12]
+	} else if presented != "" {
+		principal = "malformed"
+	}
+	if err := s.audit.Append(r.Context(), domain.AuditEntry{
+		Operation:     domain.AuditAuthenticate,
+		Principal:     principal,
+		PrincipalKind: domain.PrincipalSystem,
+		Outcome:       domain.OutcomeRefused,
+	}); err != nil {
+		s.log.Error("the audit ledger did not record a refused authentication", "error", err)
 	}
 }
 
@@ -96,11 +145,13 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := bearer(r.Header.Get("Authorization"))
 		if !ok {
+			s.recordRefusedAuth(r, "")
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "a credential is required")
 			return
 		}
 		grant, err := s.credentials.Resolve(r.Context(), token)
 		if errors.Is(err, credential.ErrUnknown) {
+			s.recordRefusedAuth(r, token)
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "a credential is required")
 			return
 		}
@@ -127,6 +178,7 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 			if errors.Is(err, pg.ErrNoSuchProject) {
 				s.log.Warn("a credential names a project that is gone or suspended",
 					"credential", grant.CredentialID, "project", grant.Project)
+				s.record(r, domain.AuditAuthenticate, grant, domain.OutcomeRefused, 0)
 				writeError(w, http.StatusUnauthorized, "unauthenticated", "a credential is required")
 				return
 			}
@@ -210,6 +262,7 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 		writeError(w, http.StatusInternalServerError, "internal", "the turn could not be stored")
 		return
 	}
+	s.record(r, domain.AuditObserve, grant, domain.OutcomeAllowed, len(turn.Messages))
 	writeJSON(w, http.StatusCreated, observeResponse{
 		ID: stored.ID, Scope: stored.Scope, LogOffset: stored.LogOffset,
 	})
@@ -243,6 +296,7 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credent
 		formed := f.Formed
 		out.Formed = &formed
 	}
+	s.record(r, domain.AuditFreshness, grant, domain.OutcomeAllowed, 0)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -314,6 +368,8 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 		writeError(w, http.StatusInternalServerError, "internal", "the question could not be answered")
 		return
 	}
+	// The magnitude is how many facts came back. Never the question, and never what they said.
+	s.record(r, domain.AuditRecall, grant, domain.OutcomeAllowed, len(bundle.Facts))
 	writeJSON(w, http.StatusOK, renderBundle(bundle))
 }
 
@@ -378,6 +434,11 @@ func (s *Server) erase(w http.ResponseWriter, r *http.Request, grant credential.
 		writeError(w, http.StatusInternalServerError, "internal", "the erasure did not complete")
 		return
 	}
+	deleted := 0
+	for _, n := range receipt.Deleted {
+		deleted += n
+	}
+	s.record(r, domain.AuditErase, grant, domain.OutcomeAllowed, deleted)
 	writeJSON(w, http.StatusOK, eraseResponse{
 		RequestID: receipt.RequestID, Scope: receipt.Scope, DataSubjectID: receipt.DataSubjectID,
 		CompletedAt: receipt.CompletedAt, Deleted: receipt.Deleted, Residual: receipt.Residual,

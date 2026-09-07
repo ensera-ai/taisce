@@ -367,6 +367,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 
 	server := httptest.NewServer(api.NewServer(
 		credentials,
+		pg.NewAuditStore(pool, schema),
 		pg.NewProjectStore(pool, schema),
 		pg.NewObservationStore(pool),
 		pg.NewEraser(pool),
@@ -674,5 +675,130 @@ func TestACredentialNamingAProjectThatIsGoneIsRefused(t *testing.T) {
 	status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, orphan)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("a credential for a project that does not exist got %d", status)
+	}
+}
+
+// ── #86: the ledger ───────────────────────────────────────────────────────────────────────────
+
+// Every operation leaves a row naming the principal that performed it.
+//
+// Asserted over the whole journey rather than per handler, because the property is that nothing
+// happens unaccounted for — and a per-handler test would pass while a new handler added tomorrow
+// recorded nothing.
+func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
+	h := newHarness(t, "api_ledger")
+	ctx := context.Background()
+	audit := pg.NewAuditStore(h.pool, h.schema)
+
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"data_subject_id": "subject-1",
+		"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
+	}, http.StatusCreated, nil)
+	h.do(t, http.MethodGet, "/v1/freshness", nil, http.StatusOK, nil)
+	h.form(t)
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{"question": "What about Ensera?"},
+		http.StatusOK, nil)
+	h.do(t, http.MethodPost, "/v1/erasures", map[string]any{
+		"data_subject_id": "subject-1", "reason": "the ledger test",
+	}, http.StatusOK, nil)
+
+	entries, err := audit.Recent(ctx, 100)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	seen := map[string]domain.AuditEntry{}
+	for _, e := range entries {
+		seen[e.Operation] = e
+	}
+	for _, op := range []string{domain.AuditObserve, domain.AuditFreshness,
+		domain.AuditRecall, domain.AuditErase} {
+		e, ok := seen[op]
+		if !ok {
+			t.Fatalf("%s left no ledger row", op)
+		}
+		if e.Principal == "" {
+			t.Fatalf("%s was recorded with no principal", op)
+		}
+		if e.PrincipalKind != domain.PrincipalCredential {
+			t.Fatalf("%s was attributed to a %q", op, e.PrincipalKind)
+		}
+		if e.Project != "p1" {
+			t.Fatalf("%s was recorded against project %q", op, e.Project)
+		}
+		if e.Outcome != domain.OutcomeAllowed {
+			t.Fatalf("%s was recorded as %q", op, e.Outcome)
+		}
+	}
+	// The magnitude is a count of what was touched, and the erasure touched something.
+	if seen[domain.AuditErase].Magnitude == 0 {
+		t.Fatal("an erasure that deleted rows was recorded as touching nothing")
+	}
+}
+
+// The ledger holds nothing that could ever be the subject of an erasure request.
+//
+// This is the property that makes append-only unconditional rather than a conflict to manage: an
+// audit trail an erasure can delete is not one, and an audit trail an erasure cannot touch is
+// personal data surviving an erasure. Recording nothing askable avoids both.
+func TestTheLedgerHoldsNothingAPersonCouldAskToHaveRemoved(t *testing.T) {
+	h := newHarness(t, "api_ledger_privacy")
+	ctx := context.Background()
+
+	const subject = "a-very-distinctive-subject-reference"
+	const content = "a-very-distinctive-sentence-nobody-else-would-write"
+	const question = "a-very-distinctive-question"
+
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"data_subject_id": subject,
+		"messages":        []map[string]any{{"role": "user", "content": content}},
+	}, http.StatusCreated, nil)
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{"question": question},
+		http.StatusOK, nil)
+
+	// Read the whole table as text and look for anything that came from a person.
+	var dump string
+	if err := h.pool.QueryRow(ctx, h.schema.SQL(
+		`SELECT coalesce(string_agg(a::text, ' '), '') FROM {schema}.audit_entry a`)).
+		Scan(&dump); err != nil {
+		t.Fatalf("dump ledger: %v", err)
+	}
+	for name, needle := range map[string]string{
+		"the data subject": subject,
+		"message content":  content,
+		"the question":     question,
+	} {
+		if strings.Contains(dump, needle) {
+			t.Fatalf("the ledger holds %s, which makes it personal data surviving an erasure", name)
+		}
+	}
+}
+
+// A refused credential is recorded, because a repeated refusal is what an attack looks like from
+// inside the ledger.
+func TestARefusedCredentialIsRecorded(t *testing.T) {
+	h := newHarness(t, "api_ledger_refused")
+	ctx := context.Background()
+	audit := pg.NewAuditStore(h.pool, h.schema)
+
+	h.raw(t, http.MethodGet, "/v1/freshness", nil, "tsk_definitelynotarealtoken")
+	h.raw(t, http.MethodGet, "/v1/freshness", nil, "")
+
+	entries, err := audit.Recent(ctx, 100)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	refused := 0
+	for _, e := range entries {
+		if e.Operation == domain.AuditAuthenticate && e.Outcome == domain.OutcomeRefused {
+			refused++
+			// The token itself must never be in the ledger: a secret written into an append-only
+			// table is a secret that cannot be removed.
+			if strings.Contains(e.Principal, "definitelynotarealtoken") {
+				t.Fatalf("the ledger recorded a presented token: %q", e.Principal)
+			}
+		}
+	}
+	if refused < 2 {
+		t.Fatalf("%d refused authentications recorded, wanted both", refused)
 	}
 }

@@ -452,3 +452,95 @@ func (e Erasure) Clean() bool {
 	}
 	return true
 }
+
+// ── The audit ledger ──────────────────────────────────────────────────────────────────────────
+
+// Operations the ledger records. Closed, because an operation nobody has heard of cannot be counted,
+// and the point of the ledger is that the set of things which happen is knowable.
+const (
+	AuditObserve          = "observe"
+	AuditRecall           = "recall"
+	AuditErase            = "erase"
+	AuditFreshness        = "freshness"
+	AuditProjectCreate    = "project.create"
+	AuditProjectSuspend   = "project.suspend"
+	AuditProjectResume    = "project.resume"
+	AuditCredentialIssue  = "credential.issue"
+	AuditCredentialRevoke = "credential.revoke"
+	// AuditAuthenticate records a credential being refused. A successful authentication is recorded
+	// as the operation it went on to perform, because a row for every accepted request twice over
+	// would double the ledger and say nothing the operation's own row does not.
+	AuditAuthenticate = "authenticate"
+)
+
+// Who performed an operation.
+const (
+	PrincipalCredential = "credential"
+	PrincipalOperator   = "operator"
+	// PrincipalSystem is the driver, the retention sweep, anything the instance does for itself. It
+	// is distinguished so that "nobody asked for this" is visible rather than looking like an
+	// operator acting at three in the morning.
+	PrincipalSystem = "system"
+)
+
+// Whether it was allowed. A refused operation is the more interesting row: a repeated refusal is what
+// an attack looks like from inside the ledger.
+const (
+	OutcomeAllowed = "allowed"
+	OutcomeRefused = "refused"
+)
+
+// AuditEntry is one thing that happened.
+//
+// It holds no data subject, no question, no quote and no content — deliberately, and that is what
+// makes the ledger append-only without conflicting with erasure. An audit trail an erasure can delete
+// is not one; an audit trail an erasure cannot touch is personal data surviving an erasure. Recording
+// nothing that could be asked about avoids both.
+//
+// The cost: a person can be told that a recall happened against a project, by which credential, and
+// when — never which of their memories it read.
+type AuditEntry struct {
+	Operation string
+	// Principal is an identifier that resolves in the registry — a credential id or a session id.
+	// Never a name or an address, because those are personal data and this record holds none.
+	Principal     string
+	PrincipalKind string
+	// Project is empty for instance-level operations.
+	Project string
+	// Magnitude is how much the operation touched: facts returned, rows deleted, messages appended.
+	// A number rather than a description, because a description summarises content.
+	Magnitude  int
+	Outcome    string
+	OccurredAt time.Time
+}
+
+// Validate refuses an entry that could not be counted.
+//
+// Checked before the insert as well as by the schema, so that the caller gets the reason rather than
+// a constraint violation four frames down naming a column.
+func (e AuditEntry) Validate() error {
+	switch e.Operation {
+	case AuditObserve, AuditRecall, AuditErase, AuditFreshness,
+		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,
+		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate:
+	default:
+		return fmt.Errorf("audit entry names operation %q, which is not one the ledger records", e.Operation)
+	}
+	switch e.PrincipalKind {
+	case PrincipalCredential, PrincipalOperator, PrincipalSystem:
+	default:
+		return fmt.Errorf("audit entry names principal kind %q", e.PrincipalKind)
+	}
+	if e.Outcome != OutcomeAllowed && e.Outcome != OutcomeRefused {
+		return fmt.Errorf("audit entry has outcome %q", e.Outcome)
+	}
+	if strings.TrimSpace(e.Principal) == "" {
+		// An unattributed row is the one thing this table cannot hold: the whole point is that every
+		// operation has somebody behind it.
+		return fmt.Errorf("audit entry has no principal, and an unattributed operation is what this record exists to prevent")
+	}
+	if e.Magnitude < 0 {
+		return fmt.Errorf("audit entry has a negative magnitude")
+	}
+	return nil
+}

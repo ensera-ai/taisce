@@ -305,3 +305,83 @@ func TestARetentionThatWouldDeleteOnWriteIsRefused(t *testing.T) {
 		t.Fatalf("a real retention policy was refused: %v", err)
 	}
 }
+
+// ── #86: the ledger cannot be rewritten ───────────────────────────────────────────────────────
+
+// Append-only, enforced by the database rather than intended by the application.
+//
+// A ledger the application is trusted not to rewrite is a ledger whose integrity is a code review.
+// This asserts it against a superuser connection: if the strongest identity available cannot change a
+// row, nothing weaker can either — including a migration written in a hurry.
+func TestTheAuditLedgerCannotBeRewrittenOrDeleted(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+
+	if _, err := pool.Exec(ctx, `INSERT INTO `+tenant+`.audit_entry
+	    (operation, principal, principal_kind, outcome) VALUES ('recall','cred-1','credential','allowed')`); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	_, err := pool.Exec(ctx, `UPDATE `+tenant+`.audit_entry SET outcome = 'refused'`)
+	if err == nil {
+		t.Fatal("an audit row was rewritten; a record that can be changed is not a record")
+	}
+	if !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `DELETE FROM `+tenant+`.audit_entry`)
+	if err == nil {
+		t.Fatal("an audit row was deleted")
+	}
+	if !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+
+	// And the row is still there, which is the assertion the two above are for.
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM `+tenant+`.audit_entry`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("%d rows survived", n)
+	}
+}
+
+// The ledger records no operation it does not know about, so a count of what happened is a count of
+// everything that happened.
+func TestTheLedgerRefusesAnOperationItDoesNotKnow(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+
+	for _, bad := range []struct{ column, value string }{
+		{"operation", "exfiltrate"},
+		{"principal_kind", "ghost"},
+		{"outcome", "maybe"},
+	} {
+		sql := `INSERT INTO ` + tenant + `.audit_entry (operation, principal, principal_kind, outcome)
+		        VALUES ('recall','cred-1','credential','allowed')`
+		switch bad.column {
+		case "operation":
+			sql = `INSERT INTO ` + tenant + `.audit_entry (operation, principal, principal_kind, outcome)
+			       VALUES ('` + bad.value + `','cred-1','credential','allowed')`
+		case "principal_kind":
+			sql = `INSERT INTO ` + tenant + `.audit_entry (operation, principal, principal_kind, outcome)
+			       VALUES ('recall','cred-1','` + bad.value + `','allowed')`
+		case "outcome":
+			sql = `INSERT INTO ` + tenant + `.audit_entry (operation, principal, principal_kind, outcome)
+			       VALUES ('recall','cred-1','credential','` + bad.value + `')`
+		}
+		if _, err := pool.Exec(ctx, sql); err == nil {
+			t.Fatalf("%s=%q was accepted", bad.column, bad.value)
+		}
+	}
+
+	// And an unattributed row, which is the one thing this table exists to make impossible.
+	if _, err := pool.Exec(ctx, `INSERT INTO `+tenant+`.audit_entry
+	    (operation, principal, principal_kind, outcome) VALUES ('recall','','credential','allowed')`); err == nil {
+		t.Fatal("an operation was recorded with no principal behind it")
+	}
+}
