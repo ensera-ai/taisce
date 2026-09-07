@@ -22,7 +22,7 @@ computed on your own substrate rather than asserted by somebody you have to trus
 | [`docs/01-decisions.md`](docs/01-decisions.md) | Every decision, closed, with what was rejected |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How work is tracked |
 | [`CLAUDE.md`](CLAUDE.md) | The working rules, in full |
-| [issues](https://github.com/althunibat/taisce/issues) | The roadmap — the source of truth for scope |
+| [issues](https://github.com/ensera-ai/taisce/issues) | The roadmap — the source of truth for scope |
 
 ## Running it
 

@@ -2,7 +2,7 @@
 //
 // Go 1.27.1, pinned exactly: a `go` directive plus a `toolchain` line means the version this module
 // is built with is a decision recorded in the file rather than whatever the builder happens to have.
-module github.com/taisce/taisce
+module github.com/ensera-ai/taisce
 
 go 1.27.1
 

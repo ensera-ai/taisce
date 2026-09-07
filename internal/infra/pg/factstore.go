@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/taisce/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/domain"
 )
 
 // FactStore resolves entities and asserts facts with their evidence.

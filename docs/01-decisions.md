@@ -147,6 +147,34 @@ work).
 **How hard to undo.** Easy. It is an ordering, not a structure, and the conformance suite is written
 before any adapter moves so a fourth language is held to the same contract as the first three.
 
+### D41 — The name is Taisce, the owner is Ensera, and the module path is `github.com/ensera-ai/taisce`
+
+Stated by the owner on 2026-09-07 and recorded because two of these three are permanent.
+
+**One project, one name.** The work that preceded this repository under a different name is the same
+project and the same ownership; the name it carries now is Taisce. There is no second system to
+migrate from, which is why the earlier caution about importing from it was a discipline about
+re-deriving reasoning rather than a boundary between two owners.
+
+**Ensera holds it.** That settles the question that blocked reuse: relicensing under Apache-2.0 is the
+copyright holder's to do, and the holder is the party doing it. `LICENSE` and `NOTICE` name Ensera.
+
+**`github.com/ensera-ai/taisce`.** Baked into every import in this repository and into every Go module
+that will ever depend on it.
+
+**Why it is taken before publishing rather than after.** A Go module path cannot be changed without
+being a different module: consumers do not follow a rename, they break. Registries refuse to reuse a
+version number. The cost of choosing now is one search and replace across 21 files; the cost of
+choosing after the first tag is a permanent redirect and a second name in every dependency graph.
+
+**Rejected:** a personal namespace (the repository's remote today, and it makes the project look like
+one person's side project to exactly the audience being courted, while making a later move to an
+organisation the breaking change above); a bare `taisce` vanity path over a redirect (a permanent
+dependency on DNS and a redirect that must outlive interest in maintaining it, for a shorter string).
+
+**How hard to undo.** The name and the module path are permanent for anything published. Ownership is
+a matter of record rather than of code.
+
 ---
 
 ## Substrate

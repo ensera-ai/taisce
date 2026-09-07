@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/taisce/taisce/internal/domain"
-	"github.com/taisce/taisce/internal/extract"
+	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/extract"
 )
 
 // Model proposes claims by asking a chat model.

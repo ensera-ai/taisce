@@ -12,7 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/taisce/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/domain"
 )
 
 // Proposal is what a model returns, before anything has been checked.

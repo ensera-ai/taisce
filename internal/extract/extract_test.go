@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/taisce/taisce/internal/domain"
-	"github.com/taisce/taisce/internal/extract"
+	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/extract"
 )
 
 // The model is stubbed HERE and only here, and it is not standing in for a database or a service.

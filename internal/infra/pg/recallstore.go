@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/taisce/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/domain"
 )
 
 // RecallStore reads the anchors a question names and the facts about them.

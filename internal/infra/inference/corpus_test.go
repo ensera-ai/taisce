@@ -39,11 +39,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/taisce/taisce/internal/domain"
-	"github.com/taisce/taisce/internal/extract"
-	"github.com/taisce/taisce/internal/infra/inference"
-	"github.com/taisce/taisce/internal/infra/pg"
-	"github.com/taisce/taisce/internal/migrate"
+	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/extract"
+	"github.com/ensera-ai/taisce/internal/infra/inference"
+	"github.com/ensera-ai/taisce/internal/infra/pg"
+	"github.com/ensera-ai/taisce/internal/migrate"
 )
 
 type corpusCase struct {

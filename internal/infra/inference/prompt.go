@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/taisce/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/domain"
 )
 
 // The extraction prompt is a file because it is prose, and prose is reviewed as prose. It is

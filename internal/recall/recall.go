@@ -15,7 +15,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/taisce/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/domain"
 )
 
 // longestAnchor is the most words an entity name is assumed to have.

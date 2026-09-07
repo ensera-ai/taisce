@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/taisce/taisce/internal/infra/inference"
+	"github.com/ensera-ai/taisce/internal/infra/inference"
 )
 
 // ── The egress guard ──────────────────────────────────────────────────────────────────────────

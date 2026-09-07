@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/taisce/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/domain"
 )
 
 // ── The prompt moved out of Go and said the same thing ────────────────────────────────────────

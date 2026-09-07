@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/taisce/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/domain"
 )
 
 // ── #67, the part that needs no ruling ────────────────────────────────────────────────────────
