@@ -98,7 +98,7 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 		if _, err := tx.Exec(ctx, schema.SQL(insertFactSQL),
 			id, scope, nullIfEmptyString(subjectID), nullIfEmptyString(objectID),
 			claim.Predicate, claim.Statement, validFrom, claim.Confidence,
-			nullIfEmpty(dataSubjectID), string(claim.Cardinality)); err != nil {
+			nullIfEmpty(dataSubjectID), string(claim.Cardinality), string(speaker)); err != nil {
 			return fmt.Errorf("insert fact: %w", err)
 		}
 
@@ -218,8 +218,8 @@ UPDATE {schema}.entity
 const insertFactSQL = `
 INSERT INTO {schema}.fact
     (fact_id, scope, subject_entity_id, object_entity_id, predicate, statement,
-     valid, confidence, data_subject_id, cardinality)
-VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9, $10)`
+     valid, confidence, data_subject_id, cardinality, source_role)
+VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9, $10, $11)`
 
 // Closes whatever this subject currently holds for this relation, at the moment the new one starts.
 //

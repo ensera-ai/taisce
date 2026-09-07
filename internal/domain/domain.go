@@ -409,6 +409,13 @@ type CitedFact struct {
 	// AnchoredOn is the entity that brought this fact into the bundle. A fact can name two anchors;
 	// this is the one it was reached through, which is what makes the path a caller can inspect.
 	AnchoredOn string
+	// SourceRole is the role of the message this fact was extracted from.
+	//
+	// It travels with the fact to the caller, always, because a fact shown without saying it came
+	// from a fetched page asks the reader to trust our sources as if they were their user's words.
+	// A recall returns only what the principal said unless the caller asks for more — and a caller
+	// who asks is told which is which rather than given a merged list.
+	SourceRole string
 }
 
 // Bundle is what a recall returns.

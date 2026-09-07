@@ -370,6 +370,6 @@ func (stubStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, 
 	return nil, nil
 }
 
-func (stubStore) FactsAbout(context.Context, []string, []string, int) ([]domain.CitedFact, error) {
+func (stubStore) FactsAbout(context.Context, []string, []string, int, []string) ([]domain.CitedFact, error) {
 	return nil, nil
 }

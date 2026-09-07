@@ -91,8 +91,22 @@ SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity
 // confidence and not salience, because each of those is a stage that has to be justified by a
 // measurement it improves — and introduced before the plain path is measured, it becomes impossible
 // to say which stage is doing the work or which is doing harm.
-func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int) ([]domain.CitedFact, error) {
-	rows, err := s.pool.Query(ctx, s.schema.SQL(selectFactsAboutSQL), scopes, entityIDs, limit)
+// FactsAbout returns facts naming the given entities, from the sources the caller admits.
+//
+// `sources` is the set of message roles whose facts may come back. It is an ARGUMENT rather than a
+// default because that is what makes the bound impossible to forget: there is no call that omits it
+// and gets everything, in the same way there is no read that omits the authorised project set and
+// gets every project (D24).
+func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int,
+	sources []string) ([]domain.CitedFact, error) {
+
+	if len(sources) == 0 {
+		// An empty set returns nothing rather than everything. A caller that computed its source
+		// list and got nothing meant nothing; the alternative — treating empty as unrestricted — is
+		// the failure the whole mechanism exists to prevent.
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, s.schema.SQL(selectFactsAboutSQL), scopes, entityIDs, limit, sources)
 	if err != nil {
 		return nil, fmt.Errorf("read facts: %w", err)
 	}
@@ -103,7 +117,7 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 		var f domain.CitedFact
 		var subject, object *string
 		if err := rows.Scan(&f.ID, &f.Scope, &subject, &f.Predicate, &object, &f.Statement,
-			&f.Confidence, &f.ValidFrom, &f.AnchoredOn,
+			&f.Confidence, &f.ValidFrom, &f.AnchoredOn, &f.SourceRole,
 			&f.Evidence.SourceObservationID, &f.Evidence.SourceOrdinal, &f.Evidence.Quote,
 			&f.Evidence.ByteStart, &f.Evidence.ByteEnd, &f.Evidence.ExtractorVersion); err != nil {
 			return nil, err
@@ -131,21 +145,25 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 const selectFactsAboutSQL = `
 WITH reachable AS (
     SELECT f.fact_id, f.scope, f.subject_entity_id, f.predicate, f.object_entity_id, f.statement,
-           f.confidence, lower(f.valid) AS valid_from, f.subject_entity_id AS anchored_on
+           f.confidence, lower(f.valid) AS valid_from, f.subject_entity_id AS anchored_on,
+           f.source_role
       FROM {schema}.fact f
      WHERE f.scope = ANY($1)
        AND f.subject_entity_id = ANY($2::uuid[])
+       AND f.source_role = ANY($4)
        AND upper_inf(f.valid) AND upper_inf(f.known)
     UNION ALL
     SELECT f.fact_id, f.scope, f.subject_entity_id, f.predicate, f.object_entity_id, f.statement,
-           f.confidence, lower(f.valid) AS valid_from, f.object_entity_id AS anchored_on
+           f.confidence, lower(f.valid) AS valid_from, f.object_entity_id AS anchored_on,
+           f.source_role
       FROM {schema}.fact f
      WHERE f.scope = ANY($1)
        AND f.object_entity_id = ANY($2::uuid[])
+       AND f.source_role = ANY($4)
        AND upper_inf(f.valid) AND upper_inf(f.known)
 )
 SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name, r.statement,
-       r.confidence, r.valid_from, r.anchored_on::text,
+       r.confidence, r.valid_from, r.anchored_on::text, r.source_role,
        e.source_observation_id::text, e.source_ordinal, e.quote, e.byte_start, e.byte_end,
        e.extractor_version
   FROM reachable r

@@ -19,9 +19,9 @@ func TestARelationOutsideTheVocabularyCannotBeStored(t *testing.T) {
 	// `employed_by` is a second spelling of `works_at`. It is the realistic failure — not a typo,
 	// but a synonym an extractor would produce and no traversal would ever match.
 	_, err := pool.Exec(ctx, schema.SQL(`
-		INSERT INTO {schema}.fact (fact_id, scope, predicate, statement, valid, cardinality)
+		INSERT INTO {schema}.fact (fact_id, scope, predicate, statement, valid, cardinality, source_role)
 		VALUES (gen_random_uuid(), 'p1', 'employed_by', 'Marta is employed by Ensera.',
-		        tstzrange(now(), NULL), 'many')`))
+		        tstzrange(now(), NULL), 'many', 'user')`))
 	if err == nil {
 		t.Fatal("a relation outside the vocabulary was stored; the set is documented, not closed")
 	}
@@ -29,9 +29,9 @@ func TestARelationOutsideTheVocabularyCannotBeStored(t *testing.T) {
 	// And the admitted spelling of the same relation goes in, so the refusal is the vocabulary
 	// working rather than the table being unwritable.
 	if _, err := pool.Exec(ctx, schema.SQL(`
-		INSERT INTO {schema}.fact (fact_id, scope, predicate, statement, valid, cardinality)
+		INSERT INTO {schema}.fact (fact_id, scope, predicate, statement, valid, cardinality, source_role)
 		VALUES (gen_random_uuid(), 'p1', 'works_at', 'Marta works at Ensera.',
-		        tstzrange(now(), NULL), 'many')`)); err != nil {
+		        tstzrange(now(), NULL), 'many', 'user')`)); err != nil {
 		t.Fatalf("the admitted relation must be storable: %v", err)
 	}
 }
@@ -47,9 +47,9 @@ func TestRetiringAPredicateInUseIsRefused(t *testing.T) {
 	schema, _ := NewSchema(tenant)
 
 	if _, err := pool.Exec(ctx, schema.SQL(`
-		INSERT INTO {schema}.fact (fact_id, scope, predicate, statement, valid, cardinality)
+		INSERT INTO {schema}.fact (fact_id, scope, predicate, statement, valid, cardinality, source_role)
 		VALUES (gen_random_uuid(), 'p1', 'lives_in', 'The user lives in Dublin.',
-		        tstzrange(now(), NULL), 'one')`)); err != nil {
+		        tstzrange(now(), NULL), 'one', 'user')`)); err != nil {
 		t.Fatalf("seed fact: %v", err)
 	}
 	if _, err := pool.Exec(ctx,

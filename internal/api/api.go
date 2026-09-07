@@ -333,7 +333,10 @@ type factPayload struct {
 	Confidence float32 `json:"confidence"`
 	// AnchoredOn is the entity this fact was reached through. A fact can name two anchors, and which
 	// one brought it in is the difference between a result and a traversal a caller can check.
-	AnchoredOn string          `json:"anchored_on"`
+	AnchoredOn string `json:"anchored_on"`
+	// SourceRole is who said it. Always present, because a fact shown without saying it came from a
+	// fetched page asks the reader to trust our sources as if they were their user's words.
+	SourceRole string          `json:"source_role"`
 	Evidence   evidencePayload `json:"evidence"`
 }
 
@@ -385,6 +388,7 @@ func renderBundle(b domain.Bundle) recallResponse {
 		out.Facts = append(out.Facts, factPayload{
 			FactID: f.ID, Subject: f.Subject, Predicate: f.Predicate, Object: f.Object,
 			Statement: f.Statement, Confidence: f.Confidence, AnchoredOn: f.AnchoredOn,
+			SourceRole: f.SourceRole,
 			Evidence: evidencePayload{
 				ObservationID: f.Evidence.SourceObservationID,
 				SourceOrdinal: f.Evidence.SourceOrdinal,

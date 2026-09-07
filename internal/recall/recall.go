@@ -32,7 +32,10 @@ type Store interface {
 	Anchors(ctx context.Context, scopes, terms []string) ([]domain.Anchor, error)
 	// FactsAbout returns the currently-valid facts naming any of the given entities, with their
 	// evidence, up to limit+1 rows so the caller can tell a full result from a truncated one.
-	FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int) ([]domain.CitedFact, error)
+	//
+	// `sources` is the set of message roles whose facts may be returned, and it is an argument
+	// rather than a default so that no call can omit it and get everything.
+	FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int, sources []string) ([]domain.CitedFact, error)
 }
 
 // Recaller answers questions against one tenant's memory.
@@ -65,7 +68,33 @@ func New(store Store, limit int) *Recaller {
 // A question naming nothing we know about is an ordinary outcome — it is most questions, early in a
 // scope's life. A caller made to distinguish that from a failure will end up treating failures as
 // ordinary.
+// PrincipalSources is what a recall returns unless the caller asks for more: facts extracted from
+// what the principal themselves said.
+//
+// # Why this is the default rather than an option
+//
+// A tool result, a fetched page or a document is written by somebody who is not the person the memory
+// is about, and text reaching extraction from those sources has been measured planting a fact that
+// passes every structural check the product makes — an admitted relation, a verbatim quote, an exact
+// span. Detecting that is undecidable. Knowing who said it is not.
+//
+// So the ordinary bundle contains what the person said. Everything else is still stored, still
+// citable, and still returned to a caller who asks for it — labelled, so a reader can tell a
+// statement from something a web page claimed.
+var PrincipalSources = []string{string(domain.RoleUser)}
+
+// Recall answers a question from what the principal said.
 func (r *Recaller) Recall(ctx context.Context, scopes []string, question string) (domain.Bundle, error) {
+	return r.RecallFrom(ctx, scopes, question, PrincipalSources)
+}
+
+// RecallFrom answers a question from the sources the caller admits.
+//
+// The wider call, for a caller that genuinely wants what a document or a tool result asserted. What
+// it gets back carries the role on every fact, so the distinction survives into whatever reads the
+// bundle — a merged list with no labels would be the same failure with an extra step.
+func (r *Recaller) RecallFrom(ctx context.Context, scopes []string, question string,
+	sources []string) (domain.Bundle, error) {
 	if len(scopes) == 0 {
 		return domain.Bundle{}, nil
 	}
@@ -90,7 +119,7 @@ func (r *Recaller) Recall(ctx context.Context, scopes []string, question string)
 	// One more than the limit, so a full result is distinguishable from a truncated one without a
 	// second count query — and without the caller having to guess from the row count whether they
 	// are looking at everything.
-	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.limit+1)
+	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.limit+1, sources)
 	if err != nil {
 		return domain.Bundle{}, err
 	}
