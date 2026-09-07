@@ -131,3 +131,20 @@ trading as **Ensera**.
 
 Commits before 2026-09 carry an earlier address for the same author, which is why the history shows
 two.
+
+## Two repositories
+
+**`althunibat/taisce`** is the working history: every commit, with the measurement that produced it,
+the alternative it rejected, and the things that turned out to be wrong. Work happens here.
+
+**`ensera-ai/taisce`** is the published repository: one commit per release. Somebody arriving to
+evaluate this should read what the software is, not excavate how it came to be — those are different
+documents for different readers, and collapsing them serves neither.
+
+The working history is not hidden for being embarrassing. It is where a decision can be traced to the
+run that produced it, which is the thing that makes the decision register trustworthy rather than
+merely confident.
+
+`scripts/publish.sh` moves one to the other. It runs every check first, and it refuses to write a
+commit message for you: the published history is one line per release, and that line is the whole
+account a reader gets.
