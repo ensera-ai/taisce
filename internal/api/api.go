@@ -488,6 +488,20 @@ type evidencePayload struct {
 	Quote         string `json:"quote"`
 	ByteStart     int    `json:"byte_start"`
 	ByteEnd       int    `json:"byte_end"`
+	// Context is the words around the quote, from the same message. A quote and a span prove a fact
+	// was in the message and say nothing about whether the sentence asserted it, hedged it or denied
+	// it — which is the difference between a receipt and a legible receipt.
+	//
+	// Empty when the message is gone, which is what an erasure leaves behind.
+	Context string `json:"context"`
+	// ContextStart is where the context begins in the message. The quote sits at
+	// `byte_start - context_start` inside it, which is what lets a reader highlight the cited words
+	// rather than search for them.
+	ContextStart int `json:"context_start"`
+	// ContextComplete says the context IS the whole message. Without it a window that happened to fit
+	// and one that was cut are indistinguishable, and a reader assuming the first has read a sentence
+	// that continues.
+	ContextComplete bool `json:"context_complete"`
 }
 
 // recallHandler answers a question against the scopes the credential authorises AND the caller asked
@@ -550,11 +564,14 @@ func renderBundle(b domain.Bundle) recallResponse {
 			Statement: f.Statement, Confidence: f.Confidence, AnchoredOn: f.AnchoredOn,
 			SourceRole: f.SourceRole, CoDerivedWith: coDerived(f.CoDerivedWith),
 			Evidence: evidencePayload{
-				ObservationID: f.Evidence.SourceObservationID,
-				SourceOrdinal: f.Evidence.SourceOrdinal,
-				Quote:         f.Evidence.Quote,
-				ByteStart:     f.Evidence.ByteStart,
-				ByteEnd:       f.Evidence.ByteEnd,
+				ObservationID:   f.Evidence.SourceObservationID,
+				SourceOrdinal:   f.Evidence.SourceOrdinal,
+				Quote:           f.Evidence.Quote,
+				ByteStart:       f.Evidence.ByteStart,
+				ByteEnd:         f.Evidence.ByteEnd,
+				Context:         f.Evidence.Context.Text,
+				ContextStart:    f.Evidence.Context.ByteStart,
+				ContextComplete: f.Evidence.Context.Complete,
 			},
 		})
 	}

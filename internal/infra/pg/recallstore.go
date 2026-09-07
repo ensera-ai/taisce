@@ -109,7 +109,8 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 		// the failure the whole mechanism exists to prevent.
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, s.schema.SQL(selectFactsAboutSQL), scopes, entityIDs, limit, sources)
+	rows, err := s.pool.Query(ctx, s.schema.SQL(selectFactsAboutSQL), scopes, entityIDs, limit, sources,
+		domain.ContextWindow)
 	if err != nil {
 		return nil, fmt.Errorf("read facts: %w", err)
 	}
@@ -119,11 +120,27 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 	for rows.Next() {
 		var f domain.CitedFact
 		var subject, object *string
+		var window []byte
+		var windowStart, messageBytes *int
 		if err := rows.Scan(&f.ID, &f.Scope, &subject, &f.Predicate, &object, &f.Statement,
 			&f.Confidence, &f.ValidFrom, &f.AnchoredOn, &f.SourceRole,
 			&f.Evidence.SourceObservationID, &f.Evidence.SourceOrdinal, &f.Evidence.Quote,
-			&f.Evidence.ByteStart, &f.Evidence.ByteEnd, &f.Evidence.ExtractorVersion); err != nil {
+			&f.Evidence.ByteStart, &f.Evidence.ByteEnd, &f.Evidence.ExtractorVersion,
+			&window, &windowStart, &messageBytes); err != nil {
 			return nil, err
+		}
+		// No message means no context, and the fact still comes back. A message can be gone because
+		// it was erased, and a citation that lost its surrounding words has lost legibility rather
+		// than validity — the quote and the span are still what they were. Refusing the fact here
+		// would make an erasure elsewhere in the turn look like memory loss.
+		if window != nil && windowStart != nil && messageBytes != nil {
+			f.Evidence.Context = domain.RawWindow{
+				Bytes:        window,
+				Start:        *windowStart,
+				QuoteStart:   f.Evidence.ByteStart,
+				QuoteEnd:     f.Evidence.ByteEnd,
+				MessageBytes: *messageBytes,
+			}.Legible()
 		}
 		// An end whose entity was erased is left blank rather than dropped. The fact is still a
 		// fact and its evidence still resolves; what it has lost is a hop, and reporting the loss
@@ -145,6 +162,22 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 //
 // The anchor id is carried through both arms, so a reader can see which entity brought a fact into
 // the bundle rather than having to work it out from the ends.
+//
+// # The context window is cut in the database, and the scope predicate is on the join that cuts it
+//
+// The span is bytes, so the window is byte arithmetic — and doing it here rather than in the server
+// is what stops a hundred-kilobyte message crossing the wire so that three hundred bytes of it can
+// be shown. `substring` clamps at both ends, so a span near either edge of a message returns a
+// shorter window rather than failing.
+//
+// The join reaches the message through its observation with `src.scope = r.scope` written on it. The
+// fact has already passed the scope predicate and the evidence names an observation that produced
+// it, so a cross-scope reach would need a defect upstream — which is exactly why the predicate is
+// here as well. Text is the thing a boundary failure leaks, and this is the one join in the read
+// path that returns text nobody has cited.
+//
+// Both joins are LEFT: an erased message leaves a fact whose quote and span are still what they
+// were, and dropping the row would make an erasure elsewhere in the turn look like memory loss.
 const selectFactsAboutSQL = `
 WITH reachable AS (
     SELECT f.fact_id, f.scope, f.subject_entity_id, f.predicate, f.object_entity_id, f.statement,
@@ -168,10 +201,21 @@ WITH reachable AS (
 SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name, r.statement,
        r.confidence, r.valid_from, r.anchored_on::text, r.source_role,
        e.source_observation_id::text, e.source_ordinal, e.quote, e.byte_start, e.byte_end,
-       e.extractor_version
+       e.extractor_version,
+       substring(convert_to(m.content, 'UTF8')
+                 from greatest(0, e.byte_start - $5) + 1
+                 for  (e.byte_end + $5) - greatest(0, e.byte_start - $5)),
+       greatest(0, e.byte_start - $5),
+       octet_length(m.content)
   FROM reachable r
   JOIN {schema}.fact_evidence e ON e.fact_id = r.fact_id
   LEFT JOIN {schema}.entity s ON s.entity_id = r.subject_entity_id
   LEFT JOIN {schema}.entity o ON o.entity_id = r.object_entity_id
+  LEFT JOIN {schema}.observation src
+         ON src.observation_id = e.source_observation_id
+        AND src.scope = r.scope
+  LEFT JOIN {schema}.turn_message m
+         ON m.observation_id = src.observation_id
+        AND m.ordinal = e.source_ordinal
  ORDER BY r.predicate, r.fact_id
  LIMIT $3`

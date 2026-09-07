@@ -684,6 +684,56 @@ truncation for the one cut it does make).
 **How hard to undo.** Additive. When ranking arrives with the measurement that justifies it, a verdict
 can sit beside these counts — which are facts about the retrieval and stay true whatever ranks it.
 
+### D53 — A citation carries a bounded window of the message, not the message
+
+A fact comes back with its quote, the span the quote occupies, and roughly 160 bytes of the message
+either side of it, cut at word boundaries and labelled with whether that is the whole message.
+
+**A span alone is verifiable and not legible.** It proves the words were in the message and says
+nothing about the sentence they were in — whether it asserted the thing, hedged it, attributed it to
+somebody else or denied it. A reader checking a fact has to go and read the message, and no path
+returns one. The words either side are already stored, already scoped and already erased with the
+message they belong to, so returning them searches nothing, ranks nothing and makes no message
+reachable that the fact did not already reach.
+
+**Why not the whole message.** It is the obvious answer and it fails twice. A bundle whose facts each
+carry a paragraph is passages with facts attached, which inverts what the product is; and it would
+introduce passage retrieval through the citation, where a caller cannot ask for it or decline it and
+where it arrives with no measurement behind it. Bounding the window also bounds the cost: what a fact
+costs is the same whether it came from a sentence or from a pasted document.
+
+**Why not the sentence.** Sentence detection is a heuristic that is wrong on abbreviations, decimals
+and lists, and being wrong means a citation that stops mid-clause while claiming to be a sentence. A
+byte window makes no claim it cannot keep: it is a window, it says where it starts, and it says
+whether anything was left out.
+
+**Why a constant and not a setting.** Nothing has asked to vary it, and a setting is a default nobody
+tunes plus a branch nobody exercises. What a caller does control is the character budget, which counts
+the context — so a caller who cannot afford legible citations gets fewer facts rather than a knob to
+find. The quote and the window are both charged even though the window contains the quote, because
+both are on the wire and a budget that describes a smaller payload than the one that arrives is worse
+than no budget.
+
+**The window is cut in the database.** The span is bytes, so the window is byte arithmetic, and doing
+it in the query is what stops a hundred-kilobyte message crossing the wire so that three hundred bytes
+of it can be shown. The join that reads the message carries the scope predicate: it is the one join in
+the read path that returns text nobody cited, and a bound that holds only while everything above it is
+correct is not a bound.
+
+**When the message is gone the fact still comes back**, with its quote, its span, and no context — and
+the bundle says a citation lost its context. Dropping the fact instead would make an erasure elsewhere
+in the turn look like memory loss.
+
+**Rejected:** the whole message (inverts the bundle and smuggles in passage retrieval); sentence
+segmentation (a heuristic making a claim it cannot keep); a per-request window size (a knob with no
+reader, and the budget already expresses the constraint); charging only the quote (describes a payload
+the caller does not receive); an inner join on the message (a fact vanishing because its context did).
+
+**How hard to undo.** Easy in one direction and not the other. Widening the window or adding a
+per-request size is additive. Removing the field is a change to a published contract, and a caller's
+prompt template that renders context is broken by its absence — which is the ordinary asymmetry of
+anything that goes on the wire.
+
 ---
 
 ## Substrate

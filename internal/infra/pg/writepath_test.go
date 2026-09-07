@@ -15,6 +15,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/domain"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
+	"github.com/ensera-ai/taisce/internal/recall"
 )
 
 // A database is required. These tests assert behaviour that lives in DDL and in transactions —
@@ -1394,5 +1395,215 @@ func TestASubjectThatNamesNothingIsStorableAsARefusal(t *testing.T) {
 		Predicate: "has_status", Statement: "x", Quote: "y", Reason: "vibes",
 	}); err == nil {
 		t.Fatal("a reason nobody has heard of was accepted; the set is not closed")
+	}
+}
+
+// ── #60: a citation is legible ────────────────────────────────────────────────────────────────
+//
+// The words around a quote come back with it, cut in the database and bounded there. A span alone
+// proves a phrase was in a message and says nothing about whether the sentence asserted it.
+
+func TestACitationCarriesTheWordsAroundItAndNothingFromAnotherMessage(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_context")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	// Long enough on both sides that the window has to cut, which is the case that can go wrong.
+	filler := strings.Repeat("we went over the migration again and nothing broke. ", 30)
+	first := "Nobody has mentioned Ensera in this conversation yet. " + filler
+	quote := "I work at Ensera"
+	second := filler + quote + ", in the Dublin office, and have done for years. " + filler
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: first},
+		domain.Message{Ordinal: 1, Role: domain.RoleUser, Content: second},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	start := strings.Index(second, quote)
+	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+		Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany,
+		Object: "Ensera", Statement: "The user works at Ensera.", Quote: quote,
+		ByteStart: start, ByteEnd: start + len(quote), SourceOrdinal: 1,
+	}); err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+
+	var ensera string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT entity_id::text FROM {schema}.entity WHERE normalized_name = 'ensera'`)).Scan(&ensera); err != nil {
+		t.Fatalf("find entity: %v", err)
+	}
+	got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{ensera}, 10, []string{"user"})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one fact, got %d", len(got))
+	}
+	c := got[0].Evidence.Context
+
+	if !strings.Contains(c.Text, quote) {
+		t.Fatalf("the context does not contain the words it is context for: %q", c.Text)
+	}
+	// The sentence around the quote is what makes the receipt legible rather than only verifiable.
+	if !strings.Contains(c.Text, "Dublin office") {
+		t.Fatalf("the context stopped at the quote, so it explains nothing: %q", c.Text)
+	}
+	// Evidence names the MESSAGE. A window taken against the turn would resolve to a plausible
+	// fragment of the wrong sentence and look entirely correct.
+	if strings.Contains(c.Text, "Nobody has mentioned Ensera") {
+		t.Fatalf("the context crossed into another message of the same turn: %q", c.Text)
+	}
+	if c.ByteStart+len(c.Text) > len(second) || second[c.ByteStart:c.ByteStart+len(c.Text)] != c.Text {
+		t.Fatalf("context_start does not locate the context in its own message: %d", c.ByteStart)
+	}
+	// The window is cut in the database, so what a fact costs does not grow with the message it came
+	// from. This message is over three kilobytes.
+	if len(c.Text) > 2*domain.ContextWindow+len(quote) {
+		t.Fatalf("the window is not bounded: %d bytes of a %d byte message", len(c.Text), len(second))
+	}
+	if c.Complete {
+		t.Fatal("a window cut out of a long message claimed to be the whole message")
+	}
+
+	// And a message that fits comes back whole, saying so.
+	short := "I live in Dublin."
+	shortTurn, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: short}))
+	if err != nil {
+		t.Fatalf("append short: %v", err)
+	}
+	at := strings.Index(short, "Dublin")
+	if _, err := facts.Assert(ctx, schema, "p1", shortTurn.ID, domain.RoleUser, "subject-1", domain.Claim{
+		Subject: "the user", Predicate: "lives_in", Cardinality: domain.CardinalityOne,
+		Object: "Dublin", Statement: "The user lives in Dublin.", Quote: "Dublin",
+		ByteStart: at, ByteEnd: at + len("Dublin"),
+	}); err != nil {
+		t.Fatalf("assert short: %v", err)
+	}
+	var dublin string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT entity_id::text FROM {schema}.entity WHERE normalized_name = 'dublin'`)).Scan(&dublin); err != nil {
+		t.Fatalf("find entity: %v", err)
+	}
+	whole, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{dublin}, 10, []string{"user"})
+	if err != nil {
+		t.Fatalf("recall short: %v", err)
+	}
+	if len(whole) != 1 {
+		t.Fatalf("expected one fact about Dublin, got %d", len(whole))
+	}
+	if w := whole[0].Evidence.Context; !w.Complete || w.Text != short {
+		t.Fatalf("a message shorter than the window did not come back whole: %+v", w)
+	}
+}
+
+// The context join carries the scope predicate, because this is the one join in the read path that
+// returns text nobody cited.
+//
+// The fact has already passed the scope predicate and its evidence names the observation that
+// produced it, so reaching another project's message would need a defect upstream. That is exactly
+// why the predicate is on the join as well: text is what a boundary failure leaks, and a bound that
+// only holds while everything above it is correct is not a bound.
+func TestContextIsNotReadFromAnotherProjectsMessage(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_ctxscope")
+	obs := pg.NewObservationStore(pool)
+
+	secret := "The board approved the acquisition of Ensera on Tuesday."
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: secret}))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// A fact in another project whose evidence points at this project's message: the shape a defect
+	// upstream would produce.
+	at := strings.Index(secret, "Ensera")
+	if _, err := pg.NewFactStore(pool).Assert(ctx, schema, "p2", stored.ID, domain.RoleUser, "subject-2",
+		domain.Claim{
+			Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany,
+			Object: "Ensera", Statement: "The user works at Ensera.", Quote: "Ensera",
+			ByteStart: at, ByteEnd: at + len("Ensera"),
+		}); err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+	var ensera string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT entity_id::text FROM {schema}.entity WHERE normalized_name = 'ensera' AND scope = 'p2'`)).
+		Scan(&ensera); err != nil {
+		t.Fatalf("find entity: %v", err)
+	}
+
+	got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p2"}, []string{ensera}, 10, []string{"user"})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one fact, got %d", len(got))
+	}
+	if c := got[0].Evidence.Context; c.Text != "" {
+		t.Fatalf("a message in another project was read as context: %q", c.Text)
+	}
+}
+
+// A fact whose message is gone keeps its quote and comes back without context.
+//
+// Nothing in the write path produces this state today — a fact and the message it came from are
+// erased together. The join is LEFT anyway, because the alternative is an inner join that drops the
+// fact, and a fact vanishing because its surrounding words did looks like memory loss rather than
+// like an erasure that did its job. The state is built directly here so the branch that handles it
+// is one somebody has watched run.
+func TestAFactWhoseMessageIsGoneKeepsItsQuoteWithNoContext(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_ctxgone")
+	obs := pg.NewObservationStore(pool)
+
+	content := "I work at Ensera and I like it."
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: content}))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	at := strings.Index(content, "Ensera")
+	if _, err := pg.NewFactStore(pool).Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1",
+		domain.Claim{
+			Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany,
+			Object: "Ensera", Statement: "The user works at Ensera.", Quote: "Ensera",
+			ByteStart: at, ByteEnd: at + len("Ensera"),
+		}); err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+	// The messages go by cascade, which is what an erasure does to them.
+	if _, err := pool.Exec(ctx, schema.SQL(
+		`DELETE FROM {schema}.observation WHERE observation_id = $1`), stored.ID); err != nil {
+		t.Fatalf("delete observation: %v", err)
+	}
+
+	bundle, err := recall.NewWithBudget(pg.NewRecallStore(pool, schema),
+		recall.Budget{Characters: 100000, MaxRows: 50}).Recall(ctx, []string{"p1"}, "What about Ensera?")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(bundle.Facts) != 1 {
+		t.Fatalf("the fact was dropped because its message was gone: %+v", bundle.Facts)
+	}
+	f := bundle.Facts[0]
+	if f.Evidence.Quote != "Ensera" || f.Evidence.ByteStart != at {
+		t.Fatalf("the citation lost more than its context: %+v", f.Evidence)
+	}
+	if f.Evidence.Context.Text != "" {
+		t.Fatalf("context came back for a message that is gone: %q", f.Evidence.Context.Text)
+	}
+	// Said out loud, because a citation that is suddenly only a span looks like a product that
+	// stopped explaining itself rather than like an erasure that did its job.
+	if len(bundle.Degraded) != 1 || bundle.Degraded[0] != domain.DegradedCitationContext {
+		t.Fatalf("the bundle did not say the citation is bare: %v", bundle.Degraded)
 	}
 }

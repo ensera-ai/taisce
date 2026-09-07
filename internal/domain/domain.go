@@ -9,10 +9,13 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Role is who spoke. The set is closed.
@@ -215,6 +218,156 @@ type Evidence struct {
 	ByteStart           int
 	ByteEnd             int
 	ExtractorVersion    string
+	// Context is the words around the quote. It is what makes the receipt legible rather than only
+	// verifiable, and it is empty when the message it would come from is gone.
+	Context Context
+}
+
+// ── What a citation carries ───────────────────────────────────────────────────────────────────
+//
+// A quote and a byte span are exactly enough to verify a fact and not enough to understand it. A
+// span reading "Dublin" proves the word was in the message and says nothing about whether the
+// sentence asserted it, hedged it or denied it — so a reader who wants to check a fact has to go and
+// fetch the message, and there is no path that returns one.
+//
+// The words either side are already stored, already scoped and already erased with the message they
+// belong to. Returning them is not a retrieval decision: nothing ranks, nothing is searched, and no
+// message becomes reachable that was not already reachable through the fact it produced. It is the
+// difference between a receipt and a legible receipt.
+
+// ContextWindow is how many bytes either side of a quote a citation carries.
+//
+// # Why a window rather than the message
+//
+// The whole message is the obvious answer and it is the wrong one twice over. A bundle whose facts
+// each carry a paragraph is passages with facts attached, which inverts the product — and it would
+// smuggle in passage retrieval through the citation, where it arrives with no measurement behind it
+// and no way for a caller to ask for it or not. The window is bounded, so what a fact costs does not
+// depend on how long the message it came from was.
+//
+// # Why this number
+//
+// Around 160 bytes is a sentence or two of English either side: enough to see the clause the quote
+// sits in and the one before it, which is what tells a reader whether the sentence asserted the
+// thing. It is a constant rather than a setting because nothing has asked to vary it, and a setting
+// is a default nobody tunes plus a branch nobody exercises. What a caller does control is the
+// character budget, which counts this — so a caller who cannot afford context gets fewer facts
+// rather than a knob to find.
+const ContextWindow = 160
+
+// Context is the words around a quote, taken from the message the quote indexes into.
+type Context struct {
+	// Text is the window, cut at word boundaries. Empty when the message is gone.
+	Text string
+	// ByteStart is where Text begins in the message, so a reader can place the quote inside it:
+	// the quote starts at Evidence.ByteStart - ByteStart of Text.
+	ByteStart int
+	// Complete says the window IS the whole message, so a reader knows whether anything was left
+	// out. Without it, a window that happens to fit and one that was cut are indistinguishable —
+	// and a reader who assumes the first has read a sentence that continues.
+	Complete bool
+}
+
+// RawWindow is a window cut around a quote before it has been made readable.
+//
+// It arrives as bytes because the cut is made by byte arithmetic in the database — the span is bytes,
+// and cutting there is what keeps a hundred-kilobyte message from crossing the wire to produce three
+// hundred bytes of context. Bytes cut at arbitrary offsets split runes and words, which is what
+// Legible repairs.
+type RawWindow struct {
+	// Bytes is the window as cut, Start is where it begins in the message.
+	Bytes []byte
+	Start int
+	// QuoteStart and QuoteEnd are the span, in the message's coordinates rather than the window's.
+	QuoteStart int
+	QuoteEnd   int
+	// MessageBytes is the length of the whole message, which is the only way to know whether the
+	// window reached its end.
+	MessageBytes int
+}
+
+// Legible turns a raw window into context a person can read.
+//
+// Two repairs, both only where the cut was made. A cut edge lands mid-rune, which would put a
+// replacement character in a receipt; and it lands mid-word, which reads as a typo in the stored
+// text rather than as an elision. Neither repair touches the quote: the trimming is bounded to the
+// bytes before the span and the bytes after it, so the words that were cited always survive.
+//
+// An edge that was NOT cut is left exactly as it is. The first word of a message is not trimmed to
+// look like an elision, which is what makes Complete worth reporting.
+func (w RawWindow) Legible() Context {
+	qs, qe := w.QuoteStart-w.Start, w.QuoteEnd-w.Start
+	if len(w.Bytes) == 0 || qs < 0 || qe > len(w.Bytes) || qs > qe {
+		// The window does not contain the quote it was cut around, so nothing here can be shown as
+		// the context for it. Returning empty is the honest answer; returning the bytes would be a
+		// receipt pointing at the wrong words while looking correct.
+		return Context{}
+	}
+
+	lo, hi := 0, len(w.Bytes)
+	elidedBefore := w.Start > 0
+	elidedAfter := w.Start+len(w.Bytes) < w.MessageBytes
+	if elidedBefore {
+		lo = wordStartIn(w.Bytes[:qs])
+	}
+	if elidedAfter {
+		hi = qe + wordEndIn(w.Bytes[qe:])
+	}
+	return Context{
+		Text:      string(w.Bytes[lo:hi]),
+		ByteStart: w.Start + lo,
+		Complete:  !elidedBefore && !elidedAfter,
+	}
+}
+
+// wordStartIn returns where the first whole word begins in a prefix whose start was cut.
+//
+// A prefix with no whitespace at all is one long word the cut landed inside, and dropping it would
+// throw away every byte of context there is. So the fallback keeps it, minus a rune the cut split.
+func wordStartIn(prefix []byte) int {
+	i := bytes.IndexFunc(prefix, unicode.IsSpace)
+	if i < 0 {
+		return firstWholeRune(prefix)
+	}
+	return len(prefix) - len(bytes.TrimLeftFunc(prefix[i:], unicode.IsSpace))
+}
+
+// wordEndIn returns where the last whole word ends in a suffix whose end was cut.
+func wordEndIn(suffix []byte) int {
+	i := bytes.LastIndexFunc(suffix, unicode.IsSpace)
+	if i < 0 {
+		return lastWholeRune(suffix)
+	}
+	return len(bytes.TrimRightFunc(suffix[:i], unicode.IsSpace))
+}
+
+// firstWholeRune and lastWholeRune drop the bytes of a rune the cut split.
+//
+// A genuine U+FFFD in the stored text decodes as a three-byte error and is kept; only the one-byte
+// decode failure — which is what a split rune produces — is dropped, and at most one rune's worth,
+// so text that is not UTF-8 at all is returned as it is rather than eaten.
+func firstWholeRune(b []byte) int {
+	start := 0
+	for i := 0; i < utf8.UTFMax && start < len(b); i++ {
+		r, size := utf8.DecodeRune(b[start:])
+		if r != utf8.RuneError || size > 1 {
+			break
+		}
+		start += size
+	}
+	return start
+}
+
+func lastWholeRune(b []byte) int {
+	end := len(b)
+	for i := 0; i < utf8.UTFMax && end > 0; i++ {
+		r, size := utf8.DecodeLastRune(b[:end])
+		if r != utf8.RuneError || size > 1 {
+			break
+		}
+		end -= size
+	}
+	return end
 }
 
 // Entity is a thing facts are about.
@@ -421,6 +574,15 @@ type Anchor struct {
 	Entity  Entity
 	Matched string
 }
+
+// DegradedCitationContext says at least one returned fact came back without the words around its
+// quote, because the message those words are in is gone.
+//
+// A named constant rather than a string at the point it is set, so the reason a caller matches on is
+// the reason the code produces. The fact itself is unaffected — its quote and span are what they
+// were — and it is reported because a citation that is suddenly only a span looks like a product
+// that stopped explaining itself rather than like an erasure that did its job.
+const DegradedCitationContext = "citation_context"
 
 // CitedFact is a fact with the receipt for it. There is no uncited variant, and that is deliberate:
 // a fact whose evidence cannot be produced is not something this product returns.

@@ -101,10 +101,13 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 			Object     string `json:"object"`
 			AnchoredOn string `json:"anchored_on"`
 			Evidence   struct {
-				ObservationID string `json:"observation_id"`
-				Quote         string `json:"quote"`
-				ByteStart     int    `json:"byte_start"`
-				ByteEnd       int    `json:"byte_end"`
+				ObservationID   string `json:"observation_id"`
+				Quote           string `json:"quote"`
+				ByteStart       int    `json:"byte_start"`
+				ByteEnd         int    `json:"byte_end"`
+				Context         string `json:"context"`
+				ContextStart    int    `json:"context_start"`
+				ContextComplete bool   `json:"context_complete"`
 			} `json:"evidence"`
 		} `json:"facts"`
 		Truncated bool `json:"truncated"`
@@ -132,6 +135,23 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 	}
 	if fact.AnchoredOn == "" {
 		t.Fatal("a fact came back without saying which anchor reached it")
+	}
+	// A citation that can be read, not only verified. The span proves the phrase was in the message;
+	// the words around it are what say whether the sentence asserted it.
+	if fact.Evidence.Context == "" {
+		t.Fatal("a citation came back with a span and no words around it")
+	}
+	if !strings.Contains(fact.Evidence.Context, fact.Evidence.Quote) {
+		t.Fatalf("the context does not contain the quote it is context for: %q", fact.Evidence.Context)
+	}
+	if at := fact.Evidence.ByteStart - fact.Evidence.ContextStart; at < 0 ||
+		at+len(fact.Evidence.Quote) > len(fact.Evidence.Context) ||
+		fact.Evidence.Context[at:at+len(fact.Evidence.Quote)] != fact.Evidence.Quote {
+		t.Fatalf("context_start does not locate the quote inside the context: %+v", fact.Evidence)
+	}
+	// This message is shorter than the window, so the caller is told they are seeing all of it.
+	if !fact.Evidence.ContextComplete || fact.Evidence.Context != content {
+		t.Fatalf("a message shorter than the window did not come back whole: %q", fact.Evidence.Context)
 	}
 
 	// ── Erase ─────────────────────────────────────────────────────────────────────────────────

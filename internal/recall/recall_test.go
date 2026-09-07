@@ -748,3 +748,84 @@ func TestTheRowBoundGuardsTheQuery(t *testing.T) {
 		t.Fatal("the row bound cut the result and the bundle does not say so")
 	}
 }
+
+// ── #60: what a legible citation costs, and what it says when it is missing ───────────────────
+
+// The context is on the wire, so the caller pays for it. A budget that counted only the quote would
+// describe a payload smaller than the one that arrives, which is the failure a budget exists to
+// prevent — and it would be believed, because it is labelled characters.
+func TestTheWordsAroundAQuoteAreChargedToTheBudget(t *testing.T) {
+	context160 := strings.Repeat("y", 300)
+	bare := domain.CitedFact{ID: "f1", Subject: "Marta", Predicate: "works_at", Object: "Ensera",
+		Statement: "Marta works at Ensera.", AnchoredOn: "e1",
+		Evidence: domain.Evidence{SourceObservationID: "o1", Quote: "works at Ensera",
+			Context: domain.Context{Text: "works at Ensera", Complete: true}}}
+	legible := bare
+	legible.ID = "f2"
+	legible.Evidence.SourceObservationID = "o2"
+	legible.Evidence.Context = domain.Context{Text: context160}
+
+	cheap, err := recall.NewWithBudget(coDerivedStore([]domain.CitedFact{bare}),
+		recall.Budget{Characters: 100000, MaxRows: 50}).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	dear, err := recall.NewWithBudget(coDerivedStore([]domain.CitedFact{legible}),
+		recall.Budget{Characters: 100000, MaxRows: 50}).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if dear.Characters-cheap.Characters != len(context160)-len("works at Ensera") {
+		t.Fatalf("the context was not charged: %d against %d", dear.Characters, cheap.Characters)
+	}
+
+	// And a budget that cannot afford the context cuts the bundle rather than the context: a fact
+	// half-cited is worse than a fact not returned, because nothing on the wire would say so.
+	cut, err := recall.NewWithBudget(coDerivedStore([]domain.CitedFact{bare, legible}),
+		recall.Budget{Characters: 120, MaxRows: 50}).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(cut.Facts) != 1 || cut.Facts[0].ID != "f1" {
+		t.Fatalf("got %d facts, wanted the one whose citation fits", len(cut.Facts))
+	}
+	if cut.Facts[0].Evidence.Context.Text == "" {
+		t.Fatal("a fact was returned with its context stripped to fit, which nothing on the wire says")
+	}
+}
+
+// A bare citation is announced once for the bundle. Which facts are bare is visible in the facts
+// themselves; what a caller cannot see without being told is that anything is bare at all.
+func TestABundleSaysWhenACitationLostItsContext(t *testing.T) {
+	legible := domain.CitedFact{ID: "f1", Subject: "Marta", Predicate: "works_at", Object: "Ensera",
+		Statement: "Marta works at Ensera.", AnchoredOn: "e1",
+		Evidence: domain.Evidence{SourceObservationID: "o1", Quote: "works at Ensera",
+			Context: domain.Context{Text: "Marta works at Ensera.", Complete: true}}}
+	bare := legible
+	bare.ID = "f2"
+	bare.Evidence.SourceObservationID = "o2"
+	bare.Evidence.Context = domain.Context{}
+
+	whole, err := recall.NewWithBudget(coDerivedStore([]domain.CitedFact{legible}),
+		recall.Budget{Characters: 100000, MaxRows: 50}).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(whole.Degraded) != 0 {
+		t.Fatalf("a bundle whose citations are all legible reported %v", whole.Degraded)
+	}
+
+	partial, err := recall.NewWithBudget(coDerivedStore([]domain.CitedFact{legible, bare}),
+		recall.Budget{Characters: 100000, MaxRows: 50}).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(partial.Degraded) != 1 || partial.Degraded[0] != domain.DegradedCitationContext {
+		t.Fatalf("a bare citation was not reported: %v", partial.Degraded)
+	}
+}

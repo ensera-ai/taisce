@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // The role policy in one assertion. Everything downstream depends on this being the only role that
@@ -173,6 +174,138 @@ func TestEveryRecordedOperationIsOneTheLedgerAccepts(t *testing.T) {
 		}
 		if err := e.Validate(); err != nil {
 			t.Fatalf("the ledger refuses principal kind %q: %v", kind, err)
+		}
+	}
+}
+
+// ── #60: a citation is legible, and says how much of the message it is showing ─────────────────
+
+// cut is the window the database takes, in Go, so these cases can be written against the same
+// arithmetic without a database. The pg tests assert that the SQL cuts the same bytes.
+func cut(message string, quoteStart, quoteEnd int) RawWindow {
+	start := quoteStart - ContextWindow
+	if start < 0 {
+		start = 0
+	}
+	end := quoteEnd + ContextWindow
+	if end > len(message) {
+		end = len(message)
+	}
+	return RawWindow{
+		Bytes:        []byte(message[start:end]),
+		Start:        start,
+		QuoteStart:   quoteStart,
+		QuoteEnd:     quoteEnd,
+		MessageBytes: len(message),
+	}
+}
+
+// The property the whole feature rests on: whatever the window did at its edges, the cited words are
+// inside what comes back, at the offset the citation says they are.
+func TestTheContextAlwaysContainsTheWordsItIsContextFor(t *testing.T) {
+	long := strings.Repeat("the migration went out on friday and nothing broke. ", 20)
+	for name, msg := range map[string]string{
+		"short message":       "I live in Dublin.",
+		"quote at the head":   "Dublin is where I live. " + long,
+		"quote at the tail":   long + " and I live in Dublin",
+		"quote in the middle": long + "I live in Dublin, which is where the office is. " + long,
+	} {
+		t.Run(name, func(t *testing.T) {
+			start := strings.Index(msg, "Dublin")
+			end := start + len("Dublin")
+			got := cut(msg, start, end).Legible()
+			if got.Text == "" {
+				t.Fatal("no context came back at all")
+			}
+			at := start - got.ByteStart
+			if at < 0 || at+len("Dublin") > len(got.Text) {
+				t.Fatalf("the quote is not inside its own context: offset %d in %d bytes", at, len(got.Text))
+			}
+			if got.Text[at:at+len("Dublin")] != "Dublin" {
+				t.Fatalf("context_start does not locate the quote: got %q", got.Text[at:])
+			}
+			if !strings.HasPrefix(msg[got.ByteStart:], got.Text) {
+				t.Fatal("the context is not the message's own bytes")
+			}
+		})
+	}
+}
+
+// Complete is the difference between "this is the message" and "this is part of it". A reader who
+// cannot tell them apart reads a sentence that continues as one that stopped.
+func TestContextSaysWhetherItIsTheWholeMessage(t *testing.T) {
+	whole := "I live in Dublin."
+	start := strings.Index(whole, "Dublin")
+	got := cut(whole, start, start+6).Legible()
+	if !got.Complete || got.Text != whole || got.ByteStart != 0 {
+		t.Fatalf("a message shorter than the window came back cut: %+v", got)
+	}
+
+	long := strings.Repeat("a sentence that is long enough to be elided. ", 40)
+	cutStart := strings.Index(long+"Dublin"+long, "Dublin")
+	partial := cut(long+"Dublin"+long, cutStart, cutStart+6).Legible()
+	if partial.Complete {
+		t.Fatal("a window cut out of a longer message claimed to be the whole message")
+	}
+	if len(partial.Text) > 2*ContextWindow+len("Dublin") {
+		t.Fatalf("the window is not bounded: %d bytes", len(partial.Text))
+	}
+}
+
+// A cut edge lands mid-word and mid-rune. Neither belongs in a receipt: one reads as a typo in the
+// stored text, the other as a replacement character.
+func TestACutEdgeIsRepairedAndOnlyTheCutEdge(t *testing.T) {
+	// Every character here is multi-byte, so an arbitrary byte cut splits a rune almost always.
+	filler := strings.Repeat("naïve café résumé — ", 30)
+	msg := filler + "Dublin" + filler
+	start := strings.Index(msg, "Dublin")
+
+	got := cut(msg, start, start+6).Legible()
+	if strings.ContainsRune(got.Text, utf8.RuneError) {
+		t.Fatalf("a split rune reached the caller: %q", got.Text)
+	}
+	if !utf8.ValidString(got.Text) {
+		t.Fatalf("the context is not valid UTF-8: %q", got.Text)
+	}
+	if strings.HasPrefix(got.Text, " ") || strings.HasSuffix(got.Text, " ") {
+		t.Fatalf("the window was not trimmed to a word: %q", got.Text)
+	}
+
+	// The edge that was NOT cut is left alone, which is what makes Complete worth reporting: the
+	// first word of a message is not trimmed to look like an elision.
+	head := "Dublin " + filler
+	atHead := cut(head, 0, 6).Legible()
+	if !strings.HasPrefix(atHead.Text, "Dublin") || atHead.ByteStart != 0 {
+		t.Fatalf("the head of a message was trimmed as though it had been cut: %+v", atHead)
+	}
+}
+
+// One long word with no whitespace in it — a URL, a stack frame, a base64 blob. Snapping to a word
+// boundary would throw away every byte of context there is, so the fallback keeps it.
+func TestAWindowWithNoWordBoundaryKeepsWhatItHas(t *testing.T) {
+	blob := strings.Repeat("x", 400)
+	msg := blob + "Dublin" + blob
+	start := strings.Index(msg, "Dublin")
+	got := cut(msg, start, start+6).Legible()
+	if !strings.Contains(got.Text, "Dublin") {
+		t.Fatalf("the quote was trimmed away: %q", got.Text)
+	}
+	if len(got.Text) < ContextWindow {
+		t.Fatalf("a window with no whitespace was discarded rather than kept: %d bytes", len(got.Text))
+	}
+}
+
+// A window that does not hold its own quote is not context for it, and returning the bytes anyway
+// would be a receipt pointing at the wrong words while looking correct.
+func TestAWindowThatDoesNotHoldItsQuoteReturnsNothing(t *testing.T) {
+	for name, w := range map[string]RawWindow{
+		"no bytes":           {Bytes: nil, QuoteStart: 0, QuoteEnd: 0},
+		"quote before it":    {Bytes: []byte("in Dublin"), Start: 100, QuoteStart: 3, QuoteEnd: 9, MessageBytes: 200},
+		"quote past its end": {Bytes: []byte("in Dublin"), Start: 0, QuoteStart: 3, QuoteEnd: 400, MessageBytes: 400},
+		"end before start":   {Bytes: []byte("in Dublin"), Start: 0, QuoteStart: 9, QuoteEnd: 3, MessageBytes: 9},
+	} {
+		if got := w.Legible(); got.Text != "" {
+			t.Errorf("%s: returned %q as context", name, got.Text)
 		}
 	}
 }

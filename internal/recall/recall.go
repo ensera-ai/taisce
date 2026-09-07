@@ -206,6 +206,12 @@ func (r *Recaller) RecallFrom(ctx context.Context, scopes []string, question str
 		if f.AnchoredOn != "" {
 			reach.FactsPerAnchor[f.AnchoredOn]++
 		}
+		// A citation with no surrounding words is a receipt that lost its legibility, which happens
+		// when the message was erased. Said once for the bundle rather than per fact: the caller
+		// needs to know some citation is bare, and which ones is visible in the facts themselves.
+		if f.Evidence.Context.Text == "" && bundle.Degraded == nil {
+			bundle.Degraded = []string{domain.DegradedCitationContext}
+		}
 	}
 	bundle.Reach = reach
 	return bundle, nil
@@ -306,10 +312,12 @@ func NormalizeSubject(s string) string { return domain.NormalizeName(s) }
 //
 // The fields that are rendered, and only those: a caller pays for what arrives, and counting an
 // identifier they receive but never read into their context would make the budget describe something
-// other than what it bounds. Approximate by a few characters of JSON punctuation per fact, and
+// other than what it bounds. The quote and the context around it are both counted even though the
+// context contains the quote, because both are on the wire — a budget that counted the words once
+// would be describing a payload the caller does not receive. Approximate by a few characters of JSON punctuation per fact, and
 // deliberately so — an exact serialisation cost would depend on the encoder rather than on the
 // content.
 func factSize(f domain.CitedFact) int {
 	return len(f.Subject) + len(f.Predicate) + len(f.Object) + len(f.Statement) +
-		len(f.Evidence.Quote)
+		len(f.Evidence.Quote) + len(f.Evidence.Context.Text)
 }
