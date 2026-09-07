@@ -6,7 +6,7 @@
 SUBSTRATE_VERSION ?= 0.1.0
 TEST_DSN ?= postgres://postgres:taisce@localhost:55432/taisce?sslmode=disable
 
-.PHONY: substrate db-up db-down test licence signoff version test-inference build
+.PHONY: substrate db-up db-down test licence signoff version test-inference build contract
 
 substrate:
 	docker build -t taisce-postgres:$(SUBSTRATE_VERSION) deploy/postgres
@@ -38,6 +38,16 @@ test: licence
 # irreversible.
 licence:
 	./scripts/licence-gate.sh
+
+# The public contract, rendered from the surface that serves it.
+#
+# Generated rather than written, because a hand-maintained description of a shape diverges from the
+# shape the first time somebody adds a field without knowing the document exists. Committed rather
+# than built on demand, because a change to a contract other people's code depends on has to appear
+# in a diff a reviewer sees. TestTheContractDocumentDescribesTheSurfaceThatServes fails when the two
+# disagree, so running this is a deliberate step and never an automatic one.
+contract:
+	go run scripts/contract.go
 
 # Who authored the commits in a change. It cannot decide who has signed the contributor agreement —
 # that record lives with the signing service — and it makes the question answerable.

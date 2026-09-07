@@ -128,6 +128,10 @@ type Operation struct {
 	Name   string
 	Method string
 	Path   string
+	// Success is what the operation answers when it worked. Part of the contract because a client
+	// that treats any 2xx as success cannot tell an append that was stored from one that was
+	// accepted for later, and the difference is the whole of D19.
+	Success int
 }
 
 // The surface, declared once (D51). A path per operation, because HTTP's own vocabulary is what
@@ -142,19 +146,27 @@ type Operation struct {
 type route struct {
 	Operation
 	handler func(*Server) grantedHandler
+	// request and response are zero values of the types this operation reads and writes. They are
+	// here so the contract document is rendered from the types the handlers actually use rather
+	// than written alongside them: a document describing a field the server does not serve is worse
+	// than no document, because it is believed.
+	//
+	// request is nil for an operation that reads no body.
+	request  any
+	response any
 }
 
 var operations = []route{
-	{Operation{domain.AuditObserve, http.MethodPost, "/observations"},
-		func(s *Server) grantedHandler { return s.observe }},
-	{Operation{domain.AuditFreshness, http.MethodGet, "/freshness"},
-		func(s *Server) grantedHandler { return s.freshness }},
-	{Operation{domain.AuditRecall, http.MethodPost, "/recalls"},
-		func(s *Server) grantedHandler { return s.recallHandler }},
-	{Operation{domain.AuditErase, http.MethodPost, "/erasures"},
-		func(s *Server) grantedHandler { return s.erase }},
-	{Operation{domain.AuditExport, http.MethodPost, "/exports"},
-		func(s *Server) grantedHandler { return s.export }},
+	{Operation{domain.AuditObserve, http.MethodPost, "/observations", http.StatusCreated},
+		func(s *Server) grantedHandler { return s.observe }, observeRequest{}, observeResponse{}},
+	{Operation{domain.AuditFreshness, http.MethodGet, "/freshness", http.StatusOK},
+		func(s *Server) grantedHandler { return s.freshness }, nil, freshnessResponse{}},
+	{Operation{domain.AuditRecall, http.MethodPost, "/recalls", http.StatusOK},
+		func(s *Server) grantedHandler { return s.recallHandler }, recallRequest{}, recallResponse{}},
+	{Operation{domain.AuditErase, http.MethodPost, "/erasures", http.StatusOK},
+		func(s *Server) grantedHandler { return s.erase }, eraseRequest{}, eraseResponse{}},
+	{Operation{domain.AuditExport, http.MethodPost, "/exports", http.StatusOK},
+		func(s *Server) grantedHandler { return s.export }, exportRequest{}, exportResponse{}},
 }
 
 // The declaration is checked before anything can serve it, and a bad one stops the binary.
@@ -199,7 +211,8 @@ func checkOperations(rs []route) error {
 func Operations() []Operation {
 	out := make([]Operation, 0, len(operations))
 	for _, o := range operations {
-		out = append(out, Operation{Name: o.Name, Method: o.Method, Path: "/" + Version + o.Path})
+		out = append(out, Operation{Name: o.Name, Method: o.Method,
+			Path: "/" + Version + o.Path, Success: o.Success})
 	}
 	return out
 }
@@ -241,18 +254,18 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 		token, ok := bearer(r.Header.Get("Authorization"))
 		if !ok {
 			s.recordRefusedAuth(r, "")
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "a credential is required")
+			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 			return
 		}
 		grant, err := s.credentials.Resolve(r.Context(), token)
 		if errors.Is(err, credential.ErrUnknown) {
 			s.recordRefusedAuth(r, token)
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "a credential is required")
+			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 			return
 		}
 		if err != nil {
 			s.log.Error("resolve credential", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal", "the request could not be served")
+			writeError(w, http.StatusInternalServerError, codeInternal, "the request could not be served")
 			return
 		}
 
@@ -274,11 +287,11 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 				s.log.Warn("a credential names a project that is gone or suspended",
 					"credential", grant.CredentialID, "project", grant.Project)
 				s.record(r, domain.AuditAuthenticate, grant, domain.OutcomeRefused, 0)
-				writeError(w, http.StatusUnauthorized, "unauthenticated", "a credential is required")
+				writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 				return
 			}
 			s.log.Error("read project", "error", err, "project", grant.Project)
-			writeError(w, http.StatusInternalServerError, "internal", "the request could not be served")
+			writeError(w, http.StatusInternalServerError, codeInternal, "the request could not be served")
 			return
 		}
 
@@ -347,14 +360,14 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 	// Validated by the domain, not here. A second validator in a handler is a second definition of
 	// what a turn is, and the one that drifts is the one no store enforces.
 	if err := turn.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_turn", err.Error())
+		writeError(w, http.StatusBadRequest, codeInvalidTurn, err.Error())
 		return
 	}
 
 	stored, err := s.observations.Append(r.Context(), s.schema, turn)
 	if err != nil {
 		s.log.Error("append observation", "error", err, "project", grant.Project)
-		writeError(w, http.StatusInternalServerError, "internal", "the turn could not be stored")
+		writeError(w, http.StatusInternalServerError, codeInternal, "the turn could not be stored")
 		return
 	}
 	s.record(r, domain.AuditObserve, grant, domain.OutcomeAllowed, len(turn.Messages))
@@ -383,7 +396,7 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credent
 	f, err := s.observations.Freshness(r.Context(), s.schema, grant.Project)
 	if err != nil {
 		s.log.Error("read freshness", "error", err, "project", grant.Project)
-		writeError(w, http.StatusInternalServerError, "internal", "freshness could not be read")
+		writeError(w, http.StatusInternalServerError, codeInternal, "freshness could not be read")
 		return
 	}
 	out := freshnessResponse{Scope: f.Scope, Stored: f.Stored, Parked: f.Parked}
@@ -454,7 +467,7 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 		return
 	}
 	if strings.TrimSpace(req.Question) == "" {
-		writeError(w, http.StatusBadRequest, "invalid_question", "a question is required")
+		writeError(w, http.StatusBadRequest, codeInvalidQuestion, "a question is required")
 		return
 	}
 
@@ -463,7 +476,7 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 	bundle, err := s.recaller.Recall(r.Context(), []string{grant.Project}, req.Question)
 	if err != nil {
 		s.log.Error("recall", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal", "the question could not be answered")
+		writeError(w, http.StatusInternalServerError, codeInternal, "the question could not be answered")
 		return
 	}
 	// The magnitude is how many facts came back. Never the question, and never what they said.
@@ -522,7 +535,7 @@ func (s *Server) erase(w http.ResponseWriter, r *http.Request, grant credential.
 		return
 	}
 	if strings.TrimSpace(req.DataSubjectID) == "" {
-		writeError(w, http.StatusBadRequest, "no_subject",
+		writeError(w, http.StatusBadRequest, codeNoSubject,
 			"an erasure names the person it is for; one without a subject would be a scope-wide delete")
 		return
 	}
@@ -530,7 +543,7 @@ func (s *Server) erase(w http.ResponseWriter, r *http.Request, grant credential.
 	receipt, err := s.eraser.Erase(r.Context(), s.schema, grant.Project, req.DataSubjectID, req.Reason)
 	if err != nil {
 		s.log.Error("erase", "error", err, "project", grant.Project)
-		writeError(w, http.StatusInternalServerError, "internal", "the erasure did not complete")
+		writeError(w, http.StatusInternalServerError, codeInternal, "the erasure did not complete")
 		return
 	}
 	deleted := 0
@@ -574,7 +587,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, grant credential
 		return
 	}
 	if strings.TrimSpace(req.DataSubjectID) == "" {
-		writeError(w, http.StatusBadRequest, "no_subject",
+		writeError(w, http.StatusBadRequest, codeNoSubject,
 			"an export names the person it is for; one without a subject would be a copy of the project")
 		return
 	}
@@ -582,7 +595,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, grant credential
 	out, err := s.exporter.Export(r.Context(), s.schema, grant.Project, req.DataSubjectID)
 	if err != nil {
 		s.log.Error("export", "error", err, "project", grant.Project)
-		writeError(w, http.StatusInternalServerError, "internal", "the export could not be produced")
+		writeError(w, http.StatusInternalServerError, codeInternal, "the export could not be produced")
 		return
 	}
 
@@ -606,7 +619,7 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(into); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_body", "the request body could not be read")
+		writeError(w, http.StatusBadRequest, codeInvalidBody, "the request body could not be read")
 		return false
 	}
 	return true
@@ -631,7 +644,49 @@ type errorDetail struct {
 	Message string `json:"message"`
 }
 
+// errorCode is the vocabulary of refusals, and it is part of the contract (D51).
+//
+// A caller branches on the code and shows the message; that is the whole reason the code exists as a
+// separate field. So the set is declared here rather than spelled at each call site, because a code
+// invented in a handler is a value external code has to handle and nobody wrote down — and the day it
+// appears is the day somebody's error handling falls through to a default it did not choose.
+//
+// A named type rather than a string so a call site reads as a choice from a list. Go will still
+// accept an untyped literal, which is why a test parses this package and refuses one.
+type errorCode string
+
+const (
+	// codeUnauthenticated is every way a credential can fail to work: absent, malformed, unknown,
+	// revoked, or naming a project that is gone. One code, deliberately — see authenticated.
+	codeUnauthenticated errorCode = "unauthenticated"
+	// codeInvalidBody is a body that could not be read as this operation's request: malformed JSON,
+	// an unknown field, or one over the size limit.
+	codeInvalidBody errorCode = "invalid_body"
+	// codeInvalidTurn is a turn the domain refuses. The message carries the domain's own reason,
+	// because a caller can fix it and a generic refusal would send them reading source.
+	codeInvalidTurn errorCode = "invalid_turn"
+	// codeInvalidQuestion is a recall with nothing to answer.
+	codeInvalidQuestion errorCode = "invalid_question"
+	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
+	// scope-wide, which is the difference between a governance operation and an accident.
+	codeNoSubject errorCode = "no_subject"
+	// codeInternal is anything that went wrong here. It says nothing about what, because what went
+	// wrong is a description of how this system is built.
+	codeInternal errorCode = "internal"
+)
+
+// errorCodes is the declared set, in the order the contract publishes them.
+//
+// What this does not cover: it says which codes exist, not which operation can return which. A
+// per-operation set would document better and would be maintained by hand against handlers that
+// change, so it would be wrong before it was useful. The honest statement is that any operation can
+// return any of these, and that is what the contract says.
+var errorCodes = []errorCode{
+	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
+	codeInvalidQuestion, codeNoSubject, codeInternal,
+}
+
 // writeError says what the caller can act on and nothing about how the system is built.
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorBody{Error: errorDetail{Code: code, Message: message}})
+func writeError(w http.ResponseWriter, status int, code errorCode, message string) {
+	writeJSON(w, status, errorBody{Error: errorDetail{Code: string(code), Message: message}})
 }

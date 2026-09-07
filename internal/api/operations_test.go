@@ -38,7 +38,7 @@ func TestTheDeclaredSurfaceIsOneTheLedgerCanAccountFor(t *testing.T) {
 // operation succeeds and the account of it does not exist. Nothing about the request would show it.
 func TestAnOperationTheLedgerCannotNameIsRefused(t *testing.T) {
 	err := checkOperations([]route{
-		{Operation{"summarise", http.MethodPost, "/summaries"}, nil},
+		{Operation{"summarise", http.MethodPost, "/summaries", http.StatusOK}, nil, nil, nil},
 	})
 	if err == nil {
 		t.Fatal("a surface serving an operation the ledger cannot name was accepted")
@@ -51,8 +51,8 @@ func TestAnOperationTheLedgerCannotNameIsRefused(t *testing.T) {
 // Two routes under one name are refused, because the ledger could not tell them apart afterwards.
 func TestTwoRoutesUnderOneNameAreRefused(t *testing.T) {
 	err := checkOperations([]route{
-		{Operation{domain.AuditRecall, http.MethodPost, "/recalls"}, nil},
-		{Operation{domain.AuditRecall, http.MethodPost, "/questions"}, nil},
+		{Operation{domain.AuditRecall, http.MethodPost, "/recalls", http.StatusOK}, nil, nil, nil},
+		{Operation{domain.AuditRecall, http.MethodPost, "/questions", http.StatusOK}, nil, nil, nil},
 	})
 	if err == nil {
 		t.Fatal("two routes sharing one operation name were accepted")

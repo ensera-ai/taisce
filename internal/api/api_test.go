@@ -193,6 +193,71 @@ func TestEveryOperationRefusesAnUnauthenticatedCaller(t *testing.T) {
 	}
 }
 
+// Every refusal a client can provoke names a code the contract publishes.
+//
+// The code is the field a client branches on — the message is for a person reading a log and is free
+// to change — and until this test nothing asserted that a refusal carried one at all. A code outside
+// the published set reaches a client as an unhandled case in somebody else's error handling, which
+// is a failure they cannot diagnose and we would never see.
+//
+// What it does not cover: `internal`. Provoking it means breaking the database underneath a live
+// request, and a test that arranged that would be testing the arrangement. It is declared and
+// published, and TestNoRefusalNamesAnUndeclaredCode reads every call site that answers with it.
+func TestEveryRefusalAClientCanProvokeNamesAPublishedCode(t *testing.T) {
+	h := newHarness(t, "api_codes")
+
+	published := map[string]bool{}
+	for _, c := range api.ErrorCodes() {
+		published[c] = true
+	}
+
+	for _, c := range []struct {
+		what         string
+		method, path string
+		body         map[string]any
+		token        string
+		want         string
+	}{
+		{"no credential", http.MethodGet, "/v1/freshness", nil, "", "unauthenticated"},
+		{"an unknown credential", http.MethodGet, "/v1/freshness", nil, "tsk_nothing", "unauthenticated"},
+		{"an unknown field", http.MethodPost, "/v1/recalls",
+			map[string]any{"question": "q", "scope": "p1"}, h.token, "invalid_body"},
+		{"a turn the domain refuses", http.MethodPost, "/v1/observations",
+			map[string]any{"data_subject_id": "s", "messages": []map[string]any{}}, h.token, "invalid_turn"},
+		{"a recall with no question", http.MethodPost, "/v1/recalls",
+			map[string]any{"question": "  "}, h.token, "invalid_question"},
+		{"an erasure naming nobody", http.MethodPost, "/v1/erasures",
+			map[string]any{"data_subject_id": ""}, h.token, "no_subject"},
+		{"an export naming nobody", http.MethodPost, "/v1/exports",
+			map[string]any{"data_subject_id": ""}, h.token, "no_subject"},
+	} {
+		t.Run(c.what, func(t *testing.T) {
+			status, raw := h.raw(t, c.method, c.path, c.body, c.token)
+			if status < 400 {
+				t.Fatalf("%s was not refused: %d %s", c.what, status, raw)
+			}
+			var body struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Fatalf("a refusal was not the shape the contract publishes: %v (%s)", err, raw)
+			}
+			if !published[body.Error.Code] {
+				t.Fatalf("%s answered code %q, which the contract does not publish", c.what, body.Error.Code)
+			}
+			if body.Error.Code != c.want {
+				t.Fatalf("%s answered code %q, wanted %q", c.what, body.Error.Code, c.want)
+			}
+			if body.Error.Message == "" {
+				t.Fatalf("%s answered code %q with no message", c.what, body.Error.Code)
+			}
+		})
+	}
+}
+
 // A token that is not ours, and one that is shaped like ours but unknown, are the same answer as no
 // token at all. Distinguishing them tells a stranger whether a token they hold is real, which is the
 // one fact they cannot get any other way.
