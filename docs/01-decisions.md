@@ -130,6 +130,16 @@ a roadmap that lies about what is coming).
 **How hard to undo.** Easy in code, since removing unbuilt scope removes nothing that runs. Hard in
 expectation, for the reason in D35.
 
+**Amended by D45.** A contributor agreement exists to preserve the ability to release contributed code
+under other terms, which is only worth having if a commercial edition is possible one day. So the
+accurate statement is narrower than the heading: **nothing is designed for a commercial line, and the
+option is deliberately kept open.**
+
+Everything above still holds and is the part that governs day-to-day work — no paid tier, no feature
+withheld, no seam built speculatively for a boundary that does not exist. What changed is only that
+"there will never be one" is no longer claimed, because taking a CLA while claiming it would be the
+register contradicting itself.
+
 ### D40 — The adapters are Python, Java and .NET, in that order
 
 Held against the argument that adoption should send us to TypeScript first, and kept.
@@ -301,47 +311,51 @@ service (server and worker are one binary, so it would be one codebase in two pl
 **How hard to undo.** Hard once packages ship. A published module path is permanent, so moving an
 adapter between repositories later means a new name and an abandoned one.
 
-### D45 — Contributors sign off; there is no contributor agreement
+### D45 — Contributors sign a CLA, and the relicensing option is kept deliberately
 
-A Developer Certificate of Origin: a contributor adds `Signed-off-by:` to each commit, asserting they
-wrote it and may submit it under this licence. Checked by CI. No document, no account, no rights
-transfer.
+A Contributor License Agreement, signed once before a first contribution is merged. It grants Ensera
+rights beyond what Apache-2.0 gives — chiefly a licence broad enough to release the contribution under
+other terms later.
 
-**How this relates to the licence, because the two are easily confused.** Apache-2.0 is the OUTBOUND
-licence: what this project grants to everyone who receives it. A DCO or a CLA is INBOUND: what a
+**How this relates to the licence, because the two answer opposite questions.** Apache-2.0 is the
+OUTBOUND licence: what this project grants to whoever receives it. A CLA is INBOUND: what a
 contributor grants to this project when they hand over a patch.
 
 Apache-2.0 already settles the inbound licence by itself. Section 5: *"any Contribution intentionally
 submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of
-this License, without any additional terms or conditions."* A contributor opening a pull request has
-therefore already licensed that code under Apache-2.0, patent grant included. No agreement is needed
-to obtain it.
+this License, without any additional terms or conditions."* So a pull request is already licensed
+under Apache-2.0, patent grant included, with no agreement needed to obtain it.
 
-**What section 5 does not say is whether they had the right to submit it.** It licenses the
-contribution; it does not establish that the contributor owned what they were licensing. Code pasted
-from a copyleft project, or written under an employment contract that assigns it to somebody else, is
-licensed by section 5 to the same extent the contributor could license it — which may be not at all,
-and the way that is discovered is the owner asking. A sign-off is the record that they said they
-could.
+**Which means the CLA is not here for the licence. It is here for the option.** Section 5 grants
+Apache-2.0 rights and nothing wider, so without an agreement this project can never release a
+contributor's code under different terms — a dual licence, a commercial edition, a change of licence
+entirely. A CLA is the only instrument that keeps that possible, and it has to exist before the
+contribution does: obtaining it afterwards means asking every contributor to sign retroactively and
+removing the code of anyone who declines or cannot be reached.
 
-**A CLA exists to let the project owner do something the licence otherwise would not permit** —
-usually relicensing, including to a proprietary or dual-licensed edition. D36 makes everything
-Apache-2.0 and D39 removes the commercial line, so there is nothing here for a CLA to enable. Note
-that a hosted edition would not need one either: Apache-2.0 already permits hosting contributed code.
-The only thing a CLA buys is the option to move *away* from Apache-2.0, which is the option D36
-deliberately gave up.
+**It also carries the provenance assertion** that a sign-off would otherwise provide — the contributor
+representing that they wrote the contribution or otherwise have the right to submit it. That is the
+gap Apache-2.0 section 5 leaves open: it licenses a contribution as far as the contributor was able to
+license it, which for code copied from elsewhere, or written under a contract assigning it to an
+employer, may be not at all.
 
-**So the cost decides it.** A CLA needs a signing service, a legal entity to sign with, and a step
-between a contributor's first patch and it being reviewed — the point at which most drive-by
-contributors stop. A sign-off is a flag on a commit.
+**What it costs, stated rather than discovered.** A signing step between a stranger's first patch and
+its review, which is where a proportion of drive-by contributions stop. A signing mechanism to
+operate. A corporate variant, because a contributor employed by somebody else may need their employer
+to sign rather than themselves. And the perception, which is real in open source, that the project
+reserves rights its contributors do not have.
 
-**Rejected:** a CLA (buys a relicensing option that has been given up, at the cost of friction on
-every first contribution); nothing at all (no record that a contributor had the right to submit what
-they submitted, which is the one thing that matters if it turns out they did not).
+**Rejected:** a Developer Certificate of Origin (a sign-off asserting the right to submit — it closes
+the provenance gap for the price of a commit flag and closes nothing else, so it cannot preserve the
+relicensing option); nothing at all (no record that a contributor had the right to submit what they
+submitted, which is the one thing that matters if it turns out they did not).
 
-**How hard to undo.** Adding either later means asking every existing contributor to sign
-retroactively, and the ones who cannot be reached are code that has to be removed or rewritten. Which
-is why it is decided before the repository is readable rather than after.
+**How hard to undo.** Dropping a CLA later is easy. Adding one later is not, which is why it is
+decided before the repository is readable.
+
+**This is not a lawyer's opinion and the text is not final.** The agreement in `docs/cla/` is derived
+from a standard template and needs review by somebody qualified before the repository accepts an
+external contribution.
 
 ### D46 — Nothing bakes in a public address
 

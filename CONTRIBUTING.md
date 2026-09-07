@@ -78,29 +78,32 @@ topology, a test DSN — belongs in text that will be mirrored into an open repo
 Ordered as **one end-to-end journey, deepened in passes** — never breadth-first layers. A milestone
 is done when the journey runs against a real deployment, not when its code exists.
 
-## Signing off
+## The contributor agreement
 
-Every commit carries a sign-off:
+Before a first contribution is merged, you sign a
+[Contributor License Agreement](docs/cla/individual.md). If the work is done in the course of
+employment, your employer signs the [corporate one](docs/cla/corporate.md) instead and names you on
+it — because intellectual property created at work usually belongs to the employer, and an agreement
+you were not entitled to sign protects nobody.
 
-```
-git commit -s
-```
+**You keep the copyright in everything you write.** The agreement is a licence, not a transfer.
 
-which appends `Signed-off-by: Your Name <your@email>`. It is the
-[Developer Certificate of Origin](https://developercertificate.org/): a statement that you wrote the
-change, or otherwise have the right to submit it under this project's licence.
+**Why an agreement and not just a sign-off, since the licence appears to cover it already.**
+Apache-2.0 does cover the licence: section 5 puts every submitted contribution under the same terms
+automatically, patent grant included, with no agreement needed to obtain it. What section 5 grants is
+Apache-2.0 rights *and nothing wider* — so without an agreement, this project could never release your
+contribution under any other terms.
 
-**Why a sign-off and not an agreement to sign.** Apache-2.0 already licenses your contribution to this
-project the moment you submit it — section 5 says so, patent grant included — so no agreement is
-needed to obtain the licence. What section 5 cannot establish is whether you had the *right* to submit
-it in the first place: code copied from elsewhere, or written under a contract that assigns it to an
-employer, is licensed only as far as you were able to license it. The sign-off is your statement that
-you were.
+That is what the agreement is for. It keeps open the possibility of a differently-licensed edition
+one day. Ensera's stated intention is that Taisce is and stays Apache-2.0, and the agreement does not
+bind Ensera to that — so read section 2 before signing, and do not sign if that possibility is not
+acceptable to you.
 
-A CLA would add something different again: rights beyond Apache-2.0, chiefly the ability to relicense
-your contribution under other terms. This project is Apache-2.0 with no commercial line, so there is
-nothing for that to enable — and it would put a signing step between your first patch and its review.
-The reasoning is in [`docs/01-decisions.md`](docs/01-decisions.md), D45.
+It also carries the representation a sign-off would otherwise make: that you wrote the contribution,
+or otherwise have the right to submit it. That is the one gap Apache-2.0 section 5 genuinely leaves
+open, because it licenses a contribution only as far as you were able to license it.
+
+The reasoning, and what was rejected, is in [`docs/01-decisions.md`](docs/01-decisions.md), D45.
 
 Ownership: Taisce is developed and maintained by Ensera. Commits before 2026-09 carry an earlier
 address for the same author, which is why the history shows two.
