@@ -175,6 +175,18 @@ dependency on DNS and a redirect that must outlive interest in maintaining it, f
 **How hard to undo.** The name and the module path are permanent for anything published. Ownership is
 a matter of record rather than of code.
 
+**Where it lives, and why there are two repositories.** `ensera-ai/taisce` is the home and the record.
+The personal repository the work started in is kept rather than moved, at the owner's instruction, so
+its history stays where anyone who already had the link will find it. GitHub refuses to transfer
+issues between different owners, so the issue record was **recreated** in order — all 82, numbers
+preserved, because commit messages and issue bodies cross-reference them by number and a renumbering
+would break the argument trail this project is mostly made of. What did not survive is the original
+timestamp on 46 comments; their text and authorship did.
+
+**The consequence to watch:** two repositories now hold the same issue numbers, and only one of them
+is the roadmap. An issue list that exists twice drifts, and the copy nobody is watching is the one
+that will be wrong.
+
 ---
 
 ## Substrate
