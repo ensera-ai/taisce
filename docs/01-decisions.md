@@ -1004,6 +1004,56 @@ rebuild rather than a migration. What is expensive is anything downstream that h
 to a community identifier — which is why the identifiers are a function of the graph rather than of
 the order the algorithm happened to visit it.
 
+### D59 — Entity resolution stays exact, because proximity was measured not to separate
+
+An entity is found by its normalised name and by the surface forms it has been referred to. A vector
+surface — the names plus the verbatim quotes behind the entity's facts — was built and measured, and
+it is not adopted as a way of finding candidates.
+
+**What was measured.** Four pairs that mean the same thing and four that do not, against
+`qwen3-embedding:4b-q8_0`, comparing a question to an entity's surface:
+
+- names alone: paraphrases 0.6691–0.7567, near misses 0.4738–0.6885, **gap −0.0193**
+- names with the stored quotes: paraphrases 0.6445–0.7546, near misses 0.5466–0.6760, **gap −0.0315**
+
+The gap is the weakest true pair minus the strongest false one. It is negative both ways: the
+distributions overlap, so no absolute threshold admits every paraphrase and rejects every near miss.
+
+**The pair that breaks it is the one the product cannot afford to get wrong.** A question about the
+Cork office scores 0.6885 against a surface for the Dublin office — above the weakest true pair. Two
+offices of one company is the ordinary shape of a workplace memory, and merging them files one site's
+facts under the other's name, cited and current and wrong.
+
+**The quotes made it worse, which was the opposite of the expectation.** They lift near misses far
+more than paraphrases: two projects of the same kind go from 0.4738 to 0.6442 once each surface carries
+sentences about migrations. A surface built from what was said about a thing is partly a surface about
+the KIND of thing it is, and same-kind confusion is exactly the failure mode being guarded against.
+
+**So the asymmetry decides it, as D6 already said it would.** Under-merging costs recall on one
+question and the entity is still there under its own name. Over-merging is irreversible in the way that
+matters: nothing downstream can tell that two people became one node, and every answer afterwards is
+confidently about the wrong person. A mechanism that cannot be shown to separate is not adopted on the
+strength of the direction it usually gets right.
+
+**This is a negative result and it is worth as much as a feature.** The alternative was building a
+partitioned vector column, an index per project, an embedding pass, an erasure registration and a
+threshold — all of it justified by an assumption that a measurement contradicts in an afternoon.
+
+**What it does not establish.** That no embedder separates them, that no surface does, or that
+proximity has no use here. Eight pairs on one local model is a gap, not a distribution. #105 holds the
+direction the data actually suggests — a term the question and the entity share, ALONGSIDE proximity,
+because the one near-miss pair that shares a word is also the furthest apart — and it says plainly that
+this is a hypothesis read off eight pairs.
+
+**Rejected:** shipping a threshold anyway (a number with a decimal point and no evidence, failing
+silently in the irreversible direction); embedding the quotes to widen the surface (measured to narrow
+the gap); a synonym list maintained by hand (it is the same over-merge decided in advance, and it has
+to be maintained per deployment, per language, forever).
+
+**How hard to undo.** Nothing was built, which is the point. When a candidate mechanism has evidence,
+what it needs — a vector column partitioned by scope, an index per partition, a projection
+registration — is additive and the measurement that justifies it already exists in the repository.
+
 ---
 
 ## Substrate

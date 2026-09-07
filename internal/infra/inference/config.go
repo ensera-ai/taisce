@@ -23,15 +23,24 @@ const (
 	EnvAPIKey    = "TAISCE_INFERENCE_API_KEY"
 	EnvModel     = "TAISCE_INFERENCE_EXTRACTOR_MODEL"
 	EnvAllowlist = "TAISCE_INFERENCE_ALLOWLIST"
+	// EnvEmbeddingModel names the model that turns text into a vector. Separate from the extractor
+	// because they are different jobs with different costs: extraction is a generation and runs once
+	// per message, embedding is a forward pass and runs once per entity and once per question.
+	// Operators pick different models for them, and a single variable would force one choice.
+	EnvEmbeddingModel = "TAISCE_INFERENCE_EMBEDDING_MODEL"
 )
 
 // Config is where inference happens and what is permitted to see it.
 type Config struct {
-	// Endpoint is the base URL. `/chat/completions` is appended, so this is the same value a
-	// vendor's own documentation calls the base URL.
+	// Endpoint is the base URL. `/chat/completions` or `/embeddings` is appended, so this is the same
+	// value a vendor's own documentation calls the base URL.
 	Endpoint string
 	APIKey   string
 	Model    string
+	// EmbeddingModel is empty when none is configured, and that is not an error here. A deployment
+	// that extracts and never embeds is a working deployment; what must not happen is a caller
+	// silently getting a vector of zeros, so the embedder refuses at the point of use instead.
+	EmbeddingModel string
 }
 
 // ConfigFromEnv reads the configuration and refuses anything that would send message content
@@ -54,6 +63,8 @@ func ConfigFromEnv() (Config, error) {
 		Endpoint: strings.TrimSuffix(strings.TrimSpace(os.Getenv(EnvEndpoint)), "/"),
 		APIKey:   strings.TrimSpace(os.Getenv(EnvAPIKey)),
 		Model:    strings.TrimSpace(os.Getenv(EnvModel)),
+
+		EmbeddingModel: strings.TrimSpace(os.Getenv(EnvEmbeddingModel)),
 	}
 	if cfg.Endpoint == "" {
 		return Config{}, fmt.Errorf("%s is not set", EnvEndpoint)
