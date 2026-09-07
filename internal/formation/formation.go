@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -112,16 +113,59 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 	return report, nil
 }
 
+// Policy bounds what forming will try before it gives up.
+//
+// Every field here exists because its absence is a way for the backlog to stop making progress
+// without anybody being told.
+type Policy struct {
+	// MaxAttempts is how many times a turn is tried before it is parked. Generous rather than tight,
+	// because the failure that matters most is the one that is not the turn's fault.
+	MaxAttempts int
+	// RetryAfter is the wait before a failed turn is offered again. It doubles per attempt, so this
+	// is the first interval rather than the only one.
+	RetryAfter time.Duration
+	// TurnBudget bounds one attempt. Extraction is a model call per message, so a long turn is a
+	// request that never ends.
+	TurnBudget time.Duration
+	// Interval is how long the driver waits after a pass that found nothing.
+	Interval time.Duration
+}
+
+// DefaultPolicy is deliberately patient.
+//
+// Six attempts with a doubling wait from ten seconds means a turn is not parked until roughly ten
+// minutes of failing, which is long enough that a provider blip does not park a backlog and short
+// enough that a genuinely poisonous turn does not hold a scope for a working day. No latency budget
+// has been agreed anywhere in this system, so these are chosen for the shape of the failure rather
+// than derived from a target — and that is worth saying out loud rather than presenting them as
+// measured.
+func DefaultPolicy() Policy {
+	return Policy{
+		MaxAttempts: 6,
+		RetryAfter:  10 * time.Second,
+		TurnBudget:  5 * time.Minute,
+		Interval:    5 * time.Second,
+	}
+}
+
 // Worker forms a scope's backlog.
 type Worker struct {
 	pool         *pgxpool.Pool
 	observations *pg.ObservationStore
 	former       *Former
+	policy       Policy
 }
 
 // NewWorker builds a worker over a pool, a store and a former.
 func NewWorker(pool *pgxpool.Pool, observations *pg.ObservationStore, former *Former) *Worker {
-	return &Worker{pool: pool, observations: observations, former: former}
+	return NewWorkerWithPolicy(pool, observations, former, DefaultPolicy())
+}
+
+// NewWorkerWithPolicy is the same worker with the bounds stated, which is what a test needs in order
+// to drive a turn to exhaustion without waiting ten minutes.
+func NewWorkerWithPolicy(pool *pgxpool.Pool, observations *pg.ObservationStore, former *Former,
+	policy Policy) *Worker {
+	return &Worker{pool: pool, observations: observations, former: former, policy: policy}
 }
 
 // ErrScopeBusy is returned when another worker is already forming this scope's backlog.
@@ -173,23 +217,68 @@ func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]R
 
 	var reports []Report
 	for {
-		observation, found, err := w.observations.NextUnformed(ctx, schema, scope)
+		observation, found, err := w.observations.NextUnformed(ctx, schema, scope, w.policy.RetryAfter)
 		if err != nil {
 			return reports, err
 		}
 		if !found {
 			return reports, nil
 		}
-		report, err := w.former.Form(ctx, schema, observation)
+
+		// A budget per turn, applied here rather than in the extractor. Extraction is a model call
+		// per message, so a turn with two hundred messages is a request that never ends — and
+		// whether to abandon it or keep waiting is a decision about this backlog, which the
+		// extractor knows nothing about.
+		attemptCtx, cancel := context.WithTimeout(ctx, w.policy.TurnBudget)
+		report, err := w.former.Form(attemptCtx, schema, observation)
+		cancel()
+
 		if err != nil {
-			// Left unformed on purpose. The turn stays at the head of the backlog and the formed
-			// watermark stays below it, so the failure is visible as a scope that stopped advancing
-			// rather than as a gap nobody notices.
-			return reports, err
+			// A cancelled parent is a shutdown, not a bad turn. Counting it as an attempt would
+			// spend a turn's budget on every restart, and a few restarts would park a backlog that
+			// nothing was ever wrong with.
+			if ctx.Err() != nil {
+				return reports, ctx.Err()
+			}
+			parked, perr := w.recordFailure(ctx, schema, observation, err)
+			if perr != nil {
+				return reports, perr
+			}
+			if !parked {
+				// Left in the backlog with its attempt counted and its wait doubled. Moving on to
+				// the next turn rather than returning, because one turn that will not form is not a
+				// reason to stop forming the scope — that was the old behaviour and it froze
+				// everything behind it.
+				continue
+			}
+			continue
 		}
+
 		if err := w.observations.MarkFormed(ctx, schema, observation.ID); err != nil {
 			return reports, err
 		}
 		reports = append(reports, report)
 	}
+}
+
+// recordFailure counts the attempt and parks the turn if it has run out of them.
+//
+// Parking is a decision to stop trying, recorded and reversible: the observation and its messages
+// are untouched, so unparking is one update and re-forming is a rebuild. It advances the watermark
+// past the turn, which is what stops one turn nobody can form from freezing a scope — and the count
+// of parked turns travels with freshness so that exception is visible rather than hidden.
+func (w *Worker) recordFailure(ctx context.Context, schema pg.Schema,
+	observation domain.Observation, cause error) (parked bool, err error) {
+
+	attempts, err := w.observations.RecordFormationFailure(ctx, schema, observation.ID, cause.Error())
+	if err != nil {
+		return false, err
+	}
+	if attempts < w.policy.MaxAttempts {
+		return false, nil
+	}
+	if err := w.observations.Park(ctx, schema, observation.ID); err != nil {
+		return false, err
+	}
+	return true, nil
 }

@@ -198,6 +198,11 @@ type freshnessResponse struct {
 	// zero is a real offset belonging to the first turn, and a caller polling for "formed >= my
 	// offset" would be told yes before anything had happened.
 	Formed *int64 `json:"formed"`
+	// Parked is how many turns the driver gave up on, and it is the exception to Formed. The
+	// watermark advances past a turn nobody can form so that one bad turn does not freeze a
+	// project's memory — which makes Formed mean "formed, except these". That is only acceptable
+	// while it is visible, so it is on the wire rather than left to be discovered.
+	Parked int `json:"parked"`
 }
 
 func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credential.Grant) {
@@ -211,7 +216,7 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credent
 		writeError(w, http.StatusInternalServerError, "internal", "freshness could not be read")
 		return
 	}
-	out := freshnessResponse{Scope: f.Scope, Stored: f.Stored}
+	out := freshnessResponse{Scope: f.Scope, Stored: f.Stored, Parked: f.Parked}
 	if f.HasFormed {
 		formed := f.Formed
 		out.Formed = &formed

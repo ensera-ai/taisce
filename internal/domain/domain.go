@@ -148,6 +148,27 @@ type Freshness struct {
 	// real offset belonging to the first turn.
 	Formed    int64
 	HasFormed bool
+	// Parked is how many turns the driver gave up on. It travels with the two numbers because it is
+	// the exception to the second one: the watermark advances past a parked turn so that one turn
+	// nobody can form does not freeze a scope's memory, which makes Formed mean "formed, except
+	// these". That is only acceptable while it is visible, so it is reported rather than inferred,
+	// and a non-zero value is something to act on.
+	Parked int
+}
+
+// ParkedTurn is a turn the driver stopped trying to form, and why.
+//
+// It is a decision rather than a loss: the observation and its messages are untouched, so unparking
+// is one update and re-forming it is a rebuild. The reason is here so that the exception to the
+// freshness watermark can be read rather than only counted.
+type ParkedTurn struct {
+	ObservationID string
+	LogOffset     int64
+	Attempts      int
+	// Reason is the last failure, truncated. It comes from a provider and is treated as text
+	// somebody else wrote.
+	Reason   string
+	ParkedAt time.Time
 }
 
 // Claim is an extracted triple with the evidence for it, before it has been resolved or stored.

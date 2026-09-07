@@ -189,3 +189,35 @@ func TestTheMemoryServiceCannotReadACredential(t *testing.T) {
 		t.Fatalf("refused for the wrong reason, which may not survive a schema change: %v", err)
 	}
 }
+
+// Revoking something that is not there, or is already revoked, is refused with the same answer as
+// resolving one. A caller cannot learn whether a credential id exists by trying to revoke it.
+func TestRevokingAnUnknownOrAlreadyRevokedCredentialIsRefused(t *testing.T) {
+	ctx := context.Background()
+	s := store(t)
+
+	if err := s.Revoke(ctx, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("revoking an unknown credential gave %v", err)
+	}
+
+	_, issued, err := s.Issue(ctx, "revoked-twice", []string{"alpha"})
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if err := s.Revoke(ctx, issued.CredentialID); err != nil {
+		t.Fatalf("first revoke: %v", err)
+	}
+	if err := s.Revoke(ctx, issued.CredentialID); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("revoking twice gave %v", err)
+	}
+}
+
+// A credential has to be nameable, because a list of anonymous keys is a list nobody can safely
+// revoke from.
+func TestACredentialWithoutANameIsRefused(t *testing.T) {
+	ctx := context.Background()
+	s := store(t)
+	if _, _, err := s.Issue(ctx, "   ", []string{"alpha"}); err == nil {
+		t.Fatal("issued a credential with no name")
+	}
+}

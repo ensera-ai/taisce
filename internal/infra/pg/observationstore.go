@@ -192,10 +192,18 @@ SELECT ordinal, role, content, group_ordinal, occurred_at
 // Oldest first, because forming out of order would let the formed watermark stall behind a turn
 // nothing is working on while newer turns complete past it — and a watermark that reports a scope as
 // behind when it is nearly current is one people learn to ignore.
-func (s *ObservationStore) NextUnformed(ctx context.Context, schema Schema, scope string) (domain.Observation, bool, error) {
+// NextUnformed returns the oldest turn in the scope's backlog that is due for an attempt.
+//
+// The backlog is what is neither formed nor parked. `retryAfter` holds back a turn whose last
+// attempt failed recently, so one turn that always fails cannot spin and starve the ones behind it —
+// backoff belongs here rather than in a sleep, because the driver may have other scopes to serve
+// while this one waits.
+func (s *ObservationStore) NextUnformed(ctx context.Context, schema Schema, scope string,
+	retryAfter time.Duration) (domain.Observation, bool, error) {
 	var out domain.Observation
 	var subject *string
-	err := s.pool.QueryRow(ctx, schema.SQL(selectNextUnformedSQL), scope).
+	err := s.pool.QueryRow(ctx, schema.SQL(selectNextUnformedSQL), scope,
+		fmt.Sprintf("%d milliseconds", retryAfter.Milliseconds())).
 		Scan(&out.ID, &out.LogOffset, &out.Scope, &subject, &out.OccurredAt, &out.IngestedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Observation{}, false, nil
@@ -212,7 +220,18 @@ func (s *ObservationStore) NextUnformed(ctx context.Context, schema Schema, scop
 const selectNextUnformedSQL = `
 SELECT observation_id::text, log_offset, scope, data_subject_id, occurred_at, ingested_at
   FROM {schema}.observation
- WHERE scope = $1 AND formed_at IS NULL
+ WHERE scope = $1 AND formed_at IS NULL AND parked_at IS NULL
+   -- A turn that just failed is not retried on the very next pass, and the wait doubles with each
+   -- attempt. Backoff is expressed where the backlog is chosen rather than as a sleep, so a scope
+   -- with one failing turn neither spins on it nor blocks the driver from serving other scopes.
+   --
+   -- It doubles because the failure that matters most is the one that is not this turn's fault: a
+   -- provider outage fails every turn, and a flat retry would burn the attempt budget of the whole
+   -- backlog inside a few minutes and park all of it. Doubling makes exhausting the budget take
+   -- long enough that an outage has to be a real one.
+   AND (formation_failed_at IS NULL
+        OR formation_failed_at
+           < now() - ($2::interval * power(2, least(formation_attempts - 1, 6))))
  ORDER BY log_offset
  LIMIT 1`
 
@@ -280,7 +299,10 @@ UPDATE {schema}.watermark
                  ELSE backlog.lowest - 1
                END
           FROM (SELECT min(log_offset) AS lowest FROM {schema}.observation
-                 WHERE scope = $1 AND formed_at IS NULL) backlog,
+                 -- Parked turns are excluded, which is what lets the watermark advance past one
+                 -- the driver gave up on rather than freezing the whole scope behind it. The
+                 -- exception that creates is reported as a count, not hidden.
+                 WHERE scope = $1 AND formed_at IS NULL AND parked_at IS NULL) backlog,
                (SELECT max(log_offset) AS highest FROM {schema}.observation
                  WHERE scope = $1) stored)
  WHERE scope = $1`
@@ -292,7 +314,7 @@ UPDATE {schema}.watermark
 func (s *ObservationStore) Freshness(ctx context.Context, schema Schema, scope string) (domain.Freshness, error) {
 	out := domain.Freshness{Scope: scope}
 	var formed *int64
-	err := s.pool.QueryRow(ctx, schema.SQL(selectFreshnessSQL), scope).Scan(&out.Stored, &formed)
+	err := s.pool.QueryRow(ctx, schema.SQL(selectFreshnessSQL), scope).Scan(&out.Stored, &formed, &out.Parked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Freshness{}, fmt.Errorf("scope %q has no turns", scope)
 	}
@@ -305,5 +327,170 @@ func (s *ObservationStore) Freshness(ctx context.Context, schema Schema, scope s
 	return out, nil
 }
 
+// The parked count is a subquery against a partial index holding only parked turns, which in a
+// healthy scope is empty. It is read on every freshness check because a number with an unstated
+// exception is worse than a number with a stated one.
 const selectFreshnessSQL = `
-SELECT log_offset, formed_offset FROM {schema}.watermark WHERE scope = $1`
+SELECT w.log_offset,
+       w.formed_offset,
+       (SELECT count(*) FROM {schema}.observation o
+         WHERE o.scope = w.scope AND o.parked_at IS NOT NULL)
+  FROM {schema}.watermark w
+ WHERE w.scope = $1`
+
+// ── When forming does not work ────────────────────────────────────────────────────────────────
+
+// RecordFormationFailure counts an attempt and remembers why it failed.
+//
+// The attempt count is what the driver's bound is measured against, and the error is what makes the
+// failure legible without reading a log. Both live on the observation so that erasure takes them
+// with the turn they describe — a provider's error text can contain the message that was sent to it.
+func (s *ObservationStore) RecordFormationFailure(ctx context.Context, schema Schema,
+	observationID, reason string) (attempts int, err error) {
+
+	// Truncated because the field is fed by a remote system, and an unbounded one lets that system
+	// decide how much of our storage it uses. The column constraint enforces the same bound; this
+	// makes the write succeed rather than fail on a long provider message.
+	const maxReason = 2000
+	if len(reason) > maxReason {
+		reason = reason[:maxReason]
+	}
+	err = s.pool.QueryRow(ctx, schema.SQL(recordFormationFailureSQL), observationID, reason).Scan(&attempts)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Formed or gone between the attempt and this write. Not an error: it means the work is
+		// done or the subject was erased, and failing here would turn either into a stuck driver.
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("record formation failure: %w", err)
+	}
+	return attempts, nil
+}
+
+const recordFormationFailureSQL = `
+UPDATE {schema}.observation
+   SET formation_attempts  = formation_attempts + 1,
+       formation_failed_at = now(),
+       formation_error     = $2
+ WHERE observation_id = $1 AND formed_at IS NULL AND parked_at IS NULL
+RETURNING formation_attempts`
+
+// Park stops trying to form a turn, and lets the scope move on.
+//
+// The observation and its messages are untouched, so this is a decision to stop rather than a
+// deletion: unparking is one update and re-forming is a rebuild. The watermark is recomputed in the
+// same transaction because parking is exactly what allows it to advance, and a park that did not
+// advance it would leave the scope frozen with a row that says it should not be.
+func (s *ObservationStore) Park(ctx context.Context, schema Schema, observationID string) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var scope string
+		err := tx.QueryRow(ctx, schema.SQL(parkSQL), observationID).Scan(&scope)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("park turn: %w", err)
+		}
+		if _, err := tx.Exec(ctx, schema.SQL(lockScopeWatermarkSQL), scope); err != nil {
+			return fmt.Errorf("lock scope watermark: %w", err)
+		}
+		if _, err := tx.Exec(ctx, schema.SQL(advanceFormedWatermarkSQL), scope); err != nil {
+			return fmt.Errorf("advance formed watermark: %w", err)
+		}
+		return nil
+	})
+}
+
+const parkSQL = `
+UPDATE {schema}.observation
+   SET parked_at = now()
+ WHERE observation_id = $1 AND formed_at IS NULL AND parked_at IS NULL
+RETURNING scope`
+
+// Parked reports the turns a scope gave up on, oldest first.
+//
+// This is what makes the watermark's exception readable rather than merely counted: an operator
+// asking why a scope has parked turns gets the offsets, the attempts and the reason.
+func (s *ObservationStore) Parked(ctx context.Context, schema Schema, scope string) ([]domain.ParkedTurn, error) {
+	rows, err := s.pool.Query(ctx, schema.SQL(selectParkedSQL), scope)
+	if err != nil {
+		return nil, fmt.Errorf("list parked turns: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.ParkedTurn
+	for rows.Next() {
+		var p domain.ParkedTurn
+		var reason *string
+		if err := rows.Scan(&p.ObservationID, &p.LogOffset, &p.Attempts, &reason, &p.ParkedAt); err != nil {
+			return nil, fmt.Errorf("scan parked turn: %w", err)
+		}
+		if reason != nil {
+			p.Reason = *reason
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+const selectParkedSQL = `
+SELECT observation_id::text, log_offset, formation_attempts, formation_error, parked_at
+  FROM {schema}.observation
+ WHERE scope = $1 AND parked_at IS NOT NULL
+ ORDER BY log_offset`
+
+// Unpark returns a turn to the backlog, clearing what it learned from failing.
+//
+// Kept beside Park because a decision to stop trying that cannot be reversed is not a decision, it
+// is a deletion with extra steps.
+func (s *ObservationStore) Unpark(ctx context.Context, schema Schema, observationID string) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var scope string
+		err := tx.QueryRow(ctx, schema.SQL(unparkSQL), observationID).Scan(&scope)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("unpark turn: %w", err)
+		}
+		if _, err := tx.Exec(ctx, schema.SQL(lockScopeWatermarkSQL), scope); err != nil {
+			return fmt.Errorf("lock scope watermark: %w", err)
+		}
+		// Recomputed downward: the turn is in the backlog again, so a watermark that advanced past
+		// it while it was parked is now claiming a turn is formed that is not.
+		if _, err := tx.Exec(ctx, schema.SQL(advanceFormedWatermarkSQL), scope); err != nil {
+			return fmt.Errorf("advance formed watermark: %w", err)
+		}
+		return nil
+	})
+}
+
+const unparkSQL = `
+UPDATE {schema}.observation
+   SET parked_at = NULL, formation_attempts = 0, formation_failed_at = NULL, formation_error = NULL
+ WHERE observation_id = $1 AND parked_at IS NOT NULL
+RETURNING scope`
+
+// ScopesWithBacklog names the scopes that have work waiting.
+//
+// The driver asks this rather than being told which scopes exist, because a scope is created by the
+// first turn written to it and nothing announces that. One index scan over the backlog index.
+func (s *ObservationStore) ScopesWithBacklog(ctx context.Context, schema Schema) ([]string, error) {
+	rows, err := s.pool.Query(ctx, schema.SQL(
+		`SELECT DISTINCT scope FROM {schema}.observation
+		  WHERE formed_at IS NULL AND parked_at IS NULL ORDER BY scope`))
+	if err != nil {
+		return nil, fmt.Errorf("list scopes with backlog: %w", err)
+	}
+	defer rows.Close()
+
+	var scopes []string
+	for rows.Next() {
+		var scope string
+		if err := rows.Scan(&scope); err != nil {
+			return nil, fmt.Errorf("scan scope: %w", err)
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes, rows.Err()
+}

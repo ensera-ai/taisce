@@ -3,6 +3,9 @@ package formation_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -97,6 +100,21 @@ func former(t *testing.T, pool *pgxpool.Pool, schema pg.Schema) (*formation.Work
 	observations := pg.NewObservationStore(pool)
 	f := formation.NewFormer(observations, pg.NewFactStore(pool), extract.New(scriptedModel{}, vocabulary))
 	return formation.NewWorker(pool, observations, f), observations
+}
+
+// workerWith builds a worker over a chosen model and policy. The existing `former` helper fixes both,
+// which is right for the tests it serves and wrong for these: what #48 is about is what happens when
+// the model refuses, and how many times.
+func workerWith(t *testing.T, pool *pgxpool.Pool, schema pg.Schema,
+	model extract.Model, policy formation.Policy) *formation.Worker {
+	t.Helper()
+	vocabulary, err := pg.LoadOntology(context.Background(), pool, schema)
+	if err != nil {
+		t.Fatalf("load vocabulary: %v", err)
+	}
+	observations := pg.NewObservationStore(pool)
+	f := formation.NewFormer(observations, pg.NewFactStore(pool), extract.New(model, vocabulary))
+	return formation.NewWorkerWithPolicy(pool, observations, f, policy)
 }
 
 func turnOf(msgs ...domain.Message) domain.Turn {
@@ -411,5 +429,467 @@ func TestFormationRecordsWhatTheVocabularyRefused(t *testing.T) {
 	}
 	if predicate != "commutes_by" || reason != domain.ReasonUnmappedRelation {
 		t.Fatalf("the rejection did not record what was refused: %q / %q", predicate, reason)
+	}
+}
+
+// ── #48: what happens to a turn that will not form ────────────────────────────────────────────
+
+// failingModel refuses every message, the way a provider that will never accept this turn does.
+type failingModel struct{ calls int }
+
+func (m *failingModel) Propose(context.Context, domain.Message, domain.Ontology) ([]extract.Proposal, error) {
+	m.calls++
+	return nil, fmt.Errorf("the provider refused this message")
+}
+
+// impatient is the default policy with the waiting taken out, so a test can drive a turn to
+// exhaustion without spending ten minutes doing it. The bounds being configurable is the reason this
+// test can exist at all.
+func impatient() formation.Policy {
+	p := formation.DefaultPolicy()
+	p.MaxAttempts = 3
+	p.RetryAfter = time.Nanosecond
+	p.TurnBudget = 30 * time.Second
+	return p
+}
+
+// A turn that fails every time is parked, and parking is legible without reading a log.
+func TestATurnThatWillNotFormIsParkedWithItsReasonKept(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_park")
+	observations := pg.NewObservationStore(pool)
+
+	stored, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	model := &failingModel{}
+	worker := workerWith(t, pool, schema, model, impatient())
+
+	// Each drain makes one attempt and moves on; the turn is offered again on the next drain.
+	for i := 0; i < impatient().MaxAttempts; i++ {
+		if _, err := worker.Drain(ctx, schema, "p1"); err != nil {
+			t.Fatalf("drain %d: %v", i, err)
+		}
+	}
+
+	parked, err := observations.Parked(ctx, schema, "p1")
+	if err != nil {
+		t.Fatalf("list parked: %v", err)
+	}
+	if len(parked) != 1 {
+		t.Fatalf("got %d parked turns after %d failed attempts, wanted 1", len(parked), impatient().MaxAttempts)
+	}
+	if parked[0].ObservationID != stored.ID {
+		t.Fatalf("parked the wrong turn: %s", parked[0].ObservationID)
+	}
+	if parked[0].Attempts != impatient().MaxAttempts {
+		t.Fatalf("parked after %d attempts, wanted %d", parked[0].Attempts, impatient().MaxAttempts)
+	}
+	// The reason is the deliverable. A parked turn whose failure can only be found in a log is a
+	// turn nobody will diagnose.
+	if !strings.Contains(parked[0].Reason, "the provider refused") {
+		t.Fatalf("the parked turn does not say why: %q", parked[0].Reason)
+	}
+}
+
+// A parked turn does not hold the scope. This is the decision the issue said was the customer-facing
+// one: the watermark advances past it so one poisonous turn cannot freeze a project's memory.
+func TestAParkedTurnDoesNotFreezeTheScopeBehindIt(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_unfreeze")
+	observations := pg.NewObservationStore(pool)
+
+	poison, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "This one will never form."},
+	))
+	if err != nil {
+		t.Fatalf("append poison: %v", err)
+	}
+
+	// Exhaust it against a model that always fails.
+	failing := workerWith(t, pool, schema, &failingModel{}, impatient())
+	for i := 0; i < impatient().MaxAttempts; i++ {
+		if _, err := failing.Drain(ctx, schema, "p1"); err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+	}
+
+	// A turn written after it forms normally.
+	good, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append good: %v", err)
+	}
+	working := workerWith(t, pool, schema, scriptedModel{}, impatient())
+	if _, err := working.Drain(ctx, schema, "p1"); err != nil {
+		t.Fatalf("drain good: %v", err)
+	}
+
+	fresh, err := observations.Freshness(ctx, schema, "p1")
+	if err != nil {
+		t.Fatalf("freshness: %v", err)
+	}
+	if !fresh.HasFormed || fresh.Formed != good.LogOffset {
+		t.Fatalf("the watermark is %v/%v and the good turn is at %d — a parked turn froze the scope",
+			fresh.Formed, fresh.HasFormed, good.LogOffset)
+	}
+	// And the exception to that number is reported rather than hidden, which is the whole condition
+	// on which advancing past a parked turn is acceptable.
+	if fresh.Parked != 1 {
+		t.Fatalf("freshness reports %d parked turns, so the watermark's exception is invisible", fresh.Parked)
+	}
+	_ = poison
+}
+
+// Parking is a decision, not a deletion. A decision that cannot be reversed is a deletion with extra
+// steps, so unparking returns the turn to the backlog and takes the watermark back down with it.
+func TestUnparkingReturnsTheTurnAndCorrectsTheWatermark(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_unpark")
+	observations := pg.NewObservationStore(pool)
+
+	stored, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	failing := workerWith(t, pool, schema, &failingModel{}, impatient())
+	for i := 0; i < impatient().MaxAttempts; i++ {
+		if _, err := failing.Drain(ctx, schema, "p1"); err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+	}
+
+	if err := observations.Unpark(ctx, schema, stored.ID); err != nil {
+		t.Fatalf("unpark: %v", err)
+	}
+	fresh, err := observations.Freshness(ctx, schema, "p1")
+	if err != nil {
+		t.Fatalf("freshness: %v", err)
+	}
+	if fresh.HasFormed {
+		t.Fatalf("the watermark still claims offset %d is formed after the turn came back", fresh.Formed)
+	}
+	if fresh.Parked != 0 {
+		t.Fatalf("%d turns are still parked", fresh.Parked)
+	}
+
+	// And it forms, which is what makes unparking worth having.
+	working := workerWith(t, pool, schema, scriptedModel{}, impatient())
+	if _, err := working.Drain(ctx, schema, "p1"); err != nil {
+		t.Fatalf("drain after unpark: %v", err)
+	}
+	fresh, err = observations.Freshness(ctx, schema, "p1")
+	if err != nil {
+		t.Fatalf("freshness: %v", err)
+	}
+	if !fresh.HasFormed || fresh.Formed != stored.LogOffset {
+		t.Fatal("an unparked turn did not form")
+	}
+}
+
+// A shutdown is not a bad turn. Counting a cancelled attempt would spend a turn's budget on every
+// restart, and a handful of restarts would park a backlog nothing was ever wrong with.
+func TestACancelledDrainDoesNotSpendTheTurnsAttempts(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_cancel")
+	observations := pg.NewObservationStore(pool)
+
+	if _, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	worker := workerWith(t, pool, schema, &failingModel{}, impatient())
+	if _, err := worker.Drain(cancelled, schema, "p1"); err == nil {
+		t.Fatal("a cancelled drain reported success")
+	}
+
+	parked, err := observations.Parked(ctx, schema, "p1")
+	if err != nil {
+		t.Fatalf("list parked: %v", err)
+	}
+	if len(parked) != 0 {
+		t.Fatalf("a cancelled drain parked %d turns", len(parked))
+	}
+}
+
+// ── The driver ────────────────────────────────────────────────────────────────────────────────
+
+// The driver finds scopes rather than being told them, which is the only way a project created after
+// it started gets formed.
+func TestTheDriverFindsScopesItWasNeverToldAbout(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_driver")
+	observations := pg.NewObservationStore(pool)
+
+	for _, scope := range []string{"p1", "p2"} {
+		turn := turnOf(domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."})
+		turn.Scope = scope
+		if err := migrate.ProvisionScope(ctx, pool, schema.String(), scope); err != nil {
+			t.Fatalf("provision %s: %v", scope, err)
+		}
+		if _, err := observations.Append(ctx, schema, turn); err != nil {
+			t.Fatalf("append to %s: %v", scope, err)
+		}
+	}
+
+	driver := formation.NewDriver(
+		workerWith(t, pool, schema, scriptedModel{}, impatient()),
+		observations, schema, impatient(), quietLogger())
+
+	pass, err := driver.Once(ctx)
+	if err != nil {
+		t.Fatalf("pass: %v", err)
+	}
+	if pass.Scopes != 2 {
+		t.Fatalf("the driver found %d scopes, wanted the two that have a backlog", pass.Scopes)
+	}
+	if pass.Formed != 2 {
+		t.Fatalf("the driver formed %d turns across two scopes", pass.Formed)
+	}
+
+	// A second pass finds nothing, which is what says the first one finished rather than looped.
+	again, err := driver.Once(ctx)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if again.Scopes != 0 {
+		t.Fatalf("%d scopes still have a backlog after a completed pass", again.Scopes)
+	}
+}
+
+// One project's bad turn does not hold up another project's memory. This is the same mistake parking
+// exists to fix, one level up.
+func TestAScopeThatFailsDoesNotStopTheOthersForming(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_isolate")
+	observations := pg.NewObservationStore(pool)
+
+	for _, scope := range []string{"p1", "p2"} {
+		if err := migrate.ProvisionScope(ctx, pool, schema.String(), scope); err != nil {
+			t.Fatalf("provision %s: %v", scope, err)
+		}
+	}
+	// p1 gets a turn a model will refuse; p2 gets one it will accept. The model fails on the
+	// content, so which scope suffers is decided by the fixture rather than by ordering.
+	poison := turnOf(domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "refuse me"})
+	poison.Scope = "p1"
+	if _, err := observations.Append(ctx, schema, poison); err != nil {
+		t.Fatalf("append poison: %v", err)
+	}
+	good := turnOf(domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."})
+	good.Scope = "p2"
+	stored, err := observations.Append(ctx, schema, good)
+	if err != nil {
+		t.Fatalf("append good: %v", err)
+	}
+
+	driver := formation.NewDriver(
+		workerWith(t, pool, schema, selective{}, impatient()),
+		observations, schema, impatient(), quietLogger())
+
+	pass, err := driver.Once(ctx)
+	if err != nil {
+		t.Fatalf("pass: %v", err)
+	}
+	if pass.Formed != 1 {
+		t.Fatalf("formed %d turns; the healthy scope should have formed regardless of the other", pass.Formed)
+	}
+
+	fresh, err := observations.Freshness(ctx, schema, "p2")
+	if err != nil {
+		t.Fatalf("freshness: %v", err)
+	}
+	if !fresh.HasFormed || fresh.Formed != stored.LogOffset {
+		t.Fatal("a healthy scope did not form because another scope was failing")
+	}
+}
+
+// selective refuses one fixture and accepts the other, so a test can have two scopes disagree.
+type selective struct{}
+
+func (selective) Propose(_ context.Context, m domain.Message, _ domain.Ontology) ([]extract.Proposal, error) {
+	if strings.Contains(m.Content, "refuse me") {
+		return nil, fmt.Errorf("the provider refused this message")
+	}
+	return scriptedModel{}.Propose(context.Background(), m, domain.Ontology{})
+}
+
+func quietLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError + 1}))
+}
+
+// The driver forms without anybody asking it to.
+//
+// This is #48's whole point and the one property none of the other tests cover: every one of them
+// calls Drain or Once directly, which proves the mechanism and not that it ever runs. Here a turn is
+// appended into a running driver and the assertion is that memory formed on its own.
+func TestTheDriverFormsAScopeWithoutAnybodyAskingIt(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_running")
+	observations := pg.NewObservationStore(pool)
+
+	policy := impatient()
+	policy.Interval = 20 * time.Millisecond
+	driver := formation.NewDriver(
+		workerWith(t, pool, schema, scriptedModel{}, policy),
+		observations, schema, policy, quietLogger())
+
+	running, stop := context.WithCancel(ctx)
+	returned := make(chan error, 1)
+	go func() { returned <- driver.Run(running) }()
+
+	stored, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		stop()
+		t.Fatalf("append: %v", err)
+	}
+
+	// Polled rather than slept on: what is being asserted is that it happens, and a fixed sleep
+	// would either make the test slow or make it flaky, and there is no third outcome.
+	formed := false
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		fresh, err := observations.Freshness(ctx, schema, "p1")
+		if err == nil && fresh.HasFormed && fresh.Formed >= stored.LogOffset {
+			formed = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stop()
+
+	if !formed {
+		t.Fatal("a turn was appended into a running driver and never formed")
+	}
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatalf("the driver returned an error on shutdown: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the driver did not return when its context ended")
+	}
+}
+
+// Two drivers over one instance do not form the same turn twice.
+//
+// This is what makes the chart's several replicas a deployment decision rather than a code change,
+// so it is asserted rather than assumed: the second driver finds the scope locked and moves on.
+func TestASecondDriverDoesNotFormTheSameTurnTwice(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_replicas")
+	observations := pg.NewObservationStore(pool)
+
+	for i := 0; i < 3; i++ {
+		if _, err := observations.Append(ctx, schema, turnOf(
+			domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+		)); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	policy := impatient()
+	newDriver := func() *formation.Driver {
+		return formation.NewDriver(workerWith(t, pool, schema, scriptedModel{}, policy),
+			observations, schema, policy, quietLogger())
+	}
+
+	// Run two passes concurrently. Whichever loses the lock reports the scope busy and forms
+	// nothing; between them they must form each turn exactly once.
+	type result struct {
+		pass formation.Pass
+		err  error
+	}
+	results := make(chan result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			p, err := newDriver().Once(ctx)
+			results <- result{p, err}
+		}()
+	}
+	total := 0
+	for i := 0; i < 2; i++ {
+		r := <-results
+		if r.err != nil {
+			t.Fatalf("a concurrent pass failed: %v", r.err)
+		}
+		total += r.pass.Formed
+	}
+	if total != 3 {
+		t.Fatalf("two drivers formed %d turns between them, wanted the 3 that exist", total)
+	}
+
+	var facts int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.fact`)).Scan(&facts); err != nil {
+		t.Fatalf("count facts: %v", err)
+	}
+	if facts != 3 {
+		t.Fatalf("%d facts from 3 turns asserting one relation each — a turn was formed twice", facts)
+	}
+}
+
+// Recording a failure against a turn that formed in the meantime is not an error.
+//
+// It happens: an attempt fails after the mark, or the subject was erased between the attempt and the
+// write. Failing here would turn a recovered run into a stuck one, and an erased subject into a
+// driver that cannot make progress.
+func TestRecordingAFailureAgainstAFormedOrAbsentTurnIsANoOp(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_noop")
+	observations := pg.NewObservationStore(pool)
+
+	stored, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if _, err := workerWith(t, pool, schema, scriptedModel{}, impatient()).
+		Drain(ctx, schema, "p1"); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	attempts, err := observations.RecordFormationFailure(ctx, schema, stored.ID, "too late")
+	if err != nil {
+		t.Fatalf("recording against a formed turn errored: %v", err)
+	}
+	if attempts != 0 {
+		t.Fatalf("a formed turn accumulated %d attempts", attempts)
+	}
+	// Parking one is the same: the turn is in memory and giving up on it is contradictory.
+	if err := observations.Park(ctx, schema, stored.ID); err != nil {
+		t.Fatalf("parking a formed turn errored: %v", err)
+	}
+	parked, err := observations.Parked(ctx, schema, "p1")
+	if err != nil {
+		t.Fatalf("list parked: %v", err)
+	}
+	if len(parked) != 0 {
+		t.Fatalf("a formed turn was parked")
+	}
+	// And an observation that does not exist at all.
+	if err := observations.Unpark(ctx, schema, "00000000-0000-0000-0000-000000000000"); err != nil {
+		t.Fatalf("unparking an absent turn errored: %v", err)
 	}
 }

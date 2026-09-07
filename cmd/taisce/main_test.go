@@ -222,3 +222,41 @@ func reachable(url string, within time.Duration) bool {
 	}
 	return false
 }
+
+// With a model configured, the process starts the formation driver alongside the server.
+//
+// The endpoint is unreachable on purpose: what is under test is that the driver is WIRED, not that
+// extraction works. A deployment where the driver silently never starts is one that stores turns,
+// never forms them, and answers every recall with nothing — which looks like a memory that does not
+// work rather than a process that was misconfigured.
+func TestAConfiguredModelStartsTheFormationDriver(t *testing.T) {
+	port := freePort(t)
+	env := complete(t)
+	env[envAddr] = fmt.Sprintf("127.0.0.1:%d", port)
+	withEnv(t, env)
+
+	// Allowlisted, because the allowlist is closed when unset and this would otherwise be refused
+	// before it ever reached a socket — which is the fail-closed default doing its job.
+	t.Setenv("TAISCE_INFERENCE_ENDPOINT", "http://127.0.0.1:1/v1")
+	t.Setenv("TAISCE_INFERENCE_EXTRACTOR_MODEL", "unreachable-on-purpose")
+	t.Setenv("TAISCE_INFERENCE_ALLOWLIST", "http://127.0.0.1:1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- run(ctx, quiet()) }()
+
+	if !reachable(fmt.Sprintf("http://127.0.0.1:%d/health", port), 5*time.Second) {
+		cancel()
+		t.Fatal("the process did not serve with a model configured")
+	}
+	cancel()
+
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("shutdown returned an error: %v", err)
+		}
+	case <-time.After(40 * time.Second):
+		t.Fatal("the process did not stop; the driver may not be honouring its context")
+	}
+}

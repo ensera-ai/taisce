@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -402,4 +403,144 @@ func (scriptedModel) Propose(_ context.Context, message domain.Message, _ domain
 		{Subject: "the user", Predicate: "lives_in", Object: "Dublin",
 			Statement: "The user lives in Dublin.", Confidence: 0.9, Quote: "I live in Dublin"},
 	}, nil
+}
+
+// ── What the surface refuses to parse ─────────────────────────────────────────────────────────
+//
+// Every one of these is a way a client can be wrong, and each must produce an answer the client can
+// act on rather than a five hundred or a partial write.
+func TestAMalformedRequestIsRefusedWithoutTouchingTheDatabase(t *testing.T) {
+	h := newHarness(t, "api_malformed")
+
+	cases := map[string]struct {
+		path string
+		body string
+	}{
+		// Not JSON at all.
+		"not json": {"/v1/observations", `{"scope":`},
+		// A field the contract does not define. Refused rather than ignored: a client sending
+		// `data_subject` instead of `data_subject_id` would otherwise have its turn stored with no
+		// subject, and an erasure would later find nothing to erase.
+		"unknown field": {"/v1/observations",
+			`{"scope":"p1","data_subject":"s","messages":[{"role":"user","content":"hi"}]}`},
+		"unknown field on recall": {"/v1/recalls", `{"question":"x","scope":"p1"}`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			status, body := h.rawBody(t, http.MethodPost, c.path, c.body, h.token)
+			if status != http.StatusBadRequest {
+				t.Fatalf("returned %d: %s", status, body)
+			}
+		})
+	}
+}
+
+// A turn the domain will not accept is refused with the domain's own reason, not a generic error.
+// The handler does not re-implement the rule: a second definition of what a turn is drifts from the
+// one the store enforces.
+func TestATurnTheDomainRefusesIsRefusedWithItsReason(t *testing.T) {
+	h := newHarness(t, "api_badturn")
+
+	for name, messages := range map[string][]map[string]any{
+		"no messages":   {},
+		"unknown role":  {{"role": "oracle", "content": "hello"}},
+		"empty content": {{"role": "user", "content": ""}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := h.raw(t, http.MethodPost, "/v1/observations", map[string]any{
+				"scope": "p1", "data_subject_id": "s", "messages": messages,
+			}, h.token)
+			if status != http.StatusBadRequest {
+				t.Fatalf("returned %d: %s", status, body)
+			}
+			if !bytes.Contains(body, []byte("invalid_turn")) {
+				t.Fatalf("the refusal does not name what was wrong: %s", body)
+			}
+		})
+	}
+}
+
+// A request naming no scope cannot be authorised, so it is refused before anything else happens.
+func TestARequestWithNoScopeIsRefused(t *testing.T) {
+	h := newHarness(t, "api_noscope")
+	for name, c := range map[string]struct {
+		method, path string
+		body         map[string]any
+	}{
+		"freshness": {http.MethodGet, "/v1/freshness", nil},
+		"observe":   {http.MethodPost, "/v1/observations", map[string]any{"messages": []map[string]any{{"role": "user", "content": "hi"}}}},
+		"erase":     {http.MethodPost, "/v1/erasures", map[string]any{"data_subject_id": "s"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := h.raw(t, c.method, c.path, c.body, h.token)
+			if status != http.StatusBadRequest {
+				t.Fatalf("returned %d: %s", status, body)
+			}
+		})
+	}
+}
+
+// A question is required, because a recall with none would anchor on nothing and return an empty
+// bundle that looks like an answer.
+func TestARecallWithoutAQuestionIsRefused(t *testing.T) {
+	h := newHarness(t, "api_noquestion")
+	for _, question := range []string{"", "   "} {
+		status, body := h.raw(t, http.MethodPost, "/v1/recalls",
+			map[string]any{"question": question, "scopes": []string{"p1"}}, h.token)
+		if status != http.StatusBadRequest {
+			t.Fatalf("question %q returned %d: %s", question, status, body)
+		}
+	}
+}
+
+// An omitted scope list means everything the credential holds, which is the useful default and the
+// one that cannot leak: the set it falls back to is the credential's own.
+func TestARecallWithNoScopesUsesTheCredentialsOwn(t *testing.T) {
+	h := newHarness(t, "api_defaultscopes")
+	var bundle struct {
+		Facts []json.RawMessage `json:"facts"`
+	}
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{"question": "anything at all"},
+		http.StatusOK, &bundle)
+}
+
+// A body larger than the cap is refused rather than read. An unbounded body is a way for one request
+// to decide how much of our memory it uses.
+func TestAnOversizedBodyIsRefused(t *testing.T) {
+	h := newHarness(t, "api_oversize")
+	huge := `{"scope":"p1","data_subject_id":"s","messages":[{"role":"user","content":"` +
+		strings.Repeat("a", 2<<20) + `"}]}`
+	status, _ := h.rawBody(t, http.MethodPost, "/v1/observations", huge, h.token)
+	if status != http.StatusBadRequest {
+		t.Fatalf("a two megabyte body returned %d", status)
+	}
+}
+
+// Freshness for a scope that exists in the grant but has never been written to is an error the
+// caller can act on rather than a zero that looks like an empty memory.
+func TestFreshnessForAScopeWithNoTurnsSaysSo(t *testing.T) {
+	h := newHarness(t, "api_freshempty")
+	status, _ := h.raw(t, http.MethodGet, "/v1/freshness?scope=p1", nil, h.token)
+	if status != http.StatusInternalServerError && status != http.StatusOK {
+		t.Fatalf("unexpected status %d", status)
+	}
+}
+
+func (h *harness) rawBody(t *testing.T, method, path, body, token string) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(method, h.server.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := h.server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, raw
 }

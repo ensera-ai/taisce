@@ -23,6 +23,9 @@ import (
 
 	"github.com/ensera-ai/taisce/internal/api"
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/extract"
+	"github.com/ensera-ai/taisce/internal/formation"
+	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/ensera-ai/taisce/internal/recall"
@@ -111,6 +114,45 @@ func run(ctx context.Context, log *slog.Logger) error {
 		log,
 	)
 
+	// The driver forms the backlog behind the append. Without it, turns are stored, freshness never
+	// advances, and a recall returns nothing — a deployment that looks like it works and holds no
+	// memory.
+	//
+	// Extraction needs a model, and there is no model that can be shipped. So a missing endpoint
+	// does not stop the process: storage, recall of what is already formed, erasure and export all
+	// work without one, and refusing to start would turn a five-minute install into a failure in
+	// minute one. What it must not do is look fine, so it says so at every level an operator might
+	// be reading.
+	driverStopped := make(chan struct{})
+	if inferenceConfig, cfgErr := inference.ConfigFromEnv(); cfgErr != nil {
+		log.Warn("MEMORY WILL NOT FORM: no model endpoint is configured, so turns will be stored "+
+			"and never extracted. Storage, recall of what is already formed, and erasure all work. "+
+			"Set TAISCE_INFERENCE_ENDPOINT, TAISCE_INFERENCE_EXTRACTOR_MODEL and "+
+			"TAISCE_INFERENCE_ALLOWLIST to start forming.", "reason", cfgErr.Error())
+		close(driverStopped)
+	} else {
+		vocabulary, vocErr := pg.LoadOntology(ctx, memory, schema)
+		if vocErr != nil {
+			return fmt.Errorf("load the relation vocabulary: %w", vocErr)
+		}
+		observations := pg.NewObservationStore(memory)
+		former := formation.NewFormer(observations, pg.NewFactStore(memory),
+			extract.New(inference.NewModel(inferenceConfig), vocabulary))
+		policy := formation.DefaultPolicy()
+		driver := formation.NewDriver(
+			formation.NewWorkerWithPolicy(memory, observations, former, policy),
+			observations, schema, policy, log)
+
+		go func() {
+			defer close(driverStopped)
+			// Run returns only when the context ends, and a scope busy with another replica is not
+			// an error here — that is the normal case when the chart runs more than one.
+			if err := driver.Run(ctx); err != nil {
+				log.Error("formation driver stopped early", "error", err)
+			}
+		}()
+	}
+
 	addr := os.Getenv(envAddr)
 	if addr == "" {
 		// Loopback would be wrong in a container and right on a laptop; a container is where this
@@ -154,7 +196,17 @@ func run(ctx context.Context, log *slog.Logger) error {
 		shutdown, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		log.Info("shutting down")
-		return httpServer.Shutdown(shutdown)
+		err := httpServer.Shutdown(shutdown)
+
+		// Wait for the driver, so a turn mid-extraction finishes or is abandoned deliberately rather
+		// than the process disappearing underneath it. Its attempt is not counted against the turn
+		// when the cause is a cancelled context, so a restart costs nothing.
+		select {
+		case <-driverStopped:
+		case <-shutdown.Done():
+			log.Warn("the formation driver did not stop within the shutdown budget")
+		}
+		return err
 	}
 }
 
