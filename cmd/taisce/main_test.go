@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 	"strings"
 	"testing"
 	"time"
@@ -178,23 +180,192 @@ func TestTheBundleCapFallsBackRatherThanFailing(t *testing.T) {
 
 // ── main itself ───────────────────────────────────────────────────────────────────────────────
 //
-// Re-executed as a subprocess, because what is being asserted is the exit status — which is the
-// contract main has with whatever supervises it, and which cannot be observed from inside the
-// process that would be exiting.
-func TestTheBinaryExitsNonZeroWhenItCannotStart(t *testing.T) {
+// Re-executed as a subprocess, because what is asserted is the EXIT STATUS — the contract main has
+// with whatever supervises it, and the thing that cannot be observed from inside the process that
+// would be exiting. A container that exits zero on a failure is one an orchestrator restarts
+// forever without ever reporting a problem.
+func TestTheBinaryExitsNonZeroWhenItFails(t *testing.T) {
 	if os.Getenv("TAISCE_MAIN_SUBPROCESS") == "1" {
 		main()
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=TestTheBinaryExitsNonZeroWhenItCannotStart")
+	cmd := exec.Command(os.Args[0], "-test.run=TestTheBinaryExitsNonZeroWhenItFails")
 	cmd.Env = append(os.Environ(), "TAISCE_MAIN_SUBPROCESS=1", envMemoryDSN+"=")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("the binary exited 0 with no configuration: %s", out)
+		t.Fatalf("the binary exited 0 on a failure: %s", out)
 	}
 	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() == 0 {
 		t.Fatalf("wanted a non-zero exit, got %v: %s", err, out)
 	}
+}
+
+// ── The commands ──────────────────────────────────────────────────────────────────────────────
+
+// No subcommand means serve, because the container's command is the common case and a deployment
+// that has to remember the word is one that fails at start with a usage message.
+func TestNoSubcommandMeansServe(t *testing.T) {
+	env := complete(t)
+	env[envMemoryDSN] = ""
+	withEnv(t, env)
+
+	err := dispatch(context.Background(), quiet(), nil)
+	if err == nil {
+		t.Fatal("dispatch with no arguments did not reach serve")
+	}
+	if !strings.Contains(err.Error(), envMemoryDSN) {
+		t.Fatalf("it routed somewhere other than serve: %v", err)
+	}
+}
+
+func TestAnUnknownCommandIsAnError(t *testing.T) {
+	if err := dispatch(context.Background(), quiet(), []string{"frobnicate"}); err == nil {
+		t.Fatal("an unknown command succeeded")
+	}
+	if err := dispatch(context.Background(), quiet(), []string{"help"}); err != nil {
+		t.Fatalf("help failed: %v", err)
+	}
+}
+
+// Bootstrap brings an empty database to a state that can serve, and it does so twice.
+//
+// Twice matters: the compose file and the chart both run it on every start, so a bootstrap that
+// fails the second time is a deployment that cannot restart. And it must not mint a second
+// credential on the second run, or every restart leaves a key nobody can account for.
+func TestBootstrapIsIdempotentAndMintsOneCredential(t *testing.T) {
+	env := complete(t)
+	env[envTenant] = "cmd_bootstrap"
+	env[envAdminDSN] = env[envMemoryDSN]
+	withEnv(t, env)
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "bootstrap-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "bootstrap-test-data")
+
+	ctx := context.Background()
+	dropSchema(t, "cmd_bootstrap")
+
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "cmd_bootstrap_p1"}); err != nil {
+		t.Fatalf("first bootstrap: %v", err)
+	}
+	first := credentialsGranting(t, "cmd_bootstrap_p1")
+	if first != 1 {
+		t.Fatalf("bootstrap left %d credentials able to reach the project, wanted exactly one", first)
+	}
+
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "cmd_bootstrap_p1"}); err != nil {
+		t.Fatalf("second bootstrap: %v", err)
+	}
+	if second := credentialsGranting(t, "cmd_bootstrap_p1"); second != first {
+		t.Fatalf("a restart minted another credential: %d then %d", first, second)
+	}
+}
+
+// The passwords for the two database identities have no default, because a default is a credential
+// that works because nobody chose one.
+func TestBootstrapRefusesWithoutTheIdentityPasswords(t *testing.T) {
+	env := complete(t)
+	env[envTenant] = "cmd_nopass"
+	env[envAdminDSN] = env[envMemoryDSN]
+	withEnv(t, env)
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "")
+	t.Setenv("TAISCE_DATA_PASSWORD", "")
+
+	err := dispatch(context.Background(), quiet(), []string{"bootstrap"})
+	if err == nil {
+		t.Fatal("bootstrapped with no passwords for the two identities")
+	}
+	if !strings.Contains(err.Error(), "TAISCE_CONTROL_PASSWORD") {
+		t.Fatalf("the refusal does not say what is missing: %v", err)
+	}
+}
+
+// Creating a project is a controlled operation, and creating one twice is not a failure — the chart
+// and the compose file both run it on every start.
+func TestCreatingAProjectIsRepeatable(t *testing.T) {
+	env := complete(t)
+	env[envTenant] = "cmd_project"
+	env[envAdminDSN] = env[envMemoryDSN]
+	withEnv(t, env)
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "project-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "project-test-data")
+
+	ctx := context.Background()
+	dropSchema(t, "cmd_project")
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "p1"}); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := dispatch(ctx, quiet(), []string{"project", "create", "p2"}); err != nil {
+			t.Fatalf("create p2 (attempt %d): %v", i, err)
+		}
+	}
+	if err := dispatch(ctx, quiet(), []string{"project", "list"}); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if err := dispatch(ctx, quiet(), []string{"project", "nonsense"}); err == nil {
+		t.Fatal("an unknown project command succeeded")
+	}
+}
+
+// A credential can be minted and revoked from the command line, which is how an operator recovers
+// from a lost token without a portal.
+func TestACredentialCanBeMintedAndRevokedFromTheCommandLine(t *testing.T) {
+	env := complete(t)
+	env[envTenant] = "cmd_cred"
+	env[envAdminDSN] = env[envMemoryDSN]
+	withEnv(t, env)
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "cred-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "cred-test-data")
+
+	ctx := context.Background()
+	dropSchema(t, "cmd_cred")
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "p1"}); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	before := credentialsGranting(t, "cmd_cred_p2")
+	if err := dispatch(ctx, quiet(), []string{"credential", "issue", "second", "-scopes", "cmd_cred_p2"}); err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if after := credentialsGranting(t, "cmd_cred_p2"); after != before+1 {
+		t.Fatalf("issuing produced %d credentials for the project, wanted %d", after, before+1)
+	}
+	if err := dispatch(ctx, quiet(), []string{"credential", "revoke", "not-a-uuid"}); err == nil {
+		t.Fatal("revoking an unknown credential succeeded")
+	}
+	if err := dispatch(ctx, quiet(), []string{"credential", "nonsense"}); err == nil {
+		t.Fatal("an unknown credential command succeeded")
+	}
+}
+
+func dropSchema(t *testing.T, name string) {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), os.Getenv("TAISCE_TEST_DSN"))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(context.Background(), `DROP SCHEMA IF EXISTS `+name+` CASCADE`); err != nil {
+		t.Fatalf("drop %s: %v", name, err)
+	}
+}
+
+// credentialsGranting counts the live credentials that can reach one project.
+//
+// Counted per project rather than instance-wide, because every test in this repository shares one
+// database and a global count would make this test depend on what else ran first.
+func credentialsGranting(t *testing.T, project string) int {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), os.Getenv("TAISCE_TEST_DSN"))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM control.credential WHERE revoked_at IS NULL AND $1 = ANY(scopes)`,
+		project).Scan(&n); err != nil {
+		t.Fatalf("count credentials: %v", err)
+	}
+	return n
 }
 
 func freePort(t *testing.T) int {
@@ -258,5 +429,102 @@ func TestAConfiguredModelStartsTheFormationDriver(t *testing.T) {
 		}
 	case <-time.After(40 * time.Second):
 		t.Fatal("the process did not stop; the driver may not be honouring its context")
+	}
+}
+
+// The operator commands refuse the same configuration mistakes the server does, and say which.
+//
+// They are a separate entry point into the same database, so a refusal the server makes and these do
+// not is a way to half-create a schema with a connection that was never checked.
+func TestTheOperatorCommandsRefuseMissingConfiguration(t *testing.T) {
+	base := complete(t)
+
+	t.Run("no admin or memory connection", func(t *testing.T) {
+		env := map[string]string{envAdminDSN: "", envMemoryDSN: "", envTenant: base[envTenant]}
+		withEnv(t, env)
+		if err := dispatch(context.Background(), quiet(), []string{"project", "list"}); err == nil {
+			t.Fatal("ran with no connection at all")
+		}
+	})
+
+	t.Run("no schema", func(t *testing.T) {
+		env := map[string]string{envAdminDSN: base[envMemoryDSN], envMemoryDSN: base[envMemoryDSN], envTenant: ""}
+		withEnv(t, env)
+		err := dispatch(context.Background(), quiet(), []string{"project", "list"})
+		if err == nil {
+			t.Fatal("ran with no schema named")
+		}
+		if !strings.Contains(err.Error(), envTenant) {
+			t.Fatalf("the refusal does not name what is missing: %v", err)
+		}
+	})
+
+	t.Run("unusable schema name", func(t *testing.T) {
+		env := map[string]string{envAdminDSN: base[envMemoryDSN], envTenant: "not a; identifier"}
+		withEnv(t, env)
+		if err := dispatch(context.Background(), quiet(), []string{"project", "list"}); err == nil {
+			t.Fatal("ran with a schema name that cannot be an identifier")
+		}
+	})
+
+	t.Run("unreachable database", func(t *testing.T) {
+		env := map[string]string{
+			envAdminDSN: "postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable&connect_timeout=2",
+			envTenant:   base[envTenant],
+		}
+		withEnv(t, env)
+		if err := dispatch(context.Background(), quiet(), []string{"project", "list"}); err == nil {
+			t.Fatal("ran against a database it cannot reach")
+		}
+	})
+}
+
+// Each command states its own usage when called with nothing, because a bare `taisce project` that
+// silently does nothing is worse than one that says what it wanted.
+func TestEachCommandSaysWhatItWantedWhenCalledBare(t *testing.T) {
+	env := complete(t)
+	env[envAdminDSN] = env[envMemoryDSN]
+	env[envTenant] = "cmd_usage"
+	withEnv(t, env)
+
+	for name, args := range map[string][]string{
+		"project":           {"project"},
+		"project create":    {"project", "create"},
+		"credential":        {"credential"},
+		"credential issue":  {"credential", "issue"},
+		"credential revoke": {"credential", "revoke"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := dispatch(context.Background(), quiet(), args)
+			if err == nil {
+				t.Fatal("ran with no arguments and reported success")
+			}
+			if !strings.Contains(err.Error(), "usage") {
+				t.Fatalf("the error does not say what was wanted: %v", err)
+			}
+		})
+	}
+}
+
+// A trailing comma in a scope list must not become a project named "".
+//
+// An empty scope would be granted to nothing and would look, in a list of grants, exactly like a
+// grant that is there.
+func TestAScopeListIgnoresEmptyEntries(t *testing.T) {
+	for raw, want := range map[string]int{
+		"a,b":     2,
+		"a,,b,":   2,
+		" a , b ": 2,
+		"":        0,
+		",,,":     0,
+	} {
+		if got := len(splitScopes(raw)); got != want {
+			t.Fatalf("%q produced %d scopes, wanted %d", raw, got, want)
+		}
+	}
+	for _, s := range splitScopes("a,,b,") {
+		if s == "" {
+			t.Fatal("an empty scope survived")
+		}
 	}
 }

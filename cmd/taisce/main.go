@@ -39,6 +39,9 @@ const (
 	envTenant      = "TAISCE_SCHEMA"
 	envAddr        = "TAISCE_ADDR"
 	envBundleLimit = "TAISCE_BUNDLE_LIMIT"
+	// The identity that may change the schema. Only the operator commands use it; the server never
+	// holds a connection that can run DDL.
+	envAdminDSN = "TAISCE_ADMIN_DSN"
 )
 
 // main owns the two things a process owns and a function should not: where the signals come from,
@@ -53,8 +56,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := run(ctx, log); err != nil {
-		log.Error("taisce did not start", "error", err)
+	if err := dispatch(ctx, log, os.Args[1:]); err != nil {
+		log.Error("taisce failed", "error", err)
 		os.Exit(1)
 	}
 }

@@ -129,3 +129,61 @@ func TestATrailingSlashOnTheEndpointIsTrimmed(t *testing.T) {
 		t.Fatalf("endpoint is %q", cfg.Endpoint)
 	}
 }
+
+// Plaintext is permitted to the machine the process is on, and to nothing else.
+//
+// The exception exists so that a container can reach a model on the operator's own laptop without the
+// quickstart beginning with a certificate. It is narrow on purpose: everything that leaves the
+// machine still needs TLS, because the failure being prevented is a customer's conversations crossing
+// a network in the clear.
+func TestPlaintextIsPermittedOnlyToThisMachine(t *testing.T) {
+	for _, endpoint := range []string{
+		"http://localhost:11434/v1",
+		"http://127.0.0.1:11434/v1",
+		"http://host.docker.internal:11434/v1",
+	} {
+		t.Setenv(inference.EnvEndpoint, endpoint)
+		t.Setenv(inference.EnvModel, "extractor")
+		host := strings.TrimPrefix(strings.Split(endpoint, "/v1")[0], "http://")
+		t.Setenv(inference.EnvAllowlist, host)
+		if _, err := inference.ConfigFromEnv(); err != nil {
+			t.Fatalf("%s was refused: %v", endpoint, err)
+		}
+	}
+
+	// Anything else in the clear is refused even when it is allowlisted, because the allowlist says
+	// WHERE content may go and this rule says HOW it may travel.
+	for _, endpoint := range []string{
+		"http://api.example.com/v1",
+		"http://192.168.1.50:11434/v1",
+	} {
+		t.Setenv(inference.EnvEndpoint, endpoint)
+		t.Setenv(inference.EnvModel, "extractor")
+		t.Setenv(inference.EnvAllowlist, strings.TrimPrefix(strings.Split(endpoint, "/v1")[0], "http://"))
+		if _, err := inference.ConfigFromEnv(); err == nil {
+			t.Fatalf("%s was accepted in the clear", endpoint)
+		}
+	}
+}
+
+// The allowlist is matched on host and port, so an entry carrying a scheme matches nothing.
+//
+// Worth its own test because it is the mistake an operator makes first: the endpoint is a URL, so the
+// allowlist looks like it should be one too, and the failure is a silent refusal to form memory
+// rather than an obvious error.
+func TestTheAllowlistIsHostAndPortRatherThanAURL(t *testing.T) {
+	t.Setenv(inference.EnvEndpoint, "http://localhost:11434/v1")
+	t.Setenv(inference.EnvModel, "extractor")
+
+	t.Setenv(inference.EnvAllowlist, "http://localhost:11434")
+	if _, err := inference.ConfigFromEnv(); err == nil {
+		t.Fatal("an allowlist entry with a scheme was accepted, which makes the match a prefix")
+	} else if !strings.Contains(err.Error(), "localhost:11434") {
+		t.Fatalf("the error does not show what the entry should have been: %v", err)
+	}
+
+	t.Setenv(inference.EnvAllowlist, "localhost:11434")
+	if _, err := inference.ConfigFromEnv(); err != nil {
+		t.Fatalf("host:port was refused: %v", err)
+	}
+}

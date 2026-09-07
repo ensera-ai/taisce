@@ -80,7 +80,7 @@ func permitted(endpoint, allowlist string) error {
 	// http is permitted only to the local machine. A plaintext hop to anywhere else puts the
 	// message content on the wire in the clear, which is a worse failure than the one the allowlist
 	// is guarding.
-	if parsed.Scheme != "https" && !isLoopback(parsed.Hostname()) {
+	if parsed.Scheme != "https" && !isLocalMachine(parsed.Hostname()) {
 		return fmt.Errorf("%s (%q) is not https, and only a loopback address may be plaintext",
 			EnvEndpoint, endpoint)
 	}
@@ -104,6 +104,24 @@ func permitted(endpoint, allowlist string) error {
 		EnvEndpoint, parsed.Host, EnvAllowlist, strings.Join(listed, ", "))
 }
 
-func isLoopback(host string) bool {
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+// isLocalMachine reports whether message content sent to this host stays on the machine.
+//
+// Loopback obviously does. `host.docker.internal` does too, and it has to be here or the whole
+// zero-signup path is impossible: a container cannot reach a model running on the operator's own
+// laptop by any other name, and requiring TLS for a hop across a local bridge would mean the
+// quickstart begins with generating a certificate.
+//
+// It is a narrow exception and it is worth stating what it assumes. That name is set by the
+// container runtime to the host gateway, so anyone able to point it somewhere else already controls
+// the deployment's own configuration. Every other host still needs https, which is the case the rule
+// exists for: content leaving the machine in the clear.
+func isLocalMachine(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	case "host.docker.internal":
+		return true
+	default:
+		return false
+	}
 }

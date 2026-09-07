@@ -83,6 +83,16 @@ vendor (one interface is why inference can move without reaching the extractor).
 
 **How hard to undo.** Easy. It is a service in a compose file and a subchart.
 
+**Amended on 2026-09-07, when the compose file was built.** The reasoning above assumed LiteLLM
+removed the configuration from the first five minutes. It does not: LiteLLM still needs a provider
+and a key behind it, so shipping it by default adds a container without removing the signup. What
+actually removes the signup is a model on the operator's own machine, so the quickstart points at a
+local Ollama over the same OpenAI-compatible interface, and LiteLLM is an opt-in profile for the case
+it is genuinely for — several providers, one key store, and cost visible in one place.
+
+The conclusion is unchanged and better founded: the endpoint is configuration, nothing about it is
+required, and the default is whichever answer costs an evaluator the least.
+
 ### D38 — The chart is highly available; the compose file is one machine and says so
 
 The Helm chart defaults to several stateless replicas and a PostgreSQL topology that survives losing

@@ -19,3 +19,6 @@ __pycache__/
 # The coverage profile the test target writes. The floor it is checked against is committed;
 # the profile is a build artefact.
 coverage.out
+
+# Local overrides for the compose stack.
+.env.local

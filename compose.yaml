@@ -1,0 +1,128 @@
+# Taisce, on one machine.
+#
+# `docker compose up` brings up the substrate, applies every migration, creates a project, mints a
+# credential and serves memory. What it does NOT do is provide a model: see the `model` note below,
+# because extraction is the one thing that cannot be shipped.
+#
+# ── THIS IS ONE MACHINE, AND IT SAYS SO ──────────────────────────────────────────────────────────
+#
+# One host is one failure domain. Nothing here survives losing it, and no arrangement of containers
+# on a single machine would — a compose file dressed up to look highly available would survive a
+# process dying and not the machine it is on. The Helm chart is where availability lives.
+#
+# ── THE TWO DATABASE IDENTITIES ARE THE POINT ────────────────────────────────────────────────────
+#
+# The server holds two connections: one that can serve memory and one that can read the registry.
+# Neither can change the schema. Only `bootstrap` connects as an identity that can, and it exits
+# before the server starts. That separation is what stops a memory query reading a credential, and
+# collapsing these three URLs into one would leave it drawn in the migration and untrue in the
+# process.
+
+name: taisce
+
+services:
+  # The substrate. Built here rather than pulled because the schema depends on extensions that are
+  # not in the stock image, and a test that skips when they are absent proves nothing about a system
+  # whose whole design is in its DDL.
+  postgres:
+    build: ./deploy/postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taisce}
+      POSTGRES_DB: taisce
+    # Not published by default. A database on a laptop's network is a database on whatever network
+    # that laptop joins next. Uncomment to inspect it with psql.
+    # ports: ["55432:5432"]
+    volumes:
+      # Mounted at /var/lib/postgresql rather than at .../data, which is what PostgreSQL 18's image
+      # expects: it places the cluster in a subdirectory so that a later `pg_upgrade --link` does not
+      # have to cross a mount point. Mounting the older path starts, finds data where it does not
+      # expect it, and refuses — found by running this file rather than by reading it.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d taisce"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Migrations, provisioning and the first credential. Runs to completion and exits.
+  #
+  # A separate service rather than an entrypoint in the server, because migration is DDL and DDL
+  # takes locks a serving process must not hold — and because two server replicas starting together
+  # would otherwise both try to migrate.
+  bootstrap:
+    build: .
+    command: ["bootstrap", "-project", "${TAISCE_PROJECT:-default}"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # The only place a superuser connection appears. The server never gets one.
+      TAISCE_ADMIN_DSN: postgres://postgres:${POSTGRES_PASSWORD:-taisce}@postgres:5432/taisce?sslmode=disable
+      TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
+      TAISCE_CONTROL_PASSWORD: ${TAISCE_CONTROL_PASSWORD:-change-me-control}
+      TAISCE_DATA_PASSWORD: ${TAISCE_DATA_PASSWORD:-change-me-data}
+    restart: "no"
+
+  taisce:
+    build: .
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "${TAISCE_PORT:-8080}:8080"
+    environment:
+      # Serves memory. Cannot read the registry, cannot change the schema.
+      TAISCE_MEMORY_DSN: postgres://taisce_data:${TAISCE_DATA_PASSWORD:-change-me-data}@postgres:5432/taisce?sslmode=disable
+      # Resolves credentials. Cannot read memory.
+      TAISCE_REGISTRY_DSN: postgres://taisce_control:${TAISCE_CONTROL_PASSWORD:-change-me-control}@postgres:5432/taisce?sslmode=disable
+      TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
+      TAISCE_ADDR: ":8080"
+
+      # ── The model ──────────────────────────────────────────────────────────────────────────────
+      #
+      # Extraction is the one thing that cannot be shipped: no key can be baked into an open
+      # repository, and a hosted provider means the first five minutes contain a signup.
+      #
+      # So the default points at Ollama on the host. On macOS with Colima, and on Docker Desktop,
+      # `host.docker.internal` is the host from inside a container — and Ollama must be told to
+      # listen beyond loopback or nothing reaches it:
+      #
+      #     OLLAMA_HOST=0.0.0.0 ollama serve
+      #     ollama pull qwen3.6:35b-a3b-mxfp8
+      #
+      # Without a model the instance still starts. It stores turns, serves recall of whatever is
+      # already formed, and erases — and it says loudly at startup that memory will not form, because
+      # a system that silently stores and never extracts looks like a memory that does not work.
+      TAISCE_INFERENCE_ENDPOINT: ${TAISCE_INFERENCE_ENDPOINT:-http://host.docker.internal:11434/v1}
+      TAISCE_INFERENCE_EXTRACTOR_MODEL: ${TAISCE_INFERENCE_EXTRACTOR_MODEL:-qwen3.6:35b-a3b-mxfp8}
+      TAISCE_INFERENCE_API_KEY: ${TAISCE_INFERENCE_API_KEY:-}
+      # Closed when unset, deliberately. This is the list of hosts permitted to receive message
+      # content, and it is the difference between an endpoint typo that fails and one that silently
+      # sends a customer's conversations somewhere nobody chose. Changing the endpoint above means
+      # changing this too — that is the mechanism working, not an inconvenience.
+      TAISCE_INFERENCE_ALLOWLIST: ${TAISCE_INFERENCE_ALLOWLIST:-host.docker.internal:11434}
+    extra_hosts:
+      # Colima and Docker Desktop resolve this already; declaring it makes the file work on plain
+      # Linux Docker too, where it otherwise does not exist.
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ── Optional: a model gateway ────────────────────────────────────────────────────────────────
+  #
+  # `docker compose --profile gateway up` puts LiteLLM in front, which is worth it when there are
+  # several providers to reach, one place to keep keys, or a need to see what inference costs. It is
+  # not the default because it does not remove the thing that makes a signup necessary — it still
+  # needs a provider behind it — so by default it would be a container that buys nothing.
+  litellm:
+    profiles: ["gateway"]
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+    volumes:
+      - ./deploy/litellm:/etc/litellm:ro
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
