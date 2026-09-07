@@ -14,6 +14,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/ensera-ai/taisce/internal/recall"
+	"github.com/ensera-ai/taisce/internal/report"
 )
 
 // The stub derives its quotes from the message, so every fact it produces is genuinely citable and
@@ -43,6 +44,36 @@ func (erasureModel) Propose(_ context.Context, message domain.Message, _ domain.
 		})
 	}
 	return out, nil
+}
+
+// described runs the subject pass over a scope after it has formed, so a test asserting that every
+// declared projection kind is produced actually produces the one that describes a subject.
+//
+// A stub writer, because what a model does with good material is measured against a live one — what
+// matters here is that prose exists, is registered to the observations behind it, and goes when they
+// do.
+func described(t *testing.T, pool *pgxpool.Pool, schema pg.Schema) {
+	t.Helper()
+	pass, err := formation.NewSubjects(pg.NewCommunityStore(pool, schema),
+		report.New(fixedReport{})).Run(context.Background(), "p1", 50)
+	if err != nil {
+		t.Fatalf("form subjects: %v", err)
+	}
+	if pass.Written == 0 {
+		t.Fatalf("no subject was described, so a test asserting erasure covers reports would pass "+
+			"for the wrong reason: %+v", pass)
+	}
+}
+
+type fixedReport struct{}
+
+func (fixedReport) Write(_ context.Context, c report.Context) (report.Report, error) {
+	return report.Report{
+		Title:            "A subject",
+		Summary:          "Written from what several people said.",
+		Importance:       4,
+		ImportanceReason: "There was material for it.",
+	}, nil
 }
 
 func formed(t *testing.T, pool *pgxpool.Pool, schema pg.Schema, turns ...domain.Turn) {
@@ -89,6 +120,7 @@ func TestEverythingDerivedFromASubjectIsErasedWithAResidualOfZero(t *testing.T) 
 	schema := tenant(t, pool, "er_zero")
 	formed(t, pool, schema,
 		subjectTurn("subject-1", "Marta works at Ensera and cycles to work."))
+	described(t, pool, schema)
 
 	// Before: every projection kind has rows, so the erasure has something to prove.
 	kinds := declaredKinds(t, pool, schema)

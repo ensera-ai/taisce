@@ -12,10 +12,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ensera-ai/taisce/internal/community"
 	"github.com/ensera-ai/taisce/internal/domain"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/ensera-ai/taisce/internal/recall"
+	"github.com/ensera-ai/taisce/internal/report"
 )
 
 // A database is required. These tests assert behaviour that lives in DDL and in transactions —
@@ -2107,5 +2109,144 @@ func TestATraversalDoesNotFollowACycle(t *testing.T) {
 		if f.Hops != 1 {
 			t.Fatalf("a fact directly about the question was reported at %d hops", f.Hops)
 		}
+	}
+}
+
+// ── #106: a report read back for a parent that has to be written from its children's ──────────
+
+// A parent too large to describe from its own facts is described from its children's reports, so the
+// pass reads them back. A child with no report yet is an ordinary state — its own writing failed on an
+// earlier tick — and it has to be distinguishable from one whose report is empty, because the first is
+// left alone by the roll-up and the second would silently remove a subject.
+func TestAReportIsReadBackAndAMissingOneSaysSo(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_reportread")
+	store := pg.NewCommunityStore(pool, schema)
+
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+	content := "Marta works at Ensera."
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: content}))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+		Subject: "Marta", Predicate: "works_at", Object: "Ensera", Cardinality: domain.CardinalityMany,
+		Statement: content, Quote: "Marta works at Ensera", ByteStart: 0, ByteEnd: 21,
+	}); err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+
+	edges, err := store.Graph(ctx, "p1")
+	if err != nil {
+		t.Fatalf("graph: %v", err)
+	}
+	graph, err := community.NewGraph(edges)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := store.Replace(ctx, "p1", community.Build(graph)); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	unwritten, err := store.Unwritten(ctx, "p1", 10)
+	if err != nil {
+		t.Fatalf("unwritten: %v", err)
+	}
+	if len(unwritten) != 1 {
+		t.Fatalf("expected one subject, got %d", len(unwritten))
+	}
+
+	// Nothing written yet: absent, not empty.
+	if _, ok, err := store.Report(ctx, "p1", unwritten[0].ID); err != nil || ok {
+		t.Fatalf("a community with no report reported one: %v %v", ok, err)
+	}
+
+	entities, material, err := store.Material(ctx, "p1", unwritten[0].Members)
+	if err != nil {
+		t.Fatalf("material: %v", err)
+	}
+	written := report.Report{
+		Title: "Marta at Ensera", Summary: "She works there.",
+		Importance: 3, ImportanceReason: "One relation.",
+		Findings: []report.Finding{{Summary: "employment", Explanation: "stated once"}},
+	}
+	if err := store.Write(ctx, "p1", unwritten[0].ID, written,
+		report.BuildContext(entities, material, nil, nil, 10000)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, ok, err := store.Report(ctx, "p1", unwritten[0].ID)
+	if err != nil || !ok {
+		t.Fatalf("the report did not come back: %v %v", ok, err)
+	}
+	if got.Title != written.Title || got.Summary != written.Summary ||
+		got.Importance != written.Importance || got.ImportanceReason != written.ImportanceReason {
+		t.Fatalf("the report came back changed: %+v", got)
+	}
+	// The findings survive the round trip whole. They carry the reasoning behind each claim, which is
+	// what a reader checks against the facts underneath.
+	if len(got.Findings) != 1 || got.Findings[0].Explanation != "stated once" {
+		t.Fatalf("the findings did not survive storage: %+v", got.Findings)
+	}
+
+	// And a community that does not exist is absent rather than an error, because a caller asking
+	// about one is asking a question whose answer is "no".
+	if _, ok, err := store.Report(ctx, "p1", "00000000-0000-0000-0000-000000000000"); err != nil || ok {
+		t.Fatalf("an unknown community reported a report: %v %v", ok, err)
+	}
+}
+
+// A store that cannot read says so, rather than reporting an empty scope.
+//
+// This is the failure that hides: every read here returns a slice, and a database error swallowed into
+// an empty one is indistinguishable from a scope with nothing in it. A subject pass would then replace
+// a scope's partition with nothing, delete every report by cascade, and log a successful tick.
+func TestAStoreThatCannotReadDoesNotReportAnEmptyMemory(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	// A schema that was never provisioned: a valid identifier with no tables behind it, which is what
+	// a misconfigured tenant looks like from inside a query.
+	schema, err := pg.NewSchema("wp_never_provisioned")
+	if err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	store := pg.NewCommunityStore(pool, schema)
+
+	if _, err := store.Graph(ctx, "p1"); err == nil {
+		t.Error("reading the graph of a schema that does not exist returned no error")
+	}
+	if _, err := store.Unwritten(ctx, "p1", 10); err == nil {
+		t.Error("reading unwritten subjects returned no error")
+	}
+	if _, err := store.Children(ctx, "p1", "00000000-0000-0000-0000-000000000000"); err == nil {
+		t.Error("reading children returned no error")
+	}
+	if _, _, err := store.Material(ctx, "p1", []string{"00000000-0000-0000-0000-000000000000"}); err == nil {
+		t.Error("reading material returned no error")
+	}
+	if _, _, err := store.Report(ctx, "p1", "00000000-0000-0000-0000-000000000000"); err == nil {
+		t.Error("reading a report returned no error")
+	}
+	if err := store.Replace(ctx, "p1", community.Hierarchy{
+		Communities: []community.Community{{ID: 0, Level: 0, Parent: -1, Members: []string{"x"}}},
+	}); err == nil {
+		t.Error("storing a partition returned no error")
+	}
+	if err := store.Write(ctx, "p1", "00000000-0000-0000-0000-000000000000",
+		report.Report{Title: "t", Summary: "s"}, report.Context{}); err == nil {
+		t.Error("storing a report returned no error")
+	}
+
+	// And the recall path, for the same reason: a bundle that came back empty because the database
+	// was unreachable is a memory that appears to have forgotten everything.
+	recall := pg.NewRecallStore(pool, schema)
+	if _, err := recall.Anchors(ctx, []string{"p1"}, []string{"anything"}); err == nil {
+		t.Error("resolving anchors returned no error")
+	}
+	if _, err := recall.FactsAbout(ctx, []string{"p1"}, []string{"00000000-0000-0000-0000-000000000000"},
+		10, []string{"user"}, domain.AsOf{}, 1); err == nil {
+		t.Error("reading facts returned no error")
 	}
 }
