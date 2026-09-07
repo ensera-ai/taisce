@@ -1039,11 +1039,38 @@ strength of the direction it usually gets right.
 partitioned vector column, an index per project, an embedding pass, an erasure registration and a
 threshold — all of it justified by an assumption that a measurement contradicts in an afternoon.
 
-**What it does not establish.** That no embedder separates them, that no surface does, or that
-proximity has no use here. Eight pairs on one local model is a gap, not a distribution. #105 holds the
-direction the data actually suggests — a term the question and the entity share, ALONGSIDE proximity,
-because the one near-miss pair that shares a word is also the furthest apart — and it says plainly that
-this is a hypothesis read off eight pairs.
+**Two follow-up measurements, taken to find out what would work, and neither did.**
+
+*Describing instead of assembling.* D60 showed a community's written summary separates where an
+entity's assembled quotes do not, so the same treatment was applied to a single entity — the same
+material, the same writer, the same prompt, an entity as a community of one. Gap **−0.0360**, against
+−0.0313 assembled. Slightly worse. Summarisation is not the mechanism.
+
+*Adding the neighbourhood.* What a community carried and an entity did not was richer material: what
+the subject is connected to. So the surface was rebuilt to carry the relations the entity stands in
+rather than only the sentences that mention it. Gap **−0.0289**, against −0.0308 for the same pairs
+without them. An improvement of 0.0019, which is nothing.
+
+**The same pair breaks all three**, and that is the result. *"What is happening at the Cork office"*
+against *the Dublin office* scores 0.6753, 0.5290 and 0.7098 across the three surfaces, and in each
+case it is at or above the weakest true pair. The question and the entity are the same kind of thing in
+the same company and differ by ONE token. So does *payments* against *database*, *Kelly* against
+*Nowak*, *Holdings* against *Ensera*.
+
+**The discriminating information is a token, and a dense vector averages it away.** That is why no
+treatment of the surrounding text helps: there is no more context to add that changes what one word
+means. It also explains why exact-match resolution has never made this error despite costing recall —
+it is matching the token rather than embedding it.
+
+**What it does not establish.** That no embedder separates them: one local model was available and
+another may behave differently, which is the remaining untested variable. And eight pairs is a gap
+rather than a distribution — nothing here is a rate.
+
+**What it does establish well enough to act on.** Three treatments of an entity's own material, on this
+embedder, all fail on the same pairs and for the same reason. Further variations of a surface are hill
+climbing on eight fixtures, which is tuning to a set too small to generalise from. #105 holds what
+would have to be brought instead: a set with a distribution, and a mechanism that treats a specifier as
+a token rather than as a direction in a vector space.
 
 **Rejected:** shipping a threshold anyway (a number with a decimal point and no evidence, failing
 silently in the irreversible direction); embedding the quotes to widen the surface (measured to narrow
