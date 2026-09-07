@@ -326,12 +326,37 @@ submitted for inclusion in the Work by You to the Licensor shall be under the te
 this License, without any additional terms or conditions."* So a pull request is already licensed
 under Apache-2.0, patent grant included, with no agreement needed to obtain it.
 
-**Which means the CLA is not here for the licence. It is here for the option.** Section 5 grants
-Apache-2.0 rights and nothing wider, so without an agreement this project can never release a
-contributor's code under different terms — a dual licence, a commercial edition, a change of licence
-entirely. A CLA is the only instrument that keeps that possible, and it has to exist before the
-contribution does: obtaining it afterwards means asking every contributor to sign retroactively and
-removing the code of anyone who declines or cannot be reached.
+**Which means the CLA is not here for the licence. It is here for certainty — and that is a narrower
+claim than it first appears.**
+
+An earlier version of this entry said a CLA was the only instrument preserving the ability to release
+contributed code under other terms. That was wrong, and it is corrected here rather than quietly
+edited, because it was the reasoning the decision was taken on.
+
+Apache-2.0 section 2 grants recipients the right to *"reproduce, prepare Derivative Works of, publicly
+display, publicly perform, **sublicense**, and distribute"* — and section 5 puts contributions under
+those same terms. MIT grants sublicensing too. So a commercial edition built on contributed code is
+already permitted by the licence, with attribution preserved, and no agreement is required to reach
+it. That is what a permissive licence is.
+
+**What an agreement buys is therefore certainty rather than capability:**
+
+- **Chain of title.** An acquirer's or an investor's review asks who owns the code and whether that
+  can be shown. Signatures answer in a document; sublicensing rights answer with an argument.
+- **Standing to enforce.** Acting against an infringer generally requires ownership or an exclusive
+  licence, and a sublicense does not confer it.
+- **Relicensing the project wholesale**, including to less permissive terms, where relying on inbound
+  sublicense rights is genuinely contested rather than merely inconvenient.
+- **The absence of an argument at all**, which is worth more than it sounds at the moment somebody is
+  performing diligence against a deadline.
+
+**And what no agreement can buy: taking it back.** Code published under Apache-2.0 stays available
+under Apache-2.0 permanently. A CLA changes what else may be done with a contribution; it does not
+un-publish anything.
+
+The timing argument is unchanged and is the reason this is settled now: an agreement has to exist
+before the contribution does, because obtaining it afterwards means asking every contributor to sign
+retroactively and removing the code of anyone who declines or cannot be reached.
 
 **It also carries the provenance assertion** that a sign-off would otherwise provide — the contributor
 representing that they wrote the contribution or otherwise have the right to submit it. That is the
@@ -345,10 +370,17 @@ operate. A corporate variant, because a contributor employed by somebody else ma
 to sign rather than themselves. And the perception, which is real in open source, that the project
 reserves rights its contributors do not have.
 
-**Rejected:** a Developer Certificate of Origin (a sign-off asserting the right to submit — it closes
-the provenance gap for the price of a commit flag and closes nothing else, so it cannot preserve the
-relicensing option); nothing at all (no record that a contributor had the right to submit what they
-submitted, which is the one thing that matters if it turns out they did not).
+**Rejected:** a Developer Certificate of Origin (a sign-off asserting the right to submit; it closes
+the provenance gap for the price of a commit flag, and — contrary to what this entry first said — the
+commercial option survives it, because the licence already permits sublicensing. What it does not give
+is chain of title on paper or standing to enforce); nothing at all (no record that a contributor had
+the right to submit what they submitted, which is the one thing that matters if it turns out they did
+not).
+
+**MIT was considered and would not change this.** It grants sublicensing on the same terms, so the
+choice between MIT and Apache-2.0 does not decide whether an agreement is needed. What Apache-2.0
+gives that MIT does not is an express patent grant with defensive termination, an explicit trademark
+carve-out, and section 5's automatic inbound licensing — see D36.
 
 **How hard to undo.** Dropping a CLA later is easy. Adding one later is not, which is why it is
 decided before the repository is readable.

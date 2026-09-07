@@ -88,16 +88,17 @@ you were not entitled to sign protects nobody.
 
 **You keep the copyright in everything you write.** The agreement is a licence, not a transfer.
 
-**Why an agreement and not just a sign-off, since the licence appears to cover it already.**
-Apache-2.0 does cover the licence: section 5 puts every submitted contribution under the same terms
-automatically, patent grant included, with no agreement needed to obtain it. What section 5 grants is
-Apache-2.0 rights *and nothing wider* — so without an agreement, this project could never release your
-contribution under any other terms.
+**Why an agreement and not just a sign-off.** Apache-2.0 already licenses your contribution to this
+project: section 5 puts it under the same terms automatically, patent grant included. And because
+section 2 permits sublicensing, that licence would already allow a commercially licensed edition built
+on contributed code — a permissive licence permits that by design, and an agreement is not what makes
+it possible.
 
-That is what the agreement is for. It keeps open the possibility of a differently-licensed edition
-one day. Ensera's stated intention is that Taisce is and stays Apache-2.0, and the agreement does not
-bind Ensera to that — so read section 2 before signing, and do not sign if that possibility is not
-acceptable to you.
+What the agreement adds is certainty rather than permission: a signed record of who owns what, which
+is what a legal review asks for and what standing to act against an infringer requires. Ensera's
+stated intention is that Taisce is and stays Apache-2.0, and the agreement does not bind Ensera to
+that — so read section 2 before signing, and do not sign if a differently-licensed edition would not
+be acceptable to you.
 
 It also carries the representation a sign-off would otherwise make: that you wrote the contribution,
 or otherwise have the right to submit it. That is the one gap Apache-2.0 section 5 genuinely leaves
