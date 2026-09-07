@@ -506,6 +506,40 @@ exists (the correct answer to a question this decision removes).
 if it had shipped the other way, since by then instances exist whose surfaces were switched off and
 whose data is in whichever state was chosen.
 
+### D49 — Two version lines: x.y.z on the working history, x.y.0 in public
+
+Every commit on the working history has a version, `x.y.z`, where z counts commits since the last
+release. The published repository contains only `x.y.0`.
+
+**The patch number is computed, never stored.** A number kept in a file is a number somebody forgets
+to bump, and the failure is silent: two commits claiming the same version, discovered when a bug
+report names one of them. Counting commits since a tag cannot disagree with the history it describes.
+`VERSION` holds only the minor line — the part a person decides — and the patch is a fact about the
+repository.
+
+**A public version is always `.0`, and that is the whole point.** There is no such thing as an
+unaccounted-for public release: each one is a commit somebody wrote, describing what changed, and the
+patch position being permanently zero is what makes that structural rather than a convention.
+
+**What it costs, which is not nothing.** An urgent fix ships as the next MINOR rather than as a patch,
+so the version number itself cannot signal "small, urgent, upgrade today" — the release notes have to
+say it, and some people upgrade on the number without reading them. That is a real loss, and it is the
+price of every public version being a deliberate account rather than a build number.
+
+**Rejected:** semantic patch releases in public (they would let a fix ship without an account of what
+it fixed, which is exactly the accounting this separation exists to force); one repository with tags
+distinguishing the two (a reader arriving at the published history would have to filter it, and the
+first thing they see would be the excavation rather than the project); a stored patch number bumped by
+a hook (it modifies the tree during a commit, conflicts with partial staging, and is one more thing
+that silently stops working).
+
+**The binary reports "unknown" when built without the stamp.** An honest answer rather than a
+plausible wrong one: a binary reporting a version it does not have is worse than one admitting it does
+not know, because the first is believed.
+
+**How hard to undo.** Easy until a public tag exists. After that, changing the scheme means a version
+line that jumps, which is the one thing a version number must not do.
+
 ---
 
 ## Substrate

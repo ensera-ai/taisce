@@ -720,3 +720,20 @@ func TestAProjectCanBeSuspendedAndResumed(t *testing.T) {
 		t.Fatal("suspended with no name")
 	}
 }
+
+// The binary says what it is, and says "unknown" rather than guessing.
+//
+// A binary reporting a version it does not have is worse than one admitting it does not know, because
+// the first is believed — by whoever is deciding whether a bug report matches what they are running.
+func TestTheBinaryReportsItsVersion(t *testing.T) {
+	if err := dispatch(context.Background(), quiet(), []string{"version"}); err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	// Built without the stamp, which is how the test binary is built.
+	if version != "unknown" {
+		t.Logf("built with a stamped version: %s", version)
+	}
+	if version == "" {
+		t.Fatal("the version is empty, which reads as a bug rather than as an unstamped build")
+	}
+}

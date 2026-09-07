@@ -6,7 +6,7 @@
 SUBSTRATE_VERSION ?= 0.1.0
 TEST_DSN ?= postgres://postgres:taisce@localhost:55432/taisce?sslmode=disable
 
-.PHONY: substrate db-up db-down test licence signoff test-inference build
+.PHONY: substrate db-up db-down test licence signoff version test-inference build
 
 substrate:
 	docker build -t taisce-postgres:$(SUBSTRATE_VERSION) deploy/postgres
@@ -67,5 +67,10 @@ signoff:
 test-inference:
 	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v ./internal/infra/inference/
 
+# What this commit is. x.y.z on the working history, and the x.y.0 it would be released as.
+version:
+	@echo "working:  $$(./scripts/version.sh current)"
+	@echo "release:  $$(./scripts/version.sh next-release)"
+
 build:
-	go build ./...
+	go build -ldflags "-X main.version=$$(./scripts/version.sh current)" ./...

@@ -38,6 +38,7 @@ const usage = `taisce — memory for agents
   taisce project resume <name>     return a suspended project to service
   taisce credential issue <name>   mint a credential; the token is printed once and never stored
   taisce credential revoke <id>    stop a credential resolving
+  taisce version                   what this binary is
 
 Configuration is read from the environment. TAISCE_MEMORY_DSN and TAISCE_REGISTRY_DSN are the two
 database connections, and they are separate so that a memory query cannot read a credential.
@@ -61,6 +62,9 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 		return project(ctx, args[1:])
 	case "credential":
 		return credentialCommand(ctx, args[1:])
+	case "version", "--version":
+		fmt.Println(version)
+		return nil
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return nil

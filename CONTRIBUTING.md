@@ -145,6 +145,12 @@ The working history is not hidden for being embarrassing. It is where a decision
 run that produced it, which is the thing that makes the decision register trustworthy rather than
 merely confident.
 
+**Versions follow the same split.** Every commit here is `x.y.z`, where z counts commits since the
+last release and nobody maintains it — `make version` says what this one is. The published repository
+contains only `x.y.0`, because a public version is an account somebody wrote and the patch position
+being permanently zero is what makes that structural. The cost is that an urgent fix ships as the next
+minor, so the number cannot signal urgency and the release notes have to.
+
 `scripts/publish.sh` moves one to the other. It runs every check first, and it refuses to write a
 commit message for you: the published history is one line per release, and that line is the whole
 account a reader gets.

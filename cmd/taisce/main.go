@@ -77,6 +77,13 @@ const (
 // file, a Kubernetes probe, an operator watching a terminal — decides whether the instance is alive
 // from that status, and a process that binds a port it cannot serve from is an instance that looks
 // healthy and answers everything with an error.
+// version is stamped at build time by the Makefile, from scripts/version.sh.
+//
+// "unknown" when built without it — an honest answer rather than a plausible wrong one. A binary
+// reporting a version it does not have is worse than one admitting it does not know, because the
+// first is believed.
+var version = "unknown"
+
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -214,7 +221,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 	errs := make(chan error, 1)
 	go func() {
 		log.Info("serving", "addr", listener.Addr().String(), "schema", schema.String(),
-			"contract", api.Version)
+			"contract", api.Version, "version", version)
 		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- err
 		}
