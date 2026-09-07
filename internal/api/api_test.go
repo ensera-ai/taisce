@@ -352,6 +352,12 @@ func newHarness(t *testing.T, tenant string) *harness {
 	if err != nil {
 		t.Fatalf("schema: %v", err)
 	}
+	// The project, because a credential now names one that has to exist. Provisioning it is what an
+	// operator does before minting a token, and the harness not doing it was the reason the first
+	// run of the suspension test failed — which is the check working.
+	if err := migrate.ProvisionScope(ctx, pool, tenant, "p1"); err != nil {
+		t.Fatalf("provision p1: %v", err)
+	}
 
 	credentials := credential.NewStore(pool, string(migrate.ControlSchema))
 	token, _, err := credentials.Issue(ctx, "test-"+tenant, "p1")
@@ -361,6 +367,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 
 	server := httptest.NewServer(api.NewServer(
 		credentials,
+		pg.NewProjectStore(pool, schema),
 		pg.NewObservationStore(pool),
 		pg.NewEraser(pool),
 		recall.New(pg.NewRecallStore(pool, schema), 50),
@@ -597,5 +604,75 @@ func TestARevokedCredentialStopsWorkingAtOnce(t *testing.T) {
 	status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, token)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("a revoked credential still worked: %d", status)
+	}
+}
+
+// ── The check no foreign key can make ─────────────────────────────────────────────────────────
+//
+// A credential names its project, and the two are on opposite sides of the plane boundary: the
+// credential is in the registry, which the memory service cannot read, and the project is in the
+// tenant schema, which the registry role has no business in. No constraint crosses that.
+//
+// The command that mints a credential checks the project exists, which catches a typo at the moment
+// somebody makes it. What it cannot catch is what happens afterwards.
+
+// A credential for a suspended project stops working, and says only that it does not work.
+//
+// Suspension is the reversible half of a project's lifecycle: the memory is intact and unreachable.
+// A credential that kept working through it would make suspension mean nothing.
+func TestACredentialForASuspendedProjectIsRefused(t *testing.T) {
+	h := newHarness(t, "api_suspended")
+	ctx := context.Background()
+	projects := pg.NewProjectStore(h.pool, h.schema)
+
+	if status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, h.token); status == http.StatusUnauthorized {
+		t.Fatal("the credential did not work before the project was suspended")
+	}
+
+	if err := projects.Suspend(ctx, "p1"); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	status, body := h.raw(t, http.MethodGet, "/v1/freshness", nil, h.token)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("a credential for a suspended project got %d", status)
+	}
+	// And it does not disclose why. Which project exists, and whether an operator suspended it, is
+	// not the holder's to learn from an error message — the fact they can act on is that their
+	// credential does not work.
+	for _, leak := range []string{"suspend", "project", "p1"} {
+		if bytes.Contains(bytes.ToLower(body), []byte(leak)) {
+			t.Fatalf("the refusal disclosed %q: %s", leak, body)
+		}
+	}
+
+	// Resuming brings it back, which is what makes suspension different from deletion.
+	if err := projects.Resume(ctx, "p1"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, h.token); status == http.StatusUnauthorized {
+		t.Fatal("resuming a project did not restore its credentials")
+	}
+}
+
+// A credential naming a project that does not exist at all is refused the same way.
+//
+// This is the state a foreign key would have prevented and cannot: a project removed while
+// credentials for it are still in circulation. Without this check such a credential authenticates
+// and writes into a namespace nobody is watching.
+func TestACredentialNamingAProjectThatIsGoneIsRefused(t *testing.T) {
+	h := newHarness(t, "api_goneproject")
+	ctx := context.Background()
+
+	// Minted directly, bypassing the command that would have checked — which is exactly the state
+	// that arises when a project is removed after a credential exists.
+	orphan, _, err := credential.NewStore(h.pool, string(migrate.ControlSchema)).
+		Issue(ctx, "api_goneproject-orphan", "no-such-project")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+
+	status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, orphan)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("a credential for a project that does not exist got %d", status)
 	}
 }

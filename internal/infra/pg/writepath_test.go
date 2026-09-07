@@ -1110,3 +1110,56 @@ func TestAClaimTheMessageDidNotAssertIsStorableAsARefusal(t *testing.T) {
 		t.Fatalf("the refusal lost what was proposed: %q / %q", quote, reason)
 	}
 }
+
+// ── Project lifecycle ─────────────────────────────────────────────────────────────────────────
+
+// Suspending is reversible and deleting is not, so they are different operations and only one of them
+// exists here.
+//
+// A suspended project's memory is intact and unreachable. That is the whole difference: an operator
+// who suspends the wrong project resumes it, and an operator who deleted it would need a backup —
+// which is why removing memory is an erasure with a counted residual rather than a lifecycle verb.
+func TestSuspendingAProjectIsReversibleAndSaysWhenThereIsNothingToDo(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_lifecycle")
+	if err := migrate.ProvisionScope(ctx, pool, schema.String(), "p1"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	projects := pg.NewProjectStore(pool, schema)
+
+	if _, err := projects.Active(ctx, "p1"); err != nil {
+		t.Fatalf("a provisioned project is not active: %v", err)
+	}
+
+	if err := projects.Suspend(ctx, "p1"); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	if _, err := projects.Active(ctx, "p1"); !errors.Is(err, pg.ErrNoSuchProject) {
+		t.Fatalf("a suspended project is still active: %v", err)
+	}
+	// Suspending twice is not a failure to report; it is a state already reached. But it must not
+	// silently claim to have done something, or a script cannot tell one from the other.
+	if err := projects.Suspend(ctx, "p1"); !errors.Is(err, pg.ErrNoSuchProject) {
+		t.Fatalf("suspending twice reported success: %v", err)
+	}
+
+	if err := projects.Resume(ctx, "p1"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if _, err := projects.Active(ctx, "p1"); err != nil {
+		t.Fatalf("a resumed project is not active: %v", err)
+	}
+	if err := projects.Resume(ctx, "p1"); !errors.Is(err, pg.ErrNoSuchProject) {
+		t.Fatalf("resuming an active project reported success: %v", err)
+	}
+
+	// And a project that was never there is the same answer as one that is suspended. A caller
+	// cannot learn which by asking.
+	if _, err := projects.Active(ctx, "never-existed"); !errors.Is(err, pg.ErrNoSuchProject) {
+		t.Fatalf("an unknown project gave %v", err)
+	}
+	if err := projects.Suspend(ctx, "never-existed"); !errors.Is(err, pg.ErrNoSuchProject) {
+		t.Fatalf("suspending an unknown project gave %v", err)
+	}
+}

@@ -37,6 +37,7 @@ const Version = "v1"
 // Server is the HTTP surface over one instance.
 type Server struct {
 	credentials  *credential.Store
+	projects     *pg.ProjectStore
 	observations *pg.ObservationStore
 	eraser       *pg.Eraser
 	recaller     *recall.Recaller
@@ -48,14 +49,15 @@ type Server struct {
 //
 // The credential store is separate from every other argument because it is the only one that reaches
 // the registry connection. That separation is the point: a memory query cannot read a key.
-func NewServer(credentials *credential.Store, observations *pg.ObservationStore, eraser *pg.Eraser,
-	recaller *recall.Recaller, schema pg.Schema, log *slog.Logger) *Server {
+func NewServer(credentials *credential.Store, projects *pg.ProjectStore,
+	observations *pg.ObservationStore, eraser *pg.Eraser, recaller *recall.Recaller,
+	schema pg.Schema, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Server{
-		credentials: credentials, observations: observations, eraser: eraser,
-		recaller: recaller, schema: schema, log: log,
+		credentials: credentials, projects: projects, observations: observations,
+		eraser: eraser, recaller: recaller, schema: schema, log: log,
 	}
 }
 
@@ -107,6 +109,32 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal", "the request could not be served")
 			return
 		}
+
+		// The credential resolved. Whether the project it names still exists is a different
+		// question, and it is asked here because no constraint can ask it: the credential is in the
+		// registry and the project is in the tenant schema, on opposite sides of the boundary that
+		// stops a memory query reading a key.
+		//
+		// The command that mints a credential checks the project exists, which catches a typo. It
+		// cannot catch what happens next — a project suspended, or removed, with credentials for it
+		// still in circulation. Without this, such a credential authenticates and writes into a
+		// namespace nobody is watching.
+		//
+		// Refused as UNAUTHENTICATED rather than as a missing project. From the holder's side the
+		// fact they can act on is that their credential does not work; which project exists, and
+		// whether an operator suspended it, is not theirs to learn from an error message.
+		if _, err := s.projects.Active(r.Context(), grant.Project); err != nil {
+			if errors.Is(err, pg.ErrNoSuchProject) {
+				s.log.Warn("a credential names a project that is gone or suspended",
+					"credential", grant.CredentialID, "project", grant.Project)
+				writeError(w, http.StatusUnauthorized, "unauthenticated", "a credential is required")
+				return
+			}
+			s.log.Error("read project", "error", err, "project", grant.Project)
+			writeError(w, http.StatusInternalServerError, "internal", "the request could not be served")
+			return
+		}
+
 		next(w, r, grant)
 	})
 }

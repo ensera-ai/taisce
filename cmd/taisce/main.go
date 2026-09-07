@@ -133,6 +133,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 
 	server := api.NewServer(
 		credential.NewStore(registry, string(migrate.ControlSchema)),
+		pg.NewProjectStore(memory, schema),
 		pg.NewObservationStore(memory),
 		pg.NewEraser(memory),
 		recall.New(pg.NewRecallStore(memory, schema), bundleLimit()),

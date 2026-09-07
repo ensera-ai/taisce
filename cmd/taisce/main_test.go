@@ -679,3 +679,44 @@ func TestAProjectNameThatCannotBeAnIdentifierIsRefused(t *testing.T) {
 		t.Fatal("a project name reached a statement")
 	}
 }
+
+// Suspending and resuming a project from the command line.
+//
+// There is deliberately no `project delete`: removing a project removes memory, and removing memory
+// is an erasure with a counted residual rather than a lifecycle verb that happens to destroy things.
+func TestAProjectCanBeSuspendedAndResumed(t *testing.T) {
+	env := complete(t)
+	env[envTenant] = "cmd_suspend"
+	env[envAdminDSN] = env[envMemoryDSN]
+	withEnv(t, env)
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "taisce-test-data")
+
+	ctx := context.Background()
+	dropSchema(t, "cmd_suspend")
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "live"}); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	if err := dispatch(ctx, quiet(), []string{"project", "suspend", "live"}); err != nil {
+		t.Fatalf("suspend: %v", err)
+	}
+	// Twice is not success. A script that could not tell "suspended it" from "it was already
+	// suspended" would report work it did not do.
+	if err := dispatch(ctx, quiet(), []string{"project", "suspend", "live"}); err == nil {
+		t.Fatal("suspending twice reported success")
+	}
+	if err := dispatch(ctx, quiet(), []string{"project", "resume", "live"}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if err := dispatch(ctx, quiet(), []string{"project", "resume", "live"}); err == nil {
+		t.Fatal("resuming an active project reported success")
+	}
+	// And neither works on a project that does not exist.
+	if err := dispatch(ctx, quiet(), []string{"project", "suspend", "ghost"}); err == nil {
+		t.Fatal("suspended a project that does not exist")
+	}
+	if err := dispatch(ctx, quiet(), []string{"project", "suspend"}); err == nil {
+		t.Fatal("suspended with no name")
+	}
+}

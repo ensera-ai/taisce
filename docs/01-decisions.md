@@ -458,6 +458,25 @@ name in every access log).
 **How hard to undo.** Easy while no adapter has shipped. The field would have to come back in a
 contract version, which is why it is settled before #36 makes the contract public.
 
+**What checks the project, since no constraint can.** The credential is in the registry schema and the
+project is in the tenant schema, on opposite sides of the boundary that stops a memory query reading a
+key — so there is no foreign key between them, and there cannot be.
+
+Two checks stand in its place, and together they are stronger than the constraint would have been. The
+command that mints a credential verifies the project exists, which catches a typo at the moment
+somebody makes it. And **every authenticated request verifies the project is still there and not
+suspended**, on the memory connection, which catches what a foreign key never could: a project
+suspended or removed while credentials for it remain in circulation. A foreign key refuses a bad
+reference at write time and says nothing about state that changes afterwards.
+
+The refusal is `unauthenticated` rather than a missing project. From the holder's side the fact they
+can act on is that their credential does not work; which projects exist, and whether an operator
+suspended one, is not theirs to learn from an error message.
+
+It costs one primary-key read per request. That is on the read path, where rule 9 says a cost is
+justified against what every caller pays rather than what it prevents in the worst case — and what it
+buys is that a credential for a project nobody is watching stops working rather than writing into it.
+
 ### D48 — Memory surfaces are chosen when a project is created, and only ever added
 
 A project declares which kinds of memory it keeps at creation. Afterwards a surface may be turned on

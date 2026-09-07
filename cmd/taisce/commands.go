@@ -31,6 +31,8 @@ const usage = `taisce — memory for agents
   taisce bootstrap                 create the schema, run every migration, and mint the first credential
   taisce project create <name>     create a project and its partition
   taisce project list              list the projects that exist
+  taisce project suspend <name>    make a project's memory unreachable, reversibly
+  taisce project resume <name>     return a suspended project to service
   taisce credential issue <name>   mint a credential; the token is printed once and never stored
   taisce credential revoke <id>    stop a credential resolving
 
@@ -223,6 +225,30 @@ func project(ctx context.Context, args []string) error {
 			fmt.Printf("%-20s surfaces=%-24s retention=%s%s\n", scope, active, retention, state)
 		}
 		return rows.Err()
+
+	case "suspend", "resume":
+		// Suspension is the reversible half of a project's lifecycle: the memory is intact and
+		// unreachable, and every credential for it stops working until it is resumed.
+		//
+		// There is deliberately no `project delete`. Removing a project would remove memory, and
+		// removing memory is an erasure — with a receipt and a counted residual — rather than a
+		// lifecycle verb that happens to destroy things.
+		if len(args) < 2 {
+			return fmt.Errorf("usage: taisce project %s <name>", args[0])
+		}
+		projects := pg.NewProjectStore(admin, schema)
+		if args[0] == "suspend" {
+			if err := projects.Suspend(ctx, args[1]); err != nil {
+				return fmt.Errorf("suspend %q: %w", args[1], err)
+			}
+			fmt.Printf("project %q suspended; its credentials will be refused until it is resumed\n", args[1])
+			return nil
+		}
+		if err := projects.Resume(ctx, args[1]); err != nil {
+			return fmt.Errorf("resume %q: %w", args[1], err)
+		}
+		fmt.Printf("project %q resumed\n", args[1])
+		return nil
 
 	default:
 		return fmt.Errorf("unknown project command %q", args[0])
