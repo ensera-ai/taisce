@@ -132,6 +132,19 @@ trading as **Ensera**.
 Commits before 2026-09 carry an earlier address for the same author, which is why the history shows
 two.
 
+## Where order lives
+
+**In the dependency graph.** An issue that cannot start carries a native `blocked-by` naming what it
+waits for, so the question "can I pick this up" is answered by the issue itself rather than by asking.
+
+Not in a numbered list. A sequence is a plan, and a plan goes stale the first time something is
+reordered and nobody updates it — quietly, because nothing fails. A dependency is a fact about the
+work: the conformance suite tests a contract shape, so the shape settles first, and that stays true
+however the plan changes.
+
+The ordering *within* what is ready is a judgement about value and cost. That belongs in the release
+issue, where it is visibly a judgement rather than looking like a constraint.
+
 ## Two repositories
 
 **`althunibat/taisce`** is the working history: every commit, with the measurement that produced it,
