@@ -318,14 +318,14 @@ func TestACredentialCanBeMintedAndRevokedFromTheCommandLine(t *testing.T) {
 
 	ctx := context.Background()
 	dropSchema(t, "cmd_cred")
-	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "p1"}); err != nil {
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "cmd_cred_p1"}); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	before := credentialsGranting(t, "cmd_cred_p2")
-	if err := dispatch(ctx, quiet(), []string{"credential", "issue", "second", "-scopes", "cmd_cred_p2"}); err != nil {
+	before := credentialsGranting(t, "cmd_cred_p1")
+	if err := dispatch(ctx, quiet(), []string{"credential", "issue", "second", "-project", "cmd_cred_p1"}); err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	if after := credentialsGranting(t, "cmd_cred_p2"); after != before+1 {
+	if after := credentialsGranting(t, "cmd_cred_p1"); after != before+1 {
 		t.Fatalf("issuing produced %d credentials for the project, wanted %d", after, before+1)
 	}
 	if err := dispatch(ctx, quiet(), []string{"credential", "revoke", "not-a-uuid"}); err == nil {
@@ -361,7 +361,7 @@ func credentialsGranting(t *testing.T, project string) int {
 	defer pool.Close()
 	var n int
 	if err := pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM control.credential WHERE revoked_at IS NULL AND $1 = ANY(scopes)`,
+		`SELECT count(*) FROM control.credential WHERE revoked_at IS NULL AND project = $1`,
 		project).Scan(&n); err != nil {
 		t.Fatalf("count credentials: %v", err)
 	}
@@ -506,26 +506,38 @@ func TestEachCommandSaysWhatItWantedWhenCalledBare(t *testing.T) {
 	}
 }
 
-// A trailing comma in a scope list must not become a project named "".
+// A credential cannot be minted for a project that does not exist.
 //
-// An empty scope would be granted to nothing and would look, in a list of grants, exactly like a
-// grant that is there.
-func TestAScopeListIgnoresEmptyEntries(t *testing.T) {
-	for raw, want := range map[string]int{
-		"a,b":     2,
-		"a,,b,":   2,
-		" a , b ": 2,
-		"":        0,
-		",,,":     0,
-	} {
-		if got := len(splitScopes(raw)); got != want {
-			t.Fatalf("%q produced %d scopes, wanted %d", raw, got, want)
-		}
+// The check a foreign key would make, in the only place that can make it: the credential is in the
+// registry schema and the project is in the tenant schema, and no constraint crosses that boundary
+// because crossing it is what the boundary prevents. Without it a typo mints a token that
+// authenticates successfully and reaches no memory — which looks like a permissions bug to whoever
+// debugs it.
+func TestACredentialCannotBeMintedForAProjectThatDoesNotExist(t *testing.T) {
+	env := complete(t)
+	env[envTenant] = "cmd_nosuchproject"
+	env[envAdminDSN] = env[envMemoryDSN]
+	withEnv(t, env)
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "taisce-test-data")
+
+	ctx := context.Background()
+	dropSchema(t, "cmd_nosuchproject")
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "real"}); err != nil {
+		t.Fatalf("bootstrap: %v", err)
 	}
-	for _, s := range splitScopes("a,,b,") {
-		if s == "" {
-			t.Fatal("an empty scope survived")
-		}
+
+	err := dispatch(ctx, quiet(), []string{"credential", "issue", "typo", "-project", "raal"})
+	if err == nil {
+		t.Fatal("minted a credential for a project that does not exist")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("the refusal does not say what is wrong: %v", err)
+	}
+
+	// And the real one works, so the check is not simply refusing everything.
+	if err := dispatch(ctx, quiet(), []string{"credential", "issue", "good", "-project", "real"}); err != nil {
+		t.Fatalf("minting for a real project failed: %v", err)
 	}
 }
 
@@ -617,5 +629,53 @@ func TestAnUnknownRoleIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), envRole) {
 		t.Fatalf("the refusal does not name the setting: %v", err)
+	}
+}
+
+// A project name that cannot be an identifier is refused.
+//
+// It is interpolated into a partition name and an index name, because DDL cannot take a bind value —
+// so validation here is not tidiness, it is the thing standing between a project name and a
+// statement.
+func TestAProjectNameThatCannotBeAnIdentifierIsRefused(t *testing.T) {
+	env := complete(t)
+	env[envTenant] = "cmd_badname"
+	env[envAdminDSN] = env[envMemoryDSN]
+	withEnv(t, env)
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "taisce-test-data")
+
+	ctx := context.Background()
+	dropSchema(t, "cmd_badname")
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "ok"}); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	for _, name := range []string{
+		"has spaces",
+		"Uppercase",
+		"1leading-digit",
+		"quote'; DROP SCHEMA public; --",
+		"",
+	} {
+		if err := dispatch(ctx, quiet(), []string{"project", "create", name}); err == nil {
+			t.Fatalf("created a project named %q", name)
+		}
+	}
+
+	// And the schema survived every one of them, which is the assertion that matters most.
+	var alive bool
+	pool, err := pgxpool.New(ctx, os.Getenv("TAISCE_TEST_DSN"))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'public')`).
+		Scan(&alive); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !alive {
+		t.Fatal("a project name reached a statement")
 	}
 }

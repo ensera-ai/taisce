@@ -76,5 +76,18 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, tenant, scope strin
 			return fmt.Errorf("provision project %q in tenant %q: %w", scope, tenant, err)
 		}
 	}
+
+	// The row last, after the storage it describes exists. A project that is listed and has no
+	// partition is one a write would land in the default partition of — visible, erasable and slow,
+	// which is the safety net rather than the intent.
+	//
+	// Surfaces and retention are not set here. Provisioning creates the place; deciding what a
+	// project keeps is a separate act with its own arguments, and defaulting it would mean every
+	// project silently acquiring whatever this function happened to choose.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(
+		`INSERT INTO %s.project (scope, label) VALUES ($1, $1) ON CONFLICT (scope) DO NOTHING`,
+		schema), scope); err != nil {
+		return fmt.Errorf("record project %q in tenant %q: %w", scope, tenant, err)
+	}
 	return nil
 }

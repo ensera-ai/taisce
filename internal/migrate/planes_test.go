@@ -205,3 +205,103 @@ func TestEstablishingThePlanesConcurrentlyIsSafe(t *testing.T) {
 		}
 	}
 }
+
+// ── #87: a project is a row, and its surfaces only ever grow ──────────────────────────────────
+
+// Provisioning records the project, so a project that exists but has never been written to is still
+// a project.
+//
+// It used to be inferred from the watermark table, which meant existence depended on somebody having
+// used it — an operator who created a project and checked their work saw nothing.
+func TestAProvisionedProjectExistsBeforeAnythingIsWrittenToIt(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	if err := ProvisionScope(ctx, pool, tenant, "unused"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	var label string
+	var surfaces []string
+	if err := pool.QueryRow(ctx,
+		`SELECT label, surfaces FROM `+tenant+`.project WHERE scope = 'unused'`).
+		Scan(&label, &surfaces); err != nil {
+		t.Fatalf("a provisioned project has no row: %v", err)
+	}
+	if len(surfaces) != 0 {
+		t.Fatalf("provisioning chose surfaces (%v); which kinds of memory a project keeps is a "+
+			"separate decision with its own arguments", surfaces)
+	}
+}
+
+// A memory surface can be turned on and never off.
+//
+// Enforced in the substrate rather than the service because it is the rule a write path forgets: an
+// administrative endpoint that sets the whole array from a form would silently drop whatever the form
+// did not send, and nothing would notice until a caller asked for memory that had stopped being
+// served.
+func TestAMemorySurfaceCanBeAddedAndNeverRemoved(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	if err := ProvisionScope(ctx, pool, tenant, "growing"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	// On.
+	if _, err := pool.Exec(ctx,
+		`UPDATE `+tenant+`.project SET surfaces = ARRAY['history','context'] WHERE scope = 'growing'`); err != nil {
+		t.Fatalf("turning surfaces on was refused: %v", err)
+	}
+	// More on.
+	if _, err := pool.Exec(ctx,
+		`UPDATE `+tenant+`.project SET surfaces = ARRAY['history','context','search'] WHERE scope = 'growing'`); err != nil {
+		t.Fatalf("adding a surface was refused: %v", err)
+	}
+
+	// Off — refused, and it says which one would have gone.
+	_, err := pool.Exec(ctx,
+		`UPDATE `+tenant+`.project SET surfaces = ARRAY['history'] WHERE scope = 'growing'`)
+	if err == nil {
+		t.Fatal("a memory surface was turned off, which either strands or destroys what it stored")
+	}
+	if !strings.Contains(err.Error(), "cannot be turned off") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+	if !strings.Contains(err.Error(), "context") && !strings.Contains(err.Error(), "search") {
+		t.Fatalf("the refusal does not name what would have been removed: %v", err)
+	}
+
+	// And the whole array being replaced with an empty one — the form-submission failure — is the
+	// same refusal.
+	if _, err := pool.Exec(ctx,
+		`UPDATE `+tenant+`.project SET surfaces = '{}' WHERE scope = 'growing'`); err == nil {
+		t.Fatal("every surface was turned off at once")
+	}
+}
+
+// A retention that would delete on write is refused. Whatever an operator meant by zero, it was not
+// that.
+func TestARetentionThatWouldDeleteOnWriteIsRefused(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	if err := ProvisionScope(ctx, pool, tenant, "retained"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	for _, bad := range []string{"0", "-1 day"} {
+		if _, err := pool.Exec(ctx,
+			`UPDATE `+tenant+`.project SET retention = $1::interval WHERE scope = 'retained'`, bad); err == nil {
+			t.Fatalf("a retention of %q was accepted", bad)
+		}
+	}
+	// NULL is a policy — keep indefinitely — rather than an absence of one.
+	if _, err := pool.Exec(ctx,
+		`UPDATE `+tenant+`.project SET retention = NULL WHERE scope = 'retained'`); err != nil {
+		t.Fatalf("indefinite retention was refused: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE `+tenant+`.project SET retention = interval '90 days' WHERE scope = 'retained'`); err != nil {
+		t.Fatalf("a real retention policy was refused: %v", err)
+	}
+}

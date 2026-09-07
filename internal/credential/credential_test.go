@@ -56,7 +56,7 @@ func TestACredentialResolvesToItsProjectsAndNothingElse(t *testing.T) {
 	ctx := context.Background()
 	s := store(t)
 
-	token, issued, err := s.Issue(ctx, "resolves-to-projects", []string{"alpha", "beta"})
+	token, issued, err := s.Issue(ctx, "resolves-to-projects", "alpha")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -67,35 +67,24 @@ func TestACredentialResolvesToItsProjectsAndNothingElse(t *testing.T) {
 	if grant.CredentialID != issued.CredentialID {
 		t.Fatalf("resolved to a different credential: %s vs %s", grant.CredentialID, issued.CredentialID)
 	}
-	if !grant.Permits("alpha") || !grant.Permits("beta") {
-		t.Fatalf("a granted project is not permitted: %v", grant.Scopes)
-	}
-	if grant.Permits("gamma") {
-		t.Fatal("a project that was never granted is permitted")
+	if grant.Project != "alpha" {
+		t.Fatalf("the credential resolved to project %q", grant.Project)
 	}
 }
 
-// An empty grant is a valid state and it reaches nothing.
+// A credential with no project is refused at minting rather than issued and useless.
 //
-// This is the state a credential lands in when its grants are removed, and the wrong behaviour —
-// treating empty as unrestricted — is the failure the permission exists to prevent.
-func TestACredentialWithNoProjectsReachesNothing(t *testing.T) {
+// The failure being prevented is a token that authenticates successfully and reaches nothing, which
+// looks like a working key to whoever holds it and like a permissions bug to whoever debugs it.
+func TestACredentialWithoutAProjectIsRefused(t *testing.T) {
 	ctx := context.Background()
 	s := store(t)
 
-	token, _, err := s.Issue(ctx, "reaches-nothing", nil)
-	if err != nil {
-		t.Fatalf("issue: %v", err)
+	if _, _, err := s.Issue(ctx, "reaches-nothing", ""); err == nil {
+		t.Fatal("minted a credential attached to no project")
 	}
-	grant, err := s.Resolve(ctx, token)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if len(grant.Scopes) != 0 {
-		t.Fatalf("an empty grant acquired scopes: %v", grant.Scopes)
-	}
-	if grant.Permits("anything") {
-		t.Fatal("an empty grant permitted a project")
+	if _, _, err := s.Issue(ctx, "reaches-nothing", "   "); err == nil {
+		t.Fatal("whitespace was accepted as a project")
 	}
 }
 
@@ -105,7 +94,7 @@ func TestEveryWayOfFailingToResolveGivesTheSameAnswer(t *testing.T) {
 	ctx := context.Background()
 	s := store(t)
 
-	revoked, issued, err := s.Issue(ctx, "to-be-revoked", []string{"alpha"})
+	revoked, issued, err := s.Issue(ctx, "to-be-revoked", "alpha")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -135,7 +124,7 @@ func TestTheTokenIsNotRecoverableFromTheDatabase(t *testing.T) {
 	pool := registry(t)
 	s := credential.NewStore(pool, string(migrate.ControlSchema))
 
-	token, issued, err := s.Issue(ctx, "not-recoverable", []string{"alpha"})
+	token, issued, err := s.Issue(ctx, "not-recoverable", "alpha")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -168,7 +157,7 @@ func TestTheTokenIsNotRecoverableFromTheDatabase(t *testing.T) {
 func TestTheMemoryServiceCannotReadACredential(t *testing.T) {
 	ctx := context.Background()
 	s := store(t)
-	if _, _, err := s.Issue(ctx, "unreachable-by-memory", []string{"alpha"}); err != nil {
+	if _, _, err := s.Issue(ctx, "unreachable-by-memory", "alpha"); err != nil {
 		t.Fatalf("issue: %v", err)
 	}
 
@@ -204,7 +193,7 @@ func TestRevokingAnUnknownOrAlreadyRevokedCredentialIsRefused(t *testing.T) {
 		t.Fatalf("revoking an unknown credential gave %v", err)
 	}
 
-	_, issued, err := s.Issue(ctx, "revoked-twice", []string{"alpha"})
+	_, issued, err := s.Issue(ctx, "revoked-twice", "alpha")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -221,7 +210,7 @@ func TestRevokingAnUnknownOrAlreadyRevokedCredentialIsRefused(t *testing.T) {
 func TestACredentialWithoutANameIsRefused(t *testing.T) {
 	ctx := context.Background()
 	s := store(t)
-	if _, _, err := s.Issue(ctx, "   ", []string{"alpha"}); err == nil {
+	if _, _, err := s.Issue(ctx, "   ", "alpha"); err == nil {
 		t.Fatal("issued a credential with no name")
 	}
 }

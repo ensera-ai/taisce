@@ -122,7 +122,8 @@ func bearer(header string) (string, bool) {
 // ── Observe ───────────────────────────────────────────────────────────────────────────────────
 
 type observeRequest struct {
-	Scope         string           `json:"scope"`
+	// No project. The credential decides it (D47) — a caller cannot name one, so there is nothing
+	// to check and nothing to get wrong.
 	DataSubjectID string           `json:"data_subject_id"`
 	OccurredAt    *time.Time       `json:"occurred_at"`
 	Messages      []messagePayload `json:"messages"`
@@ -151,11 +152,8 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 	if !decode(w, r, &req) {
 		return
 	}
-	if !s.permits(w, grant, req.Scope) {
-		return
-	}
 
-	turn := domain.Turn{Scope: req.Scope, DataSubjectID: req.DataSubjectID}
+	turn := domain.Turn{Scope: grant.Project, DataSubjectID: req.DataSubjectID}
 	if req.OccurredAt != nil {
 		turn.OccurredAt = req.OccurredAt.UTC()
 	} else {
@@ -180,7 +178,7 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 
 	stored, err := s.observations.Append(r.Context(), s.schema, turn)
 	if err != nil {
-		s.log.Error("append observation", "error", err, "scope", req.Scope)
+		s.log.Error("append observation", "error", err, "project", grant.Project)
 		writeError(w, http.StatusInternalServerError, "internal", "the turn could not be stored")
 		return
 	}
@@ -206,13 +204,9 @@ type freshnessResponse struct {
 }
 
 func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credential.Grant) {
-	scope := r.URL.Query().Get("scope")
-	if !s.permits(w, grant, scope) {
-		return
-	}
-	f, err := s.observations.Freshness(r.Context(), s.schema, scope)
+	f, err := s.observations.Freshness(r.Context(), s.schema, grant.Project)
 	if err != nil {
-		s.log.Error("read freshness", "error", err, "scope", scope)
+		s.log.Error("read freshness", "error", err, "project", grant.Project)
 		writeError(w, http.StatusInternalServerError, "internal", "freshness could not be read")
 		return
 	}
@@ -227,8 +221,7 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credent
 // ── Recall ────────────────────────────────────────────────────────────────────────────────────
 
 type recallRequest struct {
-	Question string   `json:"question"`
-	Scopes   []string `json:"scopes"`
+	Question string `json:"question"`
 }
 
 type recallResponse struct {
@@ -285,20 +278,9 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 		return
 	}
 
-	// An omitted scope list means everything this credential holds. Naming one it does not hold is
-	// refused: a request for a project you cannot reach is a mistake worth being told about.
-	scopes := req.Scopes
-	if len(scopes) == 0 {
-		scopes = grant.Scopes
-	} else {
-		for _, scope := range scopes {
-			if !s.permits(w, grant, scope) {
-				return
-			}
-		}
-	}
-
-	bundle, err := s.recaller.Recall(r.Context(), scopes, req.Question)
+	// The credential's project, and only ever that. The authorised set is still an argument on
+	// every read rather than a default (D24) — it has one member now, which is the whole of D47.
+	bundle, err := s.recaller.Recall(r.Context(), []string{grant.Project}, req.Question)
 	if err != nil {
 		s.log.Error("recall", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal", "the question could not be answered")
@@ -334,7 +316,6 @@ func renderBundle(b domain.Bundle) recallResponse {
 // ── Erase ─────────────────────────────────────────────────────────────────────────────────────
 
 type eraseRequest struct {
-	Scope         string `json:"scope"`
 	DataSubjectID string `json:"data_subject_id"`
 	Reason        string `json:"reason"`
 }
@@ -357,18 +338,15 @@ func (s *Server) erase(w http.ResponseWriter, r *http.Request, grant credential.
 	if !decode(w, r, &req) {
 		return
 	}
-	if !s.permits(w, grant, req.Scope) {
-		return
-	}
 	if strings.TrimSpace(req.DataSubjectID) == "" {
 		writeError(w, http.StatusBadRequest, "no_subject",
 			"an erasure names the person it is for; one without a subject would be a scope-wide delete")
 		return
 	}
 
-	receipt, err := s.eraser.Erase(r.Context(), s.schema, req.Scope, req.DataSubjectID, req.Reason)
+	receipt, err := s.eraser.Erase(r.Context(), s.schema, grant.Project, req.DataSubjectID, req.Reason)
 	if err != nil {
-		s.log.Error("erase", "error", err, "scope", req.Scope)
+		s.log.Error("erase", "error", err, "project", grant.Project)
 		writeError(w, http.StatusInternalServerError, "internal", "the erasure did not complete")
 		return
 	}
@@ -380,23 +358,6 @@ func (s *Server) erase(w http.ResponseWriter, r *http.Request, grant credential.
 }
 
 // ── Shared ────────────────────────────────────────────────────────────────────────────────────
-
-// permits refuses a scope the credential does not hold, and writes the refusal.
-//
-// Returns false having already answered, so a handler cannot forget the second half of the check.
-func (s *Server) permits(w http.ResponseWriter, grant credential.Grant, scope string) bool {
-	if strings.TrimSpace(scope) == "" {
-		writeError(w, http.StatusBadRequest, "no_scope", "a scope is required")
-		return false
-	}
-	if !grant.Permits(scope) {
-		// Not found rather than forbidden. Forbidden confirms the project exists, which is a fact
-		// about somebody else's data that an unauthorised caller should not be able to establish.
-		writeError(w, http.StatusNotFound, "no_such_scope", "no such project")
-		return false
-	}
-	return true
-}
 
 func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 	// Bounded, because an unbounded body is a way to spend our memory with one request. A turn is

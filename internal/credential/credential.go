@@ -40,22 +40,14 @@ var ErrUnknown = errors.New("credential does not resolve")
 type Grant struct {
 	CredentialID string
 	Name         string
-	// Scopes is the authorised project set. Empty is valid and means the credential reaches
-	// nothing, which is the correct state for one whose grants were removed.
-	Scopes []string
-}
-
-// Permits reports whether this grant covers a scope.
-//
-// Every read and every write asks. A scope absent from the set is refused rather than defaulted,
-// because a permission that widens when it is unset is the failure the permission exists to stop.
-func (g Grant) Permits(scope string) bool {
-	for _, s := range g.Scopes {
-		if s == scope {
-			return true
-		}
-	}
-	return false
+	// Project is the one project this credential reaches. A caller never names a project — the
+	// credential decides it — so this is not a set to be checked against a request but the answer
+	// to which project an operation acts on.
+	//
+	// Empty is not a valid resolved grant: Resolve refuses a credential with no project rather than
+	// returning one that reaches nothing, because a token that authenticates and then does nothing
+	// is a support case, not a security posture.
+	Project string
 }
 
 // Store resolves and issues credentials against the registry schema.
@@ -93,11 +85,11 @@ func (s *Store) Resolve(ctx context.Context, token string) (Grant, error) {
 
 	var g Grant
 	err := s.registry.QueryRow(ctx, fmt.Sprintf(`
-		SELECT credential_id::text, name, scopes
+		SELECT credential_id::text, name, project
 		  FROM %s.credential
 		 WHERE token_digest = $1
 		   AND revoked_at IS NULL`, s.schema), Digest(token)).
-		Scan(&g.CredentialID, &g.Name, &g.Scopes)
+		Scan(&g.CredentialID, &g.Name, &g.Project)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Grant{}, ErrUnknown
 	}
@@ -107,19 +99,19 @@ func (s *Store) Resolve(ctx context.Context, token string) (Grant, error) {
 	return g, nil
 }
 
-// Issue mints a credential and returns the token ONCE.
+// Issue mints a credential for one project and returns the token ONCE.
 //
 // The token is not recoverable afterwards, by us or by anyone with the database: only its digest is
 // stored. That is the property being bought, and it is why this returns the token rather than
 // writing it anywhere.
-func (s *Store) Issue(ctx context.Context, name string, scopes []string) (string, Grant, error) {
+func (s *Store) Issue(ctx context.Context, name, project string) (string, Grant, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", Grant{}, fmt.Errorf("a credential needs a name, so a person can tell it from another")
 	}
-	if scopes == nil {
-		// Distinguishing nil from empty here would make "no scopes" arrive as NULL in a NOT NULL
-		// column. Empty is the intended state and it is spelled explicitly.
-		scopes = []string{}
+	if strings.TrimSpace(project) == "" {
+		// A credential with no project reaches nothing and authenticates successfully, which is the
+		// worst combination: it looks like a working key to whoever holds it.
+		return "", Grant{}, fmt.Errorf("a credential is attached to a project")
 	}
 
 	var raw [32]byte
@@ -130,11 +122,11 @@ func (s *Store) Issue(ctx context.Context, name string, scopes []string) (string
 	}
 	token := Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
 
-	g := Grant{CredentialID: uuid.New().String(), Name: name, Scopes: scopes}
+	g := Grant{CredentialID: uuid.New().String(), Name: name, Project: project}
 	if _, err := s.registry.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, scopes)
+		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project)
 		VALUES ($1, $2, $3, $4, $5)`, s.schema),
-		g.CredentialID, Digest(token), token[:12], name, scopes); err != nil {
+		g.CredentialID, Digest(token), token[:12], name, project); err != nil {
 		return "", Grant{}, fmt.Errorf("issue credential: %w", err)
 	}
 	return token, g, nil

@@ -135,14 +135,14 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string) error {
 		return nil
 	}
 
-	token, grant, err := store.Issue(ctx, *credentialName, []string{*project})
+	token, grant, err := store.Issue(ctx, *credentialName, *project)
 	if err != nil {
 		return fmt.Errorf("mint the first credential: %w", err)
 	}
 	// Printed to stdout rather than logged, so that it can be captured by a script without the log
 	// format getting in the way — and said once, because it is not recoverable.
-	fmt.Printf("\ncredential %s (%s) grants: %s\n", grant.Name, grant.CredentialID,
-		strings.Join(grant.Scopes, ", "))
+	fmt.Printf("\ncredential %s (%s) reaches project %s\n",
+		grant.Name, grant.CredentialID, grant.Project)
 	fmt.Printf("token: %s\n", token)
 	fmt.Print("\nThis token is shown once. Only its digest is stored, so it cannot be recovered — " +
 		"mint another if it is lost.\n\n")
@@ -157,7 +157,7 @@ func credentialsForProject(ctx context.Context, pool *pgxpool.Pool, project stri
 	var n int
 	if err := pool.QueryRow(ctx,
 		`SELECT count(*) FROM `+string(migrate.ControlSchema)+`.credential
-		  WHERE revoked_at IS NULL AND $1 = ANY(scopes)`, project).Scan(&n); err != nil {
+		  WHERE revoked_at IS NULL AND project = $1`, project).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count credentials for project: %w", err)
 	}
 	return n, nil
@@ -190,21 +190,37 @@ func project(ctx context.Context, args []string) error {
 		return nil
 
 	case "list":
-		// Read from the partitions that exist rather than from a list somebody maintains: two
-		// definitions of which projects exist is one that drifts, and the one that drifts is the one
-		// no write touches.
+		// Read from the project table rather than from the data.
+		//
+		// This used to read `watermark`, which meant existence was inferred from something having
+		// been written — so a project created and not yet used did not appear, and an operator
+		// checking their work saw nothing. A project is a row now, and its existence does not depend
+		// on anybody having used it.
 		rows, err := admin.Query(ctx, schema.SQL(
-			`SELECT DISTINCT scope FROM {schema}.watermark ORDER BY scope`))
+			`SELECT scope, surfaces,
+			        coalesce(retention::text, 'indefinite'),
+			        suspended_at IS NOT NULL
+			   FROM {schema}.project ORDER BY scope`))
 		if err != nil {
 			return fmt.Errorf("list projects: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var scope string
-			if err := rows.Scan(&scope); err != nil {
+			var scope, retention string
+			var surfaces []string
+			var suspended bool
+			if err := rows.Scan(&scope, &surfaces, &retention, &suspended); err != nil {
 				return err
 			}
-			fmt.Println(scope)
+			state := ""
+			if suspended {
+				state = "  [suspended]"
+			}
+			active := "none"
+			if len(surfaces) > 0 {
+				active = strings.Join(surfaces, ",")
+			}
+			fmt.Printf("%-20s surfaces=%-24s retention=%s%s\n", scope, active, retention, state)
 		}
 		return rows.Err()
 
@@ -228,20 +244,30 @@ func credentialCommand(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "issue":
 		flags := flag.NewFlagSet("issue", flag.ContinueOnError)
-		scopes := flags.String("scopes", "default", "comma-separated projects this credential may reach")
+		project := flags.String("project", "default", "the project this credential reaches")
 		if len(args) < 2 {
-			return fmt.Errorf("usage: taisce credential issue <name> [-scopes a,b]")
+			return fmt.Errorf("usage: taisce credential issue <name> [-project <name>]")
 		}
 		name := args[1]
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
 		}
-		token, grant, err := store.Issue(ctx, name, splitScopes(*scopes))
+
+		// Checked here rather than by a foreign key, because the project table is in the tenant
+		// schema and this row is in the registry — behind the fence the memory service cannot
+		// cross. This command holds a connection that can see both, so it is the only place the
+		// reference CAN be validated, and without it a typo mints a credential that authenticates
+		// and reaches nothing.
+		if err := requireProject(ctx, admin, *project); err != nil {
+			return err
+		}
+
+		token, grant, err := store.Issue(ctx, name, *project)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("credential %s (%s) grants: %s\ntoken: %s\n",
-			grant.Name, grant.CredentialID, strings.Join(grant.Scopes, ", "), token)
+		fmt.Printf("credential %s (%s) reaches project %s\ntoken: %s\n",
+			grant.Name, grant.CredentialID, grant.Project, token)
 		fmt.Print("\nThis token is shown once and cannot be recovered.\n")
 		return nil
 
@@ -260,19 +286,30 @@ func credentialCommand(ctx context.Context, args []string) error {
 	}
 }
 
-// splitScopes turns a comma-separated list into a set, dropping empties so that a trailing comma
-// does not become a project named "".
-func splitScopes(raw string) []string {
-	var out []string
-	for _, s := range strings.Split(raw, ",") {
-		if s = strings.TrimSpace(s); s != "" {
-			out = append(out, s)
-		}
+// requireProject refuses to mint a credential for a project that does not exist.
+//
+// This is the check a foreign key would make, in the only place that can make it: the credential is
+// in the registry schema and the project is in the tenant schema, and no constraint crosses that
+// boundary because crossing it is what the boundary exists to prevent.
+//
+// It is a weaker guarantee than a constraint — a credential minted some other way could still name
+// nothing — and it catches the case that actually happens, which is a typo becoming a token that
+// authenticates successfully and reaches no memory at all.
+func requireProject(ctx context.Context, admin *pgxpool.Pool, project string) error {
+	schema, err := pg.NewSchema(strings.TrimSpace(os.Getenv(envTenant)))
+	if err != nil {
+		return err
 	}
-	if out == nil {
-		return []string{}
+	var exists bool
+	if err := admin.QueryRow(ctx, schema.SQL(
+		`SELECT EXISTS (SELECT 1 FROM {schema}.project WHERE scope = $1)`), project).Scan(&exists); err != nil {
+		return fmt.Errorf("check project %q: %w", project, err)
 	}
-	return out
+	if !exists {
+		return fmt.Errorf("project %q does not exist; create it first with `taisce project create %s`",
+			project, project)
+	}
+	return nil
 }
 
 // adminPool connects with the identity that may change the schema.

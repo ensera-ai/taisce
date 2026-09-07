@@ -53,7 +53,6 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 		LogOffset int64  `json:"log_offset"`
 	}
 	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
-		"scope":           "p1",
 		"data_subject_id": "subject-1",
 		"messages": []map[string]any{
 			{"role": "user", "content": "I work at Ensera and I live in Dublin."},
@@ -72,7 +71,7 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 		Stored int64  `json:"stored"`
 		Formed *int64 `json:"formed"`
 	}
-	h.do(t, http.MethodGet, "/v1/freshness?scope=p1", nil, http.StatusOK, &before)
+	h.do(t, http.MethodGet, "/v1/freshness", nil, http.StatusOK, &before)
 	if before.Stored != observed.LogOffset {
 		t.Fatalf("stored is %d but the append returned offset %d", before.Stored, observed.LogOffset)
 	}
@@ -85,7 +84,7 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 	var after struct {
 		Formed *int64 `json:"formed"`
 	}
-	h.do(t, http.MethodGet, "/v1/freshness?scope=p1", nil, http.StatusOK, &after)
+	h.do(t, http.MethodGet, "/v1/freshness", nil, http.StatusOK, &after)
 	if after.Formed == nil || *after.Formed != observed.LogOffset {
 		t.Fatalf("formed did not reach the offset that was appended: %v", after.Formed)
 	}
@@ -111,7 +110,6 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 	}
 	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
 		"question": "Where does the user work?",
-		"scopes":   []string{"p1"},
 	}, http.StatusOK, &bundle)
 
 	if len(bundle.Anchors) == 0 {
@@ -142,7 +140,7 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 		Clean    bool           `json:"clean"`
 	}
 	h.do(t, http.MethodPost, "/v1/erasures", map[string]any{
-		"scope": "p1", "data_subject_id": "subject-1", "reason": "the journey, over HTTP",
+		"data_subject_id": "subject-1", "reason": "the journey, over HTTP",
 	}, http.StatusOK, &receipt)
 
 	if !receipt.Clean {
@@ -162,7 +160,7 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 		Facts []json.RawMessage `json:"facts"`
 	}
 	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
-		"question": "Where does the user work?", "scopes": []string{"p1"},
+		"question": "Where does the user work?",
 	}, http.StatusOK, &afterErasure)
 	if len(afterErasure.Facts) != 0 {
 		t.Fatalf("%d facts survived an erasure that reported a residual of zero", len(afterErasure.Facts))
@@ -180,10 +178,10 @@ func TestEveryOperationRefusesAnUnauthenticatedCaller(t *testing.T) {
 		method, path string
 		body         map[string]any
 	}{
-		{http.MethodPost, "/v1/observations", map[string]any{"scope": "p1"}},
-		{http.MethodGet, "/v1/freshness?scope=p1", nil},
+		{http.MethodPost, "/v1/observations", map[string]any{"data_subject_id": "s"}},
+		{http.MethodGet, "/v1/freshness", nil},
 		{http.MethodPost, "/v1/recalls", map[string]any{"question": "anything"}},
-		{http.MethodPost, "/v1/erasures", map[string]any{"scope": "p1", "data_subject_id": "s"}},
+		{http.MethodPost, "/v1/erasures", map[string]any{"data_subject_id": "s"}},
 	} {
 		t.Run(c.method+" "+c.path, func(t *testing.T) {
 			status, _ := h.raw(t, c.method, c.path, c.body, "")
@@ -200,41 +198,94 @@ func TestEveryOperationRefusesAnUnauthenticatedCaller(t *testing.T) {
 func TestAnUnknownCredentialIsRefusedTheSameWayAsNone(t *testing.T) {
 	h := newHarness(t, "api_unknown")
 	for _, token := range []string{"not-a-taisce-token", "tsk_notarealtokenatall"} {
-		status, _ := h.raw(t, http.MethodGet, "/v1/freshness?scope=p1", nil, token)
+		status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, token)
 		if status != http.StatusUnauthorized {
 			t.Fatalf("token %q got %d", token, status)
 		}
 	}
 }
 
-// A credential reaches the projects it was granted and no others.
+// A caller cannot name a project at all, so a request that tries is refused as malformed.
 //
-// Refused as NOT FOUND rather than forbidden: forbidden confirms the project exists, which is a fact
-// about somebody else's data that an unauthorised caller should not be able to establish.
-func TestACredentialCannotReachAProjectItWasNotGranted(t *testing.T) {
-	h := newHarness(t, "api_scope")
+// This replaces two tests that checked a caller naming a project it did not hold. That check is gone
+// with the field: the project comes from the credential (D47), so there is nothing to name and
+// nothing to verify — which removes the whole class of error rather than answering it.
+func TestARequestCannotNameAProject(t *testing.T) {
+	h := newHarness(t, "api_noname")
 
-	status, body := h.raw(t, http.MethodPost, "/v1/observations", map[string]any{
-		"scope":    "p2-not-granted",
-		"messages": []map[string]any{{"role": "user", "content": "hello"}},
-	}, h.token)
-	if status != http.StatusNotFound {
-		t.Fatalf("wrote into an ungranted project: %d %s", status, body)
-	}
-	if bytes.Contains(body, []byte("forbidden")) {
-		t.Fatalf("the refusal confirms the project exists: %s", body)
+	for name, body := range map[string]string{
+		"observe": `{"scope":"somewhere-else","data_subject_id":"s",` +
+			`"messages":[{"role":"user","content":"hello"}]}`,
+		"recall":  `{"question":"anything","scope":"somewhere-else"}`,
+		"recalls": `{"question":"anything","scopes":["somewhere-else"]}`,
+		"erase":   `{"scope":"somewhere-else","data_subject_id":"s"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := "/v1/observations"
+			switch name {
+			case "recall", "recalls":
+				path = "/v1/recalls"
+			case "erase":
+				path = "/v1/erasures"
+			}
+			status, body := h.rawBody(t, http.MethodPost, path, body, h.token)
+			if status != http.StatusBadRequest {
+				t.Fatalf("a request naming a project returned %d: %s", status, body)
+			}
+		})
 	}
 }
 
-// A recall naming an ungranted scope is refused rather than silently narrowed. A bundle quietly
-// missing a project looks exactly like a project with nothing in it.
-func TestARecallNamingAnUngrantedScopeIsRefusedRatherThanNarrowed(t *testing.T) {
-	h := newHarness(t, "api_narrow")
-	status, _ := h.raw(t, http.MethodPost, "/v1/recalls", map[string]any{
-		"question": "anything", "scopes": []string{"p1", "p2-not-granted"},
-	}, h.token)
-	if status != http.StatusNotFound {
-		t.Fatalf("a recall over an ungranted scope returned %d", status)
+// Two credentials for two projects see different memory, which is the boundary stated as a property
+// rather than as a refusal.
+//
+// The previous version of this asserted that naming somebody else's project was refused. This asserts
+// the thing that actually matters: a credential reaches its own project's memory and cannot reach
+// another's, whatever it sends.
+func TestTwoCredentialsForTwoProjectsSeeDifferentMemory(t *testing.T) {
+	h := newHarness(t, "api_isolation")
+	ctx := context.Background()
+
+	if err := migrate.ProvisionScope(ctx, h.pool, h.schema.String(), "p2"); err != nil {
+		t.Fatalf("provision p2: %v", err)
+	}
+	other, _, err := credential.NewStore(h.pool, string(migrate.ControlSchema)).
+		Issue(ctx, "api_isolation-p2", "p2")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+
+	// Written with the first credential, into its own project.
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"data_subject_id": "subject-1",
+		"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
+	}, http.StatusCreated, nil)
+	h.form(t)
+
+	// The first credential sees it.
+	var mine struct {
+		Facts []json.RawMessage `json:"facts"`
+	}
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{"question": "What about Ensera?"},
+		http.StatusOK, &mine)
+	if len(mine.Facts) == 0 {
+		t.Fatal("a credential cannot see memory written through itself")
+	}
+
+	// The second sees nothing, and there is no way for it to ask for the first project.
+	status, raw := h.raw(t, http.MethodPost, "/v1/recalls",
+		map[string]any{"question": "What about Ensera?"}, other)
+	if status != http.StatusOK {
+		t.Fatalf("the second credential got %d: %s", status, raw)
+	}
+	var theirs struct {
+		Facts []json.RawMessage `json:"facts"`
+	}
+	if err := json.Unmarshal(raw, &theirs); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(theirs.Facts) != 0 {
+		t.Fatalf("a credential for another project saw %d facts", len(theirs.Facts))
 	}
 }
 
@@ -242,7 +293,7 @@ func TestARecallNamingAnUngrantedScopeIsRefusedRatherThanNarrowed(t *testing.T) 
 func TestAnErasureWithoutASubjectIsRefusedOverTheWire(t *testing.T) {
 	h := newHarness(t, "api_nosubject")
 	status, _ := h.raw(t, http.MethodPost, "/v1/erasures",
-		map[string]any{"scope": "p1", "reason": "no subject named"}, h.token)
+		map[string]any{"reason": "no subject named"}, h.token)
 	if status != http.StatusBadRequest {
 		t.Fatalf("an erasure with no subject returned %d", status)
 	}
@@ -303,7 +354,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 	}
 
 	credentials := credential.NewStore(pool, string(migrate.ControlSchema))
-	token, _, err := credentials.Issue(ctx, "test-"+tenant, []string{"p1"})
+	token, _, err := credentials.Issue(ctx, "test-"+tenant, "p1")
 	if err != nil {
 		t.Fatalf("issue credential: %v", err)
 	}
@@ -422,8 +473,8 @@ func TestAMalformedRequestIsRefusedWithoutTouchingTheDatabase(t *testing.T) {
 		// `data_subject` instead of `data_subject_id` would otherwise have its turn stored with no
 		// subject, and an erasure would later find nothing to erase.
 		"unknown field": {"/v1/observations",
-			`{"scope":"p1","data_subject":"s","messages":[{"role":"user","content":"hi"}]}`},
-		"unknown field on recall": {"/v1/recalls", `{"question":"x","scope":"p1"}`},
+			`{"data_subject":"s","messages":[{"role":"user","content":"hi"}]}`},
+		"unknown field on recall": {"/v1/recalls", `{"question":"x","project":"p1"}`},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -448,7 +499,7 @@ func TestATurnTheDomainRefusesIsRefusedWithItsReason(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			status, body := h.raw(t, http.MethodPost, "/v1/observations", map[string]any{
-				"scope": "p1", "data_subject_id": "s", "messages": messages,
+				"data_subject_id": "s", "messages": messages,
 			}, h.token)
 			if status != http.StatusBadRequest {
 				t.Fatalf("returned %d: %s", status, body)
@@ -460,33 +511,13 @@ func TestATurnTheDomainRefusesIsRefusedWithItsReason(t *testing.T) {
 	}
 }
 
-// A request naming no scope cannot be authorised, so it is refused before anything else happens.
-func TestARequestWithNoScopeIsRefused(t *testing.T) {
-	h := newHarness(t, "api_noscope")
-	for name, c := range map[string]struct {
-		method, path string
-		body         map[string]any
-	}{
-		"freshness": {http.MethodGet, "/v1/freshness", nil},
-		"observe":   {http.MethodPost, "/v1/observations", map[string]any{"messages": []map[string]any{{"role": "user", "content": "hi"}}}},
-		"erase":     {http.MethodPost, "/v1/erasures", map[string]any{"data_subject_id": "s"}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			status, body := h.raw(t, c.method, c.path, c.body, h.token)
-			if status != http.StatusBadRequest {
-				t.Fatalf("returned %d: %s", status, body)
-			}
-		})
-	}
-}
-
 // A question is required, because a recall with none would anchor on nothing and return an empty
 // bundle that looks like an answer.
 func TestARecallWithoutAQuestionIsRefused(t *testing.T) {
 	h := newHarness(t, "api_noquestion")
 	for _, question := range []string{"", "   "} {
 		status, body := h.raw(t, http.MethodPost, "/v1/recalls",
-			map[string]any{"question": question, "scopes": []string{"p1"}}, h.token)
+			map[string]any{"question": question}, h.token)
 		if status != http.StatusBadRequest {
 			t.Fatalf("question %q returned %d: %s", question, status, body)
 		}
@@ -508,7 +539,7 @@ func TestARecallWithNoScopesUsesTheCredentialsOwn(t *testing.T) {
 // to decide how much of our memory it uses.
 func TestAnOversizedBodyIsRefused(t *testing.T) {
 	h := newHarness(t, "api_oversize")
-	huge := `{"scope":"p1","data_subject_id":"s","messages":[{"role":"user","content":"` +
+	huge := `{"data_subject_id":"s","messages":[{"role":"user","content":"` +
 		strings.Repeat("a", 2<<20) + `"}]}`
 	status, _ := h.rawBody(t, http.MethodPost, "/v1/observations", huge, h.token)
 	if status != http.StatusBadRequest {
@@ -520,7 +551,7 @@ func TestAnOversizedBodyIsRefused(t *testing.T) {
 // caller can act on rather than a zero that looks like an empty memory.
 func TestFreshnessForAScopeWithNoTurnsSaysSo(t *testing.T) {
 	h := newHarness(t, "api_freshempty")
-	status, _ := h.raw(t, http.MethodGet, "/v1/freshness?scope=p1", nil, h.token)
+	status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, h.token)
 	if status != http.StatusInternalServerError && status != http.StatusOK {
 		t.Fatalf("unexpected status %d", status)
 	}
@@ -543,4 +574,28 @@ func (h *harness) rawBody(t *testing.T, method, path, body, token string) (int, 
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, raw
+}
+
+// A revoked credential stops working immediately, which is what makes revocation an answer to a leak
+// rather than a note in a ticket.
+func TestARevokedCredentialStopsWorkingAtOnce(t *testing.T) {
+	h := newHarness(t, "api_revoked")
+	ctx := context.Background()
+	store := credential.NewStore(h.pool, string(migrate.ControlSchema))
+
+	token, grant, err := store.Issue(ctx, "api_revoked-doomed", "p1")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, token); status == http.StatusUnauthorized {
+		t.Fatal("a freshly minted credential was refused")
+	}
+
+	if err := store.Revoke(ctx, grant.CredentialID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, token)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("a revoked credential still worked: %d", status)
+	}
 }

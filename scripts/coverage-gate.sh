@@ -9,6 +9,20 @@
 # a change earns it. A fixed percentage invites tests written to reach it; the only way to move a
 # ratchet is to test something that was not tested.
 #
+# THE FLOOR SITS BELOW THE NOISE, NOT AT THE PEAK.
+#
+# The measurement is not deterministic. Some tests race deliberately — several writers against one
+# exclusion constraint, several drivers against one advisory lock — and which branches run depends on
+# who wins. Observed range across consecutive runs of an unchanged tree: about half a percentage
+# point.
+#
+# So the floor is set from the LOWEST number a run produces, never the highest. A ratchet raised to a
+# lucky peak fails on the next ordinary run, and a gate that fails for reasons nobody changed is one
+# that gets bypassed — which costs more than the tenth of a percent it was protecting.
+#
+# Raising it after a real improvement means running the suite more than once and taking the smallest
+# result.
+#
 # The number is computed across packages. `go test -cover` counts only what a package's own tests
 # reach, which understates a codebase exercised end to end — the same suite reports 75.4% that way
 # and 78.9% with -coverpkg=./... . The second is the honest one.

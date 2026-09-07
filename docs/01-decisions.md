@@ -424,6 +424,69 @@ default with an override (the default is what ships, so the override is what nob
 
 **How hard to undo.** Easy while nothing is signed. Hard afterwards, which is the point.
 
+### D47 — A caller never names a project; the credential decides it
+
+A request carries no project. The credential resolves to exactly one (D43), and that is the project
+the operation acts on.
+
+**The check disappears with the field.** The surface currently accepts a `scope` in the body and
+verifies it against the grant — a check that exists only because the field does. With the project
+derived from the credential there is nothing to verify, nothing to get wrong, and no way for a caller
+to name a project at all.
+
+**It closes a disclosure surface.** A caller naming a project it does not hold has to be answered, and
+every answer says something: `403` confirms the project exists, `404` conceals it at the cost of
+lying. Neither is needed once the question cannot be asked.
+
+**It makes the audit unambiguous.** #86 attributes every operation to a principal. If a request could
+name its project, "which project did this touch" would be a second field that could disagree with the
+first. Derived, the token names it.
+
+**What it costs.** An agent working across two projects holds two credentials and switches between
+them, rather than sending a different string. That is the same trade D43 already took, and it is the
+same answer: the reach of a credential is a fact rather than an argument.
+
+**And the question it dissolves.** "What happens when an agent writes to a project that does not
+exist" was an open decision until this entry: it cannot, because the project comes from a credential
+that had to resolve to a real one. Provisioning is an operator action (D43, #87), the default
+partition stays as the safety net it was built to be, and the write path has one less way to be wrong.
+
+**Rejected:** a project in the request verified against the grant (what was built — an extra field, an
+extra check, an extra way to disagree); a project in the URL path (the same, and it puts the project
+name in every access log).
+
+**How hard to undo.** Easy while no adapter has shipped. The field would have to come back in a
+contract version, which is why it is settled before #36 makes the contract public.
+
+### D48 — Memory surfaces are chosen when a project is created, and only ever added
+
+A project declares which kinds of memory it keeps at creation. Afterwards a surface may be turned on
+and never off.
+
+**Because turning one off is a destructive act pretending to be a setting.** Data already stored by a
+surface has to go somewhere when it stops being served: left in place it is storage nobody can read
+and an operator who believes "off" means "gone" is wrong about what their instance holds; erased, a
+configuration toggle silently destroys memory and flipping it back returns an empty surface. Both are
+bad, and the second is worse because it is quiet.
+
+**Monotonic settings have no such state.** Turning a surface on is safe by construction: nothing has
+been stored by it yet, so there is nothing to strand or destroy. There is no reversal to design, no
+orphaned data to account for, and no configuration change that can lose a customer's memory.
+
+**Stopping a surface is therefore an erasure, and looks like one.** An operator who wants a surface's
+data gone asks for it explicitly and gets a receipt with a counted residual. That is this product's
+whole argument about deletion, and routing it through a settings checkbox would be the one place it
+did not apply.
+
+**Rejected:** a reversible toggle that leaves data unreachable (storage held for something nobody can
+read, and an instance holding more than its operator believes); a toggle that erases (a settings
+change that destroys memory, discovered by whoever flips it back); refusing to turn off while data
+exists (the correct answer to a question this decision removes).
+
+**How hard to undo.** Easy to widen — permitting a turn-off later is additive. Hard to have avoided
+if it had shipped the other way, since by then instances exist whose surfaces were switched off and
+whose data is in whichever state was chosen.
+
 ---
 
 ## Substrate
