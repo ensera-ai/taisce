@@ -264,14 +264,13 @@ priced.
 
 # What this is
 
-**Taisce is a multi-tenant SaaS.** One service, EU-hosted, with the tenant boundary as a schema and
-the project boundary as a permission.
+**Taisce is open-source agentic memory, run by the people who use it.** One instance, one tenant, on
+infrastructure its operator controls: `docker compose up` on a machine, or a Helm chart in a cluster.
 
-**The adapters and clients are open source; the service is not.** So the line is: **the adapter
-translates, the service decides.** Retrieval, ranking, supersession, communities, compaction and
-erasure are the service. Message filtering, envelope construction and one framework's seam are the
-adapter. Anything in an open adapter is readable and forkable, which makes "no logic in an adapter"
-the boundary between what is given away and what is sold.
+**All of it is open, under Apache-2.0** — the service, the portal, the adapters, the clients. There
+is no closed half and no paid tier, which removes the line most of the earlier decisions here were
+drawn against. Nothing is held back in order to be sold, so the only reason to keep logic out of an
+adapter is that it belongs somewhere else.
 
 **Adapter focus: Python, Java and .NET.** The adapter is the product; the client underneath is
 plumbing sized to serve it.
@@ -279,27 +278,42 @@ plumbing sized to serve it.
 ## What is settled about the shape of it
 
 **Who it is for.** Developers building agents, reached through the framework seam they already use
-rather than through an API they have to adopt.
+rather than through an API they have to adopt — and the person who has to operate it, who is usually
+the same person. That second reader is why the portal exists.
 
 **What it must do that a vector store does not.** Answer from entities rather than passages, keep
 time as a first-class property, show the words behind every claim, and prove what it deleted.
 
-**The one required dependency is PostgreSQL.** Not a vector database, graph engine, broker, cache or
+**PostgreSQL is the only required dependency.** Not a vector database, graph engine, broker, cache or
 object store — each is a second place data lives, a second thing to operate, and a second sweep an
 erasure has to prove it covered.
 
-**Governance is a feature, not overhead.** EU hosting, erasure with a counted residual, export,
-retention under the customer's own policy, and provenance on what is recalled. These are the reasons
-to choose it, so they are designed first rather than added when a customer asks.
+**A model is reached over an OpenAI-compatible endpoint, and the deployment ships LiteLLM as the
+default hop to one.** Shipped is not required: anything speaking that interface is a valid answer,
+and an operator who already holds a key should not have to run a proxy to use this. Making the proxy
+mandatory would put a second moving part on the write path in exchange for convenience.
 
-**Deliberately not built:** a self-hosted edition, and being a connector in front of somebody else's
-vector store.
+**Governance is a feature, and self-hosting sharpens it.** Erasure with a counted residual, export,
+retention under the operator's own policy, and provenance on what is recalled. The data never leaves
+the operator's infrastructure, and the proof is computed on their own substrate rather than asserted
+by somebody they have to trust.
+
+**Availability is a deployment property, not something the code learns.** The service is already safe
+to run as several replicas — formation holds a per-scope advisory lock, the watermark is taken `FOR
+UPDATE` — so high availability is what the chart arranges. The Helm chart is highly available by
+default; the compose file is one machine and says so, because one host is one failure domain and a
+compose file claiming otherwise would be the product lying in its own README.
+
+**Deliberately not built:** a hosted edition, a paid tier, and being a connector in front of somebody
+else's vector store.
 
 ## What is not settled, and should not be invented
 
-No latency budget, throughput target, tenant count or data volume has been agreed. `docs/00-goals.md`
+No latency budget, throughput target, corpus size, RTO or RPO has been agreed. `docs/00-goals.md`
 states the *shape* of the scaling claim and the issue list holds the work that would measure it —
-until then, any specific number is a guess and saying so is part of rule 11.
+until then, any specific number is a guess and saying so is part of rule 11. This applies to
+availability too: "highly available" is a topology until somebody states how much downtime and how
+much data loss is acceptable, and only then is it a requirement that can be tested.
 
 Start with [`docs/00-goals.md`](docs/00-goals.md) for what must be true and what would prove it, and
 [`docs/01-decisions.md`](docs/01-decisions.md) for what is settled and what was rejected. The roadmap

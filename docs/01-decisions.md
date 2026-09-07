@@ -12,6 +12,116 @@ or when building something forces a choice that a later reader would otherwise h
 
 ---
 
+## Shape
+
+*These entries were taken on 2026-09-07 and they govern the ones below. Where an earlier entry
+assumed a hosted, multi-tenant, part-closed product, it carries a note saying what replaced it.*
+
+### D35 — Taisce is one open-source service, single-tenant, run by its operator
+
+An instance holds one organisation's memory, on infrastructure that organisation controls: `docker
+compose up` on a machine, a Helm chart in a cluster. There is no hosted edition and no part of the
+system that is withheld.
+
+The argument is adoption. A memory layer competes with a vector store somebody already runs and with
+doing nothing, and both alternatives are free to start. Anything that makes evaluation require a
+signup, a key, or a conversation loses to them before the design is ever considered. Self-hosting
+also turns the governance claims from promises into observations: the data does not leave, and the
+residual an erasure counts is computed on the operator's own substrate rather than asserted by a
+vendor.
+
+**What it costs.** The multi-tenant machinery already built has no reader in this shape, and the
+security argument that a cross-customer read is *unreachable* becomes trivially true rather than
+hard-won. Scaling evidence gets harder to gather: nobody is running a corpus of everyone's data, so
+the numbers in G1 have to come from a benchmark rather than from production.
+
+**Rejected:** the multi-tenant hosted service this was (it tells the governance story second-hand, and
+every evaluation starts with a signup); running both (the out-of-scope section's own argument —
+hosted and self-hosted cannot both be told well, and the one that suffers is whichever is not being
+demonstrated).
+
+**How hard to undo.** Moderate in code and severe in expectation. The schema-per-scope substrate would
+carry a hosted edition with little change, but a licence cannot be narrowed and a community that
+adopted an open product does not quietly accept it closing.
+
+### D36 — Apache-2.0, for all of it
+
+Service, portal, adapters, clients. One permissive licence, no split.
+
+Adapters link into other people's applications, and a reciprocal licence there is a thing a legal
+review refuses — which would cost exactly the adoption the adapters exist to win. Applying the same
+licence to the service keeps the answer to *"what can I do with this"* one sentence long, and a
+licence an operator has to reason about is friction at the moment they are deciding whether to try it
+at all.
+
+**What it costs, stated rather than discovered.** Anyone may host this as a competing service with no
+obligation to contribute back. That is the price of the adoption, and it is paid permanently.
+
+**Rejected:** AGPL for the service with Apache-2.0 adapters (the split most infrastructure projects
+land on; it would preserve a hosted business and it was rejected because there is not going to be
+one, and because AGPL anywhere in a stack is a question every adopter's legal team asks); BSL or
+another source-available licence (protects a commercial position best, and it is not open source, so
+it contradicts the thing being built).
+
+**How hard to undo.** Permanent for anything published. Registries refuse to reuse a version number,
+and code released under Apache-2.0 stays available under it.
+
+### D37 — LiteLLM ships in the deployment; it is not a dependency
+
+The service speaks the OpenAI-compatible HTTP interface and nothing more specific. The compose file
+and the chart include LiteLLM configured as the default hop to a provider, because "bring your own
+endpoint" as the only answer means the first five minutes involve choosing and configuring one.
+
+Shipped is not required. An operator who already holds a key points the endpoint at it and runs
+nothing extra. D1 is intact: PostgreSQL remains the only thing that has to be there.
+
+**Rejected:** requiring LiteLLM (a second moving part on the write path, mandatory, in exchange for
+convenience that an operator with a key does not need — and D1's argument applies to a proxy exactly
+as it applies to a cache); shipping nothing and documenting a provider (correct and slower, and the
+five minutes it costs are the five minutes that decide adoption); calling providers directly per
+vendor (one interface is why inference can move without reaching the extractor).
+
+**How hard to undo.** Easy. It is a service in a compose file and a subchart.
+
+### D38 — The chart is highly available; the compose file is one machine and says so
+
+The Helm chart defaults to several stateless replicas and a PostgreSQL topology that survives losing
+a node. The compose file is a single host, documented as an evaluation and development deployment.
+
+The application needs nothing new for this. Formation takes a per-scope advisory lock and the
+watermark row is taken `FOR UPDATE`, so a second replica forming the same scope is refused rather
+than racing — which is already tested. Availability is therefore what the chart arranges.
+
+**Rejected:** arranging compose to look highly available (it survives a process dying and not the
+machine, so the word would be doing work it cannot support); deferring availability until an RTO and
+RPO exist (the topology is the part that is expensive to retrofit, and it can be built while the
+number is still unstated — provided the claim is not made).
+
+**What is deliberately not claimed.** No RTO or RPO has been agreed, so the chart is a topology with a
+failover path rather than a guarantee. The first measurement of that number is the closing evidence
+on the chart's own issue.
+
+**How hard to undo.** Easy for compose, moderate for the chart.
+
+### D39 — There is no commercial line, so none is designed for
+
+No paid tier, no enterprise edition, no feature held back. Bundles, plan catalogues, entitlement
+enforcers and subscription lifecycles are removed from scope rather than deferred.
+
+An open-core line drawn later is a refactor through every feature that straddles it, and — worse — it
+changes what gets built in the meantime, because anything that might end up on the paid side gets
+designed with a seam it does not need. Deciding there is no line now is what stops that.
+
+**Rejected:** open core with the portal or availability behind it (it makes operations the paid part
+of a product whose argument is that operations are visible); a hosted edition later (D35); keeping the
+bundle work dormant in case (a design nobody is building rots, and a milestone nobody will finish is
+a roadmap that lies about what is coming).
+
+**How hard to undo.** Easy in code, since removing unbuilt scope removes nothing that runs. Hard in
+expectation, for the reason in D35.
+
+---
+
 ## Substrate
 
 ### D1 — PostgreSQL is the only required dependency
@@ -128,6 +238,11 @@ a name); a schema per project (a multi-project recall becomes a cross-schema uni
 planned as one query); a database per tenant (connection pooling and migration both scale badly).
 
 ## Erasure
+
+**Amended by D35.** There is one tenant, so the hard boundary this describes is now trivially true
+rather than load-bearing. The schema stays for the reasons that survive — erasure walks one namespace,
+migration applies in one order, a backup has an obvious edge — and the project half of this entry is
+unchanged and is the boundary that still does work.
 
 ### D9 — Erasure walks a registered dependency, not a list of tables
 
@@ -553,6 +668,11 @@ makes the guarantee, and process separation adds isolation on top of it without 
 model — so it is a deployment choice that can be made later, and making it now would buy nothing that
 is not already bought.
 
+**Amended by D35.** The registry it separates has no reader in a single-tenant instance, so the
+control plane as a *commercial* boundary is retired. The least-privilege half is kept and matters more
+than before: the portal is a new reader of personal data, and a role that cannot change the schema is
+the difference between an operator surface and a database client.
+
 ### D30 — A credential is exchanged for a short-lived signed grant, verified without a round trip
 
 The control plane resolves a credential to a tenant schema, an authorised project set and an
@@ -583,6 +703,10 @@ liability rather than a bound); a shared secret rather than a signature (every p
 can also mint, so the memory service could issue itself any authority it liked); putting the
 credential itself in the grant (the memory service would then hold something it could replay against
 the control plane, which is the authority it was deliberately not given).
+
+**Superseded by D35.** A credential resolving to a tenant and its entitlements describes a product
+that no longer exists. What replaces it is narrower and still required: a credential resolves to an
+authorised project set, and an empty set returns nothing. The issue that owns the replacement says so.
 
 ### D31 — The read audit is append-only, and it holds nothing that could ever need erasing
 
@@ -636,6 +760,10 @@ one, retroactively, on downgrade); a platform maximum (an opinion about somebody
 no retention mechanism at all (three columns carrying an expiry that nothing reads is a cost with no
 mechanism behind it).
 
+**Superseded by D39.** There is no subscription, so there is no second clock. Retention runs under
+the operator's policy, unconditionally — which is what this entry argued was correct whenever it was
+possible.
+
 ### D33 — A lapsed subscription gets a grace period, then the tenant's schema is dropped
 
 Not suspended indefinitely, and not deleted on the day a payment fails.
@@ -666,6 +794,9 @@ failure (a card expiring is not a request to be forgotten); withholding export f
 customer (holding data hostage); marking rows deleted rather than dropping the schema (leaves the
 residual question open when the answer could have been structural).
 
+**Superseded by D39.** Nothing lapses. Dropping the schema remains the strongest erasure available
+and is now an operator action rather than a billing consequence.
+
 ### D34 — One verification log per tenant
 
 The log's origin names the tenant, its checkpoints are the tenant's, and the anchor a client retains
@@ -685,6 +816,10 @@ who checks); a log per project (a project is a permission and not a boundary, so
 the structure without separating anything that is not already separated by scope).
 
 ## Method
+
+**Amended by D35.** One tenant means one log by construction. The reasoning that a shared log
+discloses other customers' governance volume no longer applies, and what remains is the simpler
+version: the log covers the instance.
 
 ### D14 — Nothing is brought in from another codebase unless it is asked for
 

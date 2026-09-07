@@ -1,7 +1,9 @@
 # Goals
 
-**Adopted 2026-09-04.** The first document in the repository and the one every other document answers
-to. It says what Taisce is for, what must be true of it, and — for each goal — what would prove it.
+**Adopted 2026-09-04. Revised 2026-09-07**, when the product changed shape: from a multi-tenant
+hosted service with open adapters to an open-source single-tenant service the operator runs. G11,
+G12 and G13 were rewritten and G14 added; the register records what that decision rejected. The first
+document in the repository and the one every other document answers to. It says what Taisce is for, what must be true of it, and — for each goal — what would prove it.
 A goal with no way to be proved wrong is a slogan, and none of those belong here.
 
 ---
@@ -12,8 +14,14 @@ Memory for agents. An agent writes what it observes; later it asks a question an
 relevant, current and attributable — with the evidence for each claim, the history behind it, and a
 guarantee that anything erased is gone and can be shown to be gone.
 
-A multi-tenant SaaS, hosted in the EU, on one PostgreSQL substrate. The adapters and clients that
-reach it are open source; the service is not.
+An open-source service on one PostgreSQL substrate, run by the people who use it: one instance, one
+tenant, on infrastructure its operator controls. All of it is Apache-2.0 — service, portal, adapters,
+clients.
+
+**Adoption is the measure.** A memory layer nobody installs is a design document with tests. That
+puts weight on things a closed product could treat as packaging: how long it takes to get a working
+agent from a cold machine, whether it appears at the seam a developer is already standing at, and
+whether the claims it makes can be re-run by the person deciding whether to trust them.
 
 ---
 
@@ -200,92 +208,112 @@ against it has to be concrete.
 the stale and the current claim, Taisce returns the current one with the stale one marked superseded.
 That is one demo and it is the whole argument.
 
-### G11 — Two boundaries, and they are not the same kind of thing
+### G11 — One instance is one tenant, and the boundary that remains is the project
 
-**A tenant is a schema. Hard.** A cross-tenant read is impossible because the other tenant's name is
-not in the statement — not because a predicate excluded it. There is no tenant column to forget, and
-a bug in a `WHERE` clause cannot cross it. A schema name cannot be a bind parameter, so it is
-interpolated from a validated type that exists only after construction: forgetting to validate is a
-compile error rather than an injection.
+**There is no tenant boundary to cross, because there is one tenant.** An instance holds one
+organisation's memory, on their own infrastructure. That removes the hardest security surface a
+memory product has — a cross-customer read is not mitigated, it is unreachable, because no other
+customer's data is in the database.
 
-**A project is a scope. Soft.** Inside one tenant, where cross-project reads are *intended* — a
-principal granted several projects gets one bundle across them. So scope is a column, every read
-carries the authorised set, and the boundary is a permission that is checked.
+**The schema stays.** Not for tenancy: because it is what makes erasure a walk over one namespace,
+migration a single ordered application, and a backup a thing with an obvious boundary. A schema name
+cannot be a bind parameter, so it is interpolated from a validated type that exists only after
+construction, and forgetting to validate is a compile error rather than an injection.
 
-Getting this backwards in either direction is a serious defect. Tenancy as a column is one missing
-predicate from a cross-customer leak; projects as schemas makes a multi-project recall a cross-schema
-union that cannot be planned as one query.
+**A project is a scope, and it is a real boundary.** One tenant is not one user or one application.
+Several agents, several teams and several products share an instance, cross-project reads are
+*intended* for a principal granted more than one, and an operator's portal session is not entitled to
+everything by virtue of being an operator. So scope is a column, every read carries the authorised
+set, and an empty set returns nothing.
 
-**Proved by.** Two tenants holding the same project name and the same data-subject reference, where a
-tenant-scoped read returns exactly its own row **with no tenant predicate in the query at all** — and
-a multi-project read inside one tenant returning two of three projects by authorisation.
+**Proved by.** A multi-project read returning two of three projects by authorisation, and an empty
+authorised set returning an empty bundle rather than everything.
 
-### G12 — Open client, closed service, and the line between them is the architecture
+### G12 — All of it is open, and publishing is irreversible
 
-The adapters and clients are open source. They run inside the customer's process, hold their key, and
-see every observation and every recall on the way past; nobody should take that on trust from a
-binary, and an adapter that cannot be read will not be adopted by anyone whose security team reads
-code.
+Everything is Apache-2.0: the service, the portal, the adapters and the clients. Permissive
+throughout, chosen for adoption — an adapter that links into somebody's application cannot carry a
+reciprocal licence without becoming a thing their legal review refuses, and a service under a licence
+that scares operators is a service nobody runs.
 
-**The service is not open.** So the line is: **the adapter translates, the service decides.**
-Retrieval, ranking, supersession, communities, compaction and erasure are the service. Message
-filtering, envelope construction and one framework's seam are the adapter. That makes "no logic in an
-adapter" (G8) the boundary between what is given away and what is sold, not merely a consistency
-rule.
+**What that costs, stated rather than discovered.** Anyone may host this, including as a competing
+service, with no obligation to contribute anything back. That is the price of the adoption the
+licence buys, and it is paid permanently: a licence cannot be narrowed once packages ship.
 
-Three consequences that are easy to notice too late. The REST contract becomes public the day the
-first package ships. Publishing is irreversible — registries refuse to reuse a version number, and a
-Go module path is permanent — so the organisation and module path are settled before the first
-publish. And every README is public copy making claims about the service.
+**So the line between adapter and service is no longer commercial, and it still holds.** Retrieval,
+ranking, supersession, communities, compaction and erasure are the service because that is where a
+correctness argument can be tested against a real substrate. Message filtering, envelope construction
+and one framework's seam are the adapter. "No logic in an adapter" (G8) is now a consistency rule
+rather than a boundary of what is sold — and consistency is why it survives: five adapters with five
+implementations of ranking is five behaviours to explain.
+
+**Publishing is irreversible in ways that are easy to notice too late.** Registries refuse to reuse a
+version number, a Go module path is permanent, and the REST contract is public the day the first
+package ships. So the organisation, the module path and the contract are settled before the first
+publish, not after the first user.
 
 **Proved by.** A test that fails when an operation reaches the dispatch table without appearing in
-the public contract; a guard over the SDK READMEs; and signed, provenanced releases on every
-registry.
+the public contract; signed, provenanced releases on every registry; and a licence header check that
+fails the build rather than a note in a README.
 
-### G13 — A bundle constrains to exactly what it promised, in both directions
+### G13 — It runs on one machine in minutes, and in a cluster without a single point of failure
 
-Subscription bundles from a free tier upward. Both halves are enforceable claims: **every promise has
-an enforcer**, or it is an unbounded cost and a number on a public page with nothing behind it; and
-**every enforcer has a promise**, or it is a surprise outage the customer could not have planned for.
+**The first five minutes decide whether there is a sixth.** `docker compose up` brings up the
+substrate, the service, the default model hop and the portal, and an agent stores and recalls a
+memory against it without editing a configuration file first. Every step between a cold machine and
+that moment is a place the evaluation ends, so the number of them is a design constraint rather than
+documentation's problem.
 
-Enforcement is **one path** — a single view the quota gate already reads, cached per tenant,
-refreshing faster as a tenant nears a ceiling, failing open on a database blip. An entitlement that
-needs new machinery is an entitlement designed wrong. Usage is measured **physically**, over the
-tenant's own tables including indexes, because the cost being bounded is disk rather than the length
-of the strings somebody sent.
+**The compose file is one machine and says so.** One host is one failure domain. A compose file
+arranged to look highly available would survive a process dying and not the machine it is on, and a
+product whose argument is that it proves what it holds cannot make a claim it has not measured.
 
-**The catalogue is copied onto the tenant at subscribe time**, so a published change cannot silently
-re-limit somebody already on a plan.
+**The chart is highly available by default.** Several stateless replicas of the service and a
+PostgreSQL topology that survives losing a node. The application is already safe to run this way —
+formation takes a per-scope advisory lock and the watermark is taken `FOR UPDATE`, so two replicas
+forming the same scope is a case that is refused rather than a race — which makes availability the
+chart's arrangement rather than something the code has to learn.
 
-**The metering that is easy to miss.** Ingest and recall happen on request paths a counter can see.
-Compaction (G9) and community reports (G5) call a model **on a schedule the customer sets** —
-compaction whenever a run of turns completes, reports per community per rebuild. Neither is visible
-to a request counter, and on a free tier that is unbounded spend from an abandoned tenant. When that
-budget is exhausted the degradation is decided rather than defaulted: compaction falls back to a
-non-LLM strategy, because an agent that stops working when a quota runs out is an outage while one
-that compacts more bluntly is a smaller product.
+**"Highly available" is a topology until it has a number.** No RTO or RPO has been agreed. Until one
+is, the chart is a topology with a failover path, not a guarantee, and saying so is part of rule 11.
 
-**Reclamation is a line item, not an apology.** An empty tenant schema costs storage before anything
-is stored, and every deployment's migration walks all of them. A product whose argument is that it
-can prove what it deleted should be the one vendor that deletes what nobody is using, on a published
-schedule, and shows the residual afterwards. Dormancy is a **clock, not a state** — an account that
-has gone quiet must still be able to sign in, or the notice telling it to is an instruction the
-system refuses.
+**Proved by.** A timed run from a cold checkout to a recalled memory, measured rather than estimated;
+and a chart test that kills the primary and asserts the service still answers, with the recovery time
+recorded as the first measurement of the number nobody has yet agreed.
 
-**Proved by.** A test that fails when a plan column exists with no reader. A test that every model
-call site lands against a meter. A guard over the feature strings, because a pricing page is public
-copy and an unenforced feature is the same class of defect as an unearned claim.
+### G14 — The operator can see what the instance is doing, without reading the database
 
----
+Somebody now runs this, and it is usually the same person who built the agent. What they need to
+answer is narrow and mostly already recorded: is formation keeping up, what is extraction refusing
+and why, what did the last erasure prove, what is the model costing, and is the deployment healthy.
+
+**Most of the ops story is already in the schema.** Refusals are rows carrying the model's own words
+and a reason — `unmapped_relation` tells you the vocabulary is wrong, `unlocatable_quote` tells you
+the model is paraphrasing, `duplicate_claim` tells you it is repeating itself, and those need
+different responses. The watermark says how far behind forming is. An erasure receipt carries its
+counted residual. The portal reads what is there rather than inventing a telemetry layer beside it.
+
+**The portal is a trust boundary, and single-tenant does not make it one user.** It displays verbatim
+quotes from people's messages. It authenticates by default, it is not exposed by default, and what it
+may show is a decision rather than a consequence of what is convenient to query.
+
+**Proved by.** A test that the portal serves nothing to an unauthenticated request, including in the
+default compose deployment; and a test that every panel is backed by a query against a table that
+exists rather than a metric emitted for the panel's benefit.
 
 ## 4. Out of scope
 
 - **A second datastore of any kind** — vector database, graph engine, broker, cache, object store.
   PostgreSQL is the only required dependency; each addition is a second place data lives, a second
   thing to operate, and a second sweep an erasure has to prove it covered.
-- **A self-hosted edition.** Hosted and self-hosted cannot both be told well.
+- **A hosted edition, and a paid tier.** Hosted and self-hosted cannot both be told well, and this is
+  the one being told. An open-core line drawn later is a refactor through every feature that
+  straddles it, so there is no line.
 - **Being a vector-store connector.** That makes Taisce a place to put vectors and discards the
   governance that is the product.
+- **Requiring a model proxy.** LiteLLM ships in the deployment as the default hop to an
+  OpenAI-compatible endpoint. Requiring it would make a second moving part mandatory on the write
+  path in exchange for convenience an operator with a key does not need.
 
 ---
 

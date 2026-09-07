@@ -9,8 +9,10 @@ answer is assembled by expanding their neighbourhood, and passages are read to s
 traversal found. Retrieval cost is proportional to a neighbourhood rather than to how much the
 customer has stored.
 
-A multi-tenant SaaS on one PostgreSQL substrate, hosted in the EU. The adapters and clients that
-reach it are open source; the service is not.
+Open source under Apache-2.0 — all of it, service and portal and adapters — on one PostgreSQL
+substrate. You run it: `docker compose up` on a machine, or a Helm chart in a cluster where it is
+highly available by default. Your data does not leave, and the proof that something was erased is
+computed on your own substrate rather than asserted by somebody you have to trust.
 
 ## Where to start
 
@@ -26,8 +28,15 @@ reach it are open source; the service is not.
 
 ```
 make db-up     # build the substrate image and start PostgreSQL on 55432
-make test      # against that deployment; there is no mock path
+make test      # against that deployment; there is no mock path — coverage is gated
 make db-down
+```
+
+Extraction against a live model is a separate, deliberate command, because it costs money and sends
+its fixture text to whichever endpoint is configured:
+
+```
+make test-inference   # the citability check and the extraction regression corpus
 ```
 
 ## The rules, in short
