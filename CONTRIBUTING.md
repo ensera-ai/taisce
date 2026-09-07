@@ -77,3 +77,23 @@ topology, a test DSN — belongs in text that will be mirrored into an open repo
 
 Ordered as **one end-to-end journey, deepened in passes** — never breadth-first layers. A milestone
 is done when the journey runs against a real deployment, not when its code exists.
+
+## Signing off
+
+Every commit carries a sign-off:
+
+```
+git commit -s
+```
+
+which appends `Signed-off-by: Your Name <your@email>`. It is the
+[Developer Certificate of Origin](https://developercertificate.org/): a statement that you wrote the
+change, or otherwise have the right to submit it under this project's licence.
+
+There is no contributor agreement to sign, deliberately. A CLA exists to let a project owner
+relicense — including to a proprietary edition — and this project is Apache-2.0 with no commercial
+line, so there is nothing for one to enable and no reason to put a signing step between your first
+patch and its review. The reasoning is in [`docs/01-decisions.md`](docs/01-decisions.md), D45.
+
+Ownership: Taisce is developed and maintained by Ensera. Commits before 2026-09 carry an earlier
+address for the same author, which is why the history shows two.

@@ -273,6 +273,77 @@ by definition).
 now. The project table is a migration; the settings on it are only as reversible as the behaviour they
 switch.
 
+### D44 — The service is one repository; each adapter has its own
+
+`ensera-ai/taisce` holds the server, the workers and the migrations. Every framework adapter — Python,
+Java, .NET — is a separate repository.
+
+**The service is one deployable and one version.** Server and worker are the same binary in different
+roles (D42), and a migration has to ship with the code that needs it: a schema change released ahead
+of its reader, or behind it, is a deployment that half works. Splitting them across repositories would
+create a version pair somebody has to reason about on every release.
+
+**An adapter belongs to somebody else's ecosystem.** It is released on that ecosystem's cadence, into
+that ecosystem's registry, under that ecosystem's versioning conventions — and it is consumed by
+people who will never look at this repository. A Python package at `0.3.0` and a Go service at
+`0.3.0` mean different things, and forcing them to move together means every adapter waits for the
+slowest one.
+
+**What that costs, and how it is paid.** The wire contract is now shared across repositories that
+release independently, so it can drift — an adapter written against an operation the service has
+changed. That is what the conformance suite (#26) is for, and it is why the suite is written before
+any adapter moves rather than after the second one disagrees.
+
+**Rejected:** a monorepo (one tag would mean five different things, and every ecosystem's tooling has
+to agree about prefixed tags before any of them can release); a repository per component of the
+service (server and worker are one binary, so it would be one codebase in two places).
+
+**How hard to undo.** Hard once packages ship. A published module path is permanent, so moving an
+adapter between repositories later means a new name and an abandoned one.
+
+### D45 — Contributors sign off; there is no contributor agreement
+
+A Developer Certificate of Origin: a contributor adds `Signed-off-by:` to each commit, asserting they
+wrote it and may submit it under this licence. Checked by CI. No document, no account, no rights
+transfer.
+
+**A CLA exists to let the project owner do something the licence otherwise would not permit** —
+usually relicensing, including to a proprietary or dual-licensed edition. D36 makes everything
+Apache-2.0 and D39 removes the commercial line, so there is nothing here for a CLA to enable. Note
+that a hosted edition would not need one either: Apache-2.0 already permits hosting contributed code.
+The only thing a CLA buys is the option to move *away* from Apache-2.0, which is the option D36
+deliberately gave up.
+
+**So the cost decides it.** A CLA needs a signing service, a legal entity to sign with, and a step
+between a contributor's first patch and it being reviewed — the point at which most drive-by
+contributors stop. A sign-off is a flag on a commit.
+
+**Rejected:** a CLA (buys a relicensing option that has been given up, at the cost of friction on
+every first contribution); nothing at all (no record that a contributor had the right to submit what
+they submitted, which is the one thing that matters if it turns out they did not).
+
+**How hard to undo.** Adding either later means asking every existing contributor to sign
+retroactively, and the ones who cannot be reached are code that has to be removed or rewritten. Which
+is why it is decided before the repository is readable rather than after.
+
+### D46 — Nothing bakes in a public address
+
+No URL of this instance is compiled in, signed into anything, or written into a stored record. Where
+a public address is genuinely needed it is configuration, read at runtime.
+
+**Because the address is the operator's, not ours.** This is self-hosted: there is no canonical
+hostname, and a value that is right for one deployment is wrong for every other.
+
+**And because an address inside a signed artefact is a migration.** A public site URL baked into
+cryptographic checkpoint signatures has already been seen making a domain change into a data
+migration rather than a DNS edit. #86's ledger is the place that hazard could recur, so the rule is
+recorded before the ledger exists rather than after.
+
+**Rejected:** a canonical domain in the code (wrong for every deployment but one); a compiled-in
+default with an override (the default is what ships, so the override is what nobody sets).
+
+**How hard to undo.** Easy while nothing is signed. Hard afterwards, which is the point.
+
 ---
 
 ## Substrate
