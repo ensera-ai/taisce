@@ -648,6 +648,42 @@ shipped and no client depends on the shape. After the first SDK, changing it is 
 an upgrade in five ecosystems. The enumerable declaration is easy to undo in either direction; the
 wire shape is not.
 
+### D52 — A bundle reports the shape it was built from, not a verdict on its relevance
+
+A recall returns how many candidate names the question offered, how many were found in memory, and how
+the facts distribute across them. It does not return a relevance score.
+
+**The problem is real and it is not the one entity anchoring already solves.** Every mechanism that
+orders candidates says which are *best* and none says whether any is *good*, so a question about
+something a memory holds nothing on comes back full of whatever could be reached. Anchoring on named
+entities makes the worst version impossible — a question naming nothing known reaches nothing. What it
+does not prevent is a question that names something known and then asks about something else, which
+comes back full, cited and plausible.
+
+**Why not a verdict.** Strong, weak or none derived from how the top candidate compares to the rest
+requires candidates to be scored, and nothing here scores them: D25 holds that a ranking stage
+introduced before the plain path is measured makes it impossible to say afterwards which stage is
+doing the work and which is doing harm. A verdict is a ranking judgement under a different name, and
+it arrives with the same unjustifiable threshold.
+
+**And an absolute floor is measured not to work.** On an embedder's own held-out set, near misses
+reached higher similarity than true pairs began at. No cutoff separates them, so a floor tuned to
+suppress one bad bundle removes real answers elsewhere.
+
+**What is exact and needs no number.** Six candidate names offered, one matched, every fact drawn from
+it: that is recognisably a question that named something and asked about something else, and a caller
+sees it without anybody choosing a threshold. The distinction that matters most is between the two
+empty answers — *we have never heard of what you asked about* and *we know that and have nothing to
+say about it* — which are different, and indistinguishable in an empty bundle unless it says which.
+
+**Rejected:** a similarity floor (measured not to separate); a computed verdict (a ranking stage
+before ranking has been justified); returning fewer rows when relevance looks low (that is ranking
+deciding what a caller sees, from a judgement nobody can defend, and the bundle already declares
+truncation for the one cut it does make).
+
+**How hard to undo.** Additive. When ranking arrives with the measurement that justifies it, a verdict
+can sit beside these counts — which are facts about the retrieval and stay true whatever ranks it.
+
 ---
 
 ## Substrate

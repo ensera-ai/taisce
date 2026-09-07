@@ -541,3 +541,107 @@ func TestAFactWithNoSubjectIsNotCoDerivedWithEverything(t *testing.T) {
 		}
 	}
 }
+
+// ── #80: a recall says what it had to work with ───────────────────────────────────────────────
+//
+// Every mechanism that orders candidates says which are BEST and none says whether any is GOOD.
+// Entity anchoring makes the worst version impossible — a question naming nothing known reaches
+// nothing — and does not prevent a question that names something known and then asks about something
+// else, which comes back full and plausible.
+
+// A question that names nothing this memory holds says so, rather than returning an empty bundle that
+// looks like having nothing to say.
+func TestAQuestionNamingNothingKnownSaysSoRatherThanLookingSilent(t *testing.T) {
+	bundle, err := recall.New(emptyAnchorStore{}, 50).
+		Recall(context.Background(), []string{"p1"}, "what is our Kubernetes cluster configuration")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(bundle.Facts) != 0 {
+		t.Fatal("facts came back for a question naming nothing known")
+	}
+	if bundle.Reach.Terms == 0 {
+		t.Fatal("the question offered candidate names and the bundle reports none")
+	}
+	if bundle.Reach.Anchored != 0 {
+		t.Fatalf("%d anchors from a store that matches nothing", bundle.Reach.Anchored)
+	}
+	if !bundle.Reach.NamedNothingKnown() {
+		t.Fatal("the bundle does not distinguish 'never heard of it' from 'nothing to say about it'")
+	}
+}
+
+// A question that names something known and finds no facts is the OTHER empty answer, and must not
+// claim the thing is unknown.
+func TestAKnownSubjectWithNoFactsIsNotTheSameAsAnUnknownOne(t *testing.T) {
+	bundle, err := recall.New(coDerivedStore(nil), 50).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if bundle.Reach.Anchored == 0 {
+		t.Fatal("the fixture anchors on Marta and the bundle says it anchored on nothing")
+	}
+	if bundle.Reach.NamedNothingKnown() {
+		t.Fatal("a known subject with no facts was reported as an unknown one")
+	}
+}
+
+// Where the facts came from is visible, so a question that named several things and drew everything
+// from one is recognisable without anybody choosing a threshold.
+func TestTheBundleSaysWhereItsFactsCameFrom(t *testing.T) {
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "Marta", Predicate: "works_at", AnchoredOn: "e1",
+			Evidence: domain.Evidence{SourceObservationID: "o1"}},
+		{ID: "f2", Subject: "Marta", Predicate: "lives_in", AnchoredOn: "e1",
+			Evidence: domain.Evidence{SourceObservationID: "o2"}},
+		{ID: "f3", Subject: "Cork team", Predicate: "part_of", AnchoredOn: "e2",
+			Evidence: domain.Evidence{SourceObservationID: "o3"}},
+	}
+	bundle, err := recall.New(coDerivedStore(facts), 50).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if bundle.Reach.FactsPerAnchor["e1"] != 2 || bundle.Reach.FactsPerAnchor["e2"] != 1 {
+		t.Fatalf("facts per anchor: %v", bundle.Reach.FactsPerAnchor)
+	}
+}
+
+// The counts describe what the caller received. Counting rows that were cut would describe something
+// else.
+func TestTheCountsDescribeWhatTheCallerGot(t *testing.T) {
+	var facts []domain.CitedFact
+	for i := 0; i < 6; i++ {
+		facts = append(facts, domain.CitedFact{
+			ID: fmt.Sprintf("f%d", i), Subject: "Marta", Predicate: "prefers", AnchoredOn: "e1",
+			Evidence: domain.Evidence{SourceObservationID: fmt.Sprintf("o%d", i)},
+		})
+	}
+	bundle, err := recall.New(coDerivedStore(facts), 2).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if !bundle.Truncated {
+		t.Fatal("the fixture did not truncate")
+	}
+	total := 0
+	for _, n := range bundle.Reach.FactsPerAnchor {
+		total += n
+	}
+	if total != len(bundle.Facts) {
+		t.Fatalf("the counts total %d and the caller received %d", total, len(bundle.Facts))
+	}
+}
+
+// emptyAnchorStore is a memory that holds nothing the question names.
+type emptyAnchorStore struct{}
+
+func (emptyAnchorStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
+	return nil, nil
+}
+
+func (emptyAnchorStore) FactsAbout(context.Context, []string, []string, int, []string) ([]domain.CitedFact, error) {
+	return nil, nil
+}

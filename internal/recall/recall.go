@@ -105,13 +105,18 @@ func (r *Recaller) RecallFrom(ctx context.Context, scopes []string, question str
 	if len(terms) == 0 {
 		return domain.Bundle{}, nil
 	}
+	reach := domain.Reach{Terms: len(terms), FactsPerAnchor: map[string]int{}}
 
 	anchors, err := r.store.Anchors(ctx, scopes, terms)
 	if err != nil {
 		return domain.Bundle{}, err
 	}
+	reach.Anchored = len(anchors)
 	if len(anchors) == 0 {
-		return domain.Bundle{}, nil
+		// Empty, and saying why. "We have never heard of what you asked about" and "we know that and
+		// have nothing to say" are different answers, and a caller that cannot tell them apart
+		// cannot decide whether to write something or ask differently.
+		return domain.Bundle{Reach: reach}, nil
 	}
 
 	ids := make([]string, 0, len(anchors))
@@ -135,6 +140,15 @@ func (r *Recaller) RecallFrom(ctx context.Context, scopes []string, question str
 	// After the cut, not before. Co-derivation is a statement about what is IN the bundle, and naming
 	// a fact the caller cannot see would be a citation that resolves to nothing.
 	markCoDerived(bundle.Facts)
+
+	// Counted over what the caller can see, after the cut, for the same reason co-derivation is: a
+	// count describing rows nobody received describes something else.
+	for _, f := range bundle.Facts {
+		if f.AnchoredOn != "" {
+			reach.FactsPerAnchor[f.AnchoredOn]++
+		}
+	}
+	bundle.Reach = reach
 	return bundle, nil
 }
 

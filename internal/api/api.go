@@ -421,6 +421,25 @@ type recallResponse struct {
 	// these, so a cut bundle is missing arbitrary members rather than the least relevant ones. A
 	// caller told only the facts would read the cut as a judgement.
 	Truncated bool `json:"truncated"`
+	// Reach is how this bundle was arrived at. Always present, because an empty bundle without it
+	// cannot say whether the question named something unknown or something known-and-silent.
+	Reach reachPayload `json:"reach"`
+}
+
+// reachPayload reports the shape rather than a verdict.
+//
+// No relevance score, deliberately: scoring candidates is a ranking stage, and ranking waits for the
+// measurement that would say whether it helps. What a caller gets instead is exact and needs no
+// threshold — how many names the question offered, how many were found, and how the facts distribute
+// across them. Everything arriving from one anchor when several matched is a question that named
+// something and asked about something else, and it is visible without anybody choosing a number.
+type reachPayload struct {
+	Terms    int `json:"terms"`
+	Anchored int `json:"anchored"`
+	// NamedNothingKnown separates "we have never heard of what you asked about" from "we know that
+	// and have nothing to say". Both produce an empty bundle and they are different answers.
+	NamedNothingKnown bool           `json:"named_nothing_known"`
+	FactsPerAnchor    map[string]int `json:"facts_per_anchor"`
 }
 
 type anchorPayload struct {
@@ -492,7 +511,19 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 }
 
 func renderBundle(b domain.Bundle) recallResponse {
-	out := recallResponse{Truncated: b.Truncated, Anchors: []anchorPayload{}, Facts: []factPayload{}}
+	perAnchor := b.Reach.FactsPerAnchor
+	if perAnchor == nil {
+		perAnchor = map[string]int{}
+	}
+	out := recallResponse{
+		Truncated: b.Truncated,
+		Anchors:   []anchorPayload{},
+		Facts:     []factPayload{},
+		Reach: reachPayload{
+			Terms: b.Reach.Terms, Anchored: b.Reach.Anchored,
+			NamedNothingKnown: b.Reach.NamedNothingKnown(), FactsPerAnchor: perAnchor,
+		},
+	}
 	for _, a := range b.Anchors {
 		out.Anchors = append(out.Anchors, anchorPayload{
 			EntityID: a.Entity.ID, Name: a.Entity.CanonicalName,

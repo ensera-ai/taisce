@@ -474,7 +474,57 @@ type Bundle struct {
 	// than the least relevant ones, and a caller that does not know that will read the cut as a
 	// verdict.
 	Truncated bool
+	// Reach says how the bundle was arrived at: what the question offered, what of it was found, and
+	// where the facts came from.
+	//
+	// It exists because an empty bundle and a full one can both be the wrong answer for reasons a
+	// caller cannot see. Asked something the memory holds nothing about, retrieval returns whatever
+	// it can reach — every mechanism that orders candidates says which are BEST and none says
+	// whether any is GOOD. Entity anchoring makes the worst version of that impossible: a question
+	// naming nothing known reaches nothing. What it does not prevent is a question that names
+	// something known and then asks about something else, which comes back full and plausible.
+	//
+	// So the bundle reports the shape it was built from rather than a verdict on it. See Reach.
+	Reach Reach
 }
+
+// Reach is what a recall had to work with.
+//
+// # Why this and not a relevance score
+//
+// The obvious answer is a verdict — strong, weak, none — derived from how the top candidate compares
+// to the rest. That needs candidates to be scored, and nothing here scores them: recall returns facts
+// in a deterministic order that carries no judgement, because a ranking stage introduced before the
+// plain path is measured makes it impossible to say afterwards which stage is doing the work and
+// which is doing harm.
+//
+// A verdict is a ranking judgement wearing a different name, and it would arrive with the same
+// problem: a threshold nobody can justify. And an absolute similarity floor is measured not to work —
+// on an embedder's own held-out set, near misses reached higher similarity than true pairs began at,
+// so no cutoff separates them.
+//
+// What is exact and needs no threshold is the SHAPE: how many candidate names the question offered,
+// how many were found in memory, and how the facts distribute across them. A question that offered
+// six names, matched one, and drew every fact from it is recognisably a question that named something
+// and asked about something else — and a caller can see that without anybody choosing a number.
+type Reach struct {
+	// Terms is how many candidate names the question offered.
+	Terms int
+	// Anchored is how many of them were found. Zero means the question named nothing this memory
+	// holds, which is a different answer from holding the thing and knowing nothing about it — and
+	// the two are indistinguishable in an empty bundle unless this says so.
+	Anchored int
+	// FactsPerAnchor is how many facts each anchor contributed, keyed by entity id. Everything
+	// arriving from one anchor when several matched is the signature worth seeing.
+	FactsPerAnchor map[string]int
+}
+
+// NamedNothingKnown reports that the question offered candidates and none of them are in this memory.
+//
+// Worth its own answer: "we have never heard of what you asked about" and "we know that thing and
+// have nothing to say about it" are different, and a caller that cannot tell them apart cannot decide
+// whether to write something or ask differently.
+func (r Reach) NamedNothingKnown() bool { return r.Terms > 0 && r.Anchored == 0 }
 
 // ── Erasure ───────────────────────────────────────────────────────────────────────────────────
 
