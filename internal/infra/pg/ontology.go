@@ -67,3 +67,35 @@ const selectOntologySQL = `
 SELECT predicate, semantic_type, cardinality, object_kind, description
   FROM {schema}.predicate
  ORDER BY predicate`
+
+// LoadVocabulary reads both closed sets an extractor needs.
+//
+// One call rather than two, because they are read together on the same path and a caller that loaded
+// one and forgot the other would get an extractor whose refusals silently stop happening — which
+// looks like the model improving.
+func LoadVocabulary(ctx context.Context, pool *pgxpool.Pool, schema Schema) (domain.Vocabulary, error) {
+	ontology, err := LoadOntology(ctx, pool, schema)
+	if err != nil {
+		return domain.Vocabulary{}, err
+	}
+
+	rows, err := pool.Query(ctx, schema.SQL(
+		`SELECT term FROM {schema}.unresolvable_term WHERE lang = $1`), "en")
+	if err != nil {
+		return domain.Vocabulary{}, fmt.Errorf("read unresolvable terms: %w", err)
+	}
+	defer rows.Close()
+
+	terms := map[string]struct{}{}
+	for rows.Next() {
+		var term string
+		if err := rows.Scan(&term); err != nil {
+			return domain.Vocabulary{}, err
+		}
+		terms[term] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return domain.Vocabulary{}, err
+	}
+	return domain.Vocabulary{Ontology: ontology, Unresolvable: terms}, nil
+}

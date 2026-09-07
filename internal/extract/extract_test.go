@@ -478,3 +478,96 @@ func TestAnAssertedClaimStillBecomesAFact(t *testing.T) {
 		t.Fatalf("an asserted claim was refused: %+v", result.Rejected)
 	}
 }
+
+// ── #45: a claim that is citable and about nothing ────────────────────────────────────────────
+//
+// Measured against a live model: `Thanks, that worked perfectly.` produced
+// `that has_status worked perfectly`, with a verbatim quote and an exact span. Every rule held,
+// because every rule in the path is about form and this is about whether there is anything to be
+// about.
+
+func TestASubjectThatNamesNothingIsRefused(t *testing.T) {
+	content := "Thanks, that worked perfectly."
+	v := domain.Vocabulary{
+		Ontology: vocabulary(t),
+		Unresolvable: map[string]struct{}{
+			"that": {}, "it": {}, "this": {}, "something": {},
+		},
+	}
+
+	for _, subject := range []string{"that", "That", "  that  ", "it", "this", "something"} {
+		result, err := extract.NewWith(&stubModel{proposals: []extract.Proposal{
+			{Subject: subject, Predicate: "lives_in", Object: "Dublin",
+				Statement: "It lives in Dublin.", Quote: "that worked perfectly",
+				Polarity: domain.PolarityAsserted},
+		}}, v).Extract(context.Background(), message(content))
+		if err != nil {
+			t.Fatalf("extract: %v", err)
+		}
+		if len(result.Claims) != 0 {
+			t.Fatalf("subject %q became a fact", subject)
+		}
+		if result.Rejected[0].Reason != domain.ReasonUnresolvableSubject {
+			t.Fatalf("subject %q was refused as %q", subject, result.Rejected[0].Reason)
+		}
+	}
+}
+
+// It is refused for naming nothing rather than for anything else, so the refusal counts stay
+// meaningful — a pronoun subject recorded as an uncitable quote would send whoever reads the
+// refusals looking at the model's quoting when the problem is elsewhere.
+func TestAPronounSubjectIsRefusedForNamingNothingRatherThanForItsQuote(t *testing.T) {
+	v := domain.Vocabulary{
+		Ontology:     vocabulary(t),
+		Unresolvable: map[string]struct{}{"that": {}},
+	}
+	// A quote that is NOT in the message, so both checks would fire. The subject one runs first.
+	result, err := extract.NewWith(&stubModel{proposals: []extract.Proposal{
+		{Subject: "that", Predicate: "lives_in", Object: "Dublin",
+			Quote: "a quote that was never in the message", Polarity: domain.PolarityAsserted},
+	}}, v).Extract(context.Background(), message("Thanks, that worked perfectly."))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if result.Rejected[0].Reason != domain.ReasonUnresolvableSubject {
+		t.Fatalf("refused as %q", result.Rejected[0].Reason)
+	}
+}
+
+// A real subject is untouched, which is the property a conservative filter is most likely to break.
+func TestARealSubjectIsNotRefused(t *testing.T) {
+	v := domain.Vocabulary{
+		Ontology:     vocabulary(t),
+		Unresolvable: map[string]struct{}{"that": {}, "it": {}},
+	}
+	for _, subject := range []string{"Marta", "the user", "Ensera", "Italy", "Ito"} {
+		result, err := extract.NewWith(&stubModel{proposals: []extract.Proposal{
+			{Subject: subject, Predicate: "works_at", Object: "Ensera",
+				Quote: "I work at Ensera", Polarity: domain.PolarityAsserted},
+		}}, v).Extract(context.Background(), message("I work at Ensera."))
+		if err != nil {
+			t.Fatalf("extract: %v", err)
+		}
+		if len(result.Claims) != 1 {
+			t.Fatalf("subject %q was refused: %+v", subject, result.Rejected)
+		}
+	}
+}
+
+// An extractor built without the term set behaves as it did before, rather than refusing everything
+// or nothing unpredictably.
+//
+// The failure being avoided: a deployment whose table has not been seeded getting refusals it cannot
+// explain, on a path where a refusal means memory silently not forming.
+func TestAnExtractorWithNoTermSetStillWorks(t *testing.T) {
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "that", Predicate: "works_at", Object: "Ensera",
+			Quote: "I work at Ensera", Polarity: domain.PolarityAsserted},
+	}}, vocabulary(t)).Extract(context.Background(), message("I work at Ensera."))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Claims) != 1 {
+		t.Fatal("an extractor with no term set refused a claim")
+	}
+}

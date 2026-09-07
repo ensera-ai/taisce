@@ -289,13 +289,13 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 		return nil
 	}
 
-	vocabulary, err := pg.LoadOntology(ctx, memory, schema)
+	vocabulary, err := pg.LoadVocabulary(ctx, memory, schema)
 	if err != nil {
-		return fmt.Errorf("load the relation vocabulary: %w", err)
+		return fmt.Errorf("load the vocabulary: %w", err)
 	}
 	observations := pg.NewObservationStore(memory)
 	former := formation.NewFormer(observations, pg.NewFactStore(memory),
-		extract.New(inference.NewModel(inferenceConfig), vocabulary))
+		extract.NewWith(inference.NewModel(inferenceConfig), vocabulary))
 	policy := formation.DefaultPolicy()
 	driver := formation.NewDriver(
 		formation.NewWorkerWithPolicy(memory, observations, former, policy),

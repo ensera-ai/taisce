@@ -1336,3 +1336,63 @@ func TestAnEmptySourceSetReturnsNothing(t *testing.T) {
 		t.Fatalf("an empty source set returned %d facts", len(got))
 	}
 }
+
+// Both closed sets are read from the tables that enforce them, in one call.
+//
+// One call rather than two, because a caller that loaded the relations and forgot the terms would get
+// an extractor whose refusals silently stop happening — which looks like the model improving.
+func TestTheVocabularyIsReadFromBothTablesThatEnforceIt(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_vocabload")
+
+	v, err := pg.LoadVocabulary(ctx, pool, schema)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if v.Ontology.Len() < 30 {
+		t.Fatalf("the ontology has %d relations", v.Ontology.Len())
+	}
+	if len(v.Unresolvable) < 20 {
+		t.Fatalf("%d unresolvable terms loaded", len(v.Unresolvable))
+	}
+
+	// The helper compares the way the resolver would, so casing and spacing do not let a term past.
+	for _, name := range []string{"that", "That", "  THAT  ", "it"} {
+		if v.CanBeSubject(name) {
+			t.Fatalf("%q was accepted as a subject", name)
+		}
+	}
+	for _, name := range []string{"Marta", "Ensera", "the Dublin office"} {
+		if !v.CanBeSubject(name) {
+			t.Fatalf("%q was refused as a subject", name)
+		}
+	}
+}
+
+// The fifth refusal reason is one the schema admits, and the set is still closed.
+func TestASubjectThatNamesNothingIsStorableAsARefusal(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_unresolvable")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "Thanks, that worked perfectly."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := facts.Reject(ctx, schema, "p1", stored.ID, "subject-1", domain.RejectedClaim{
+		Predicate: "has_status", Statement: "That has status worked perfectly.",
+		Quote: "that worked perfectly", Reason: domain.ReasonUnresolvableSubject,
+	}); err != nil {
+		t.Fatalf("the schema refused a reason the code writes: %v", err)
+	}
+	if err := facts.Reject(ctx, schema, "p1", stored.ID, "subject-1", domain.RejectedClaim{
+		Predicate: "has_status", Statement: "x", Quote: "y", Reason: "vibes",
+	}); err == nil {
+		t.Fatal("a reason nobody has heard of was accepted; the set is not closed")
+	}
+}

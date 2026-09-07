@@ -340,7 +340,31 @@ const (
 	// This one would be a presence — cited, current, and indistinguishable from a correct fact by
 	// every mechanism downstream.
 	ReasonNotAsserted = "not_asserted"
+	// ReasonUnresolvableSubject — the subject names nothing the message establishes. A pronoun or a
+	// demonstrative whose referent is outside the message.
+	//
+	// Measured: `Thanks, that worked perfectly.` produced `that has_status worked perfectly`, with a
+	// verbatim quote and an exact span. Every check in the path is about form, and this one is about
+	// whether there is anything to be about.
+	ReasonUnresolvableSubject = "unresolvable_subject"
 )
+
+// Vocabulary is the closed sets an extractor is given, read from the tables that enforce them.
+//
+// Two definitions of a closed set is two places for it to drift, and the one that drifts is whichever
+// is not enforced — so both of these come from the database rather than from a literal here.
+type Vocabulary struct {
+	Ontology Ontology
+	// Unresolvable holds terms that cannot be a subject, normalised the way entity names are, so the
+	// comparison is the one the resolver would have made.
+	Unresolvable map[string]struct{}
+}
+
+// CanBeSubject reports whether a name could resolve to something the message established.
+func (v Vocabulary) CanBeSubject(name string) bool {
+	_, unresolvable := v.Unresolvable[NormalizeName(name)]
+	return !unresolvable
+}
 
 // Polarity is what a claim's own message does with it.
 //

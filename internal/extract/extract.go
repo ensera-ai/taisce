@@ -63,11 +63,21 @@ type Result struct {
 type Extractor struct {
 	model      Model
 	vocabulary domain.Ontology
+	// unresolvable are terms that cannot be a subject, from the table that holds them. Empty is
+	// valid and means the check does nothing — a deployment that has not seeded the table gets the
+	// behaviour it had before, rather than a refusal it cannot explain.
+	unresolvable map[string]struct{}
 }
 
 // New builds an extractor over a model and a tenant's vocabulary.
 func New(model Model, vocabulary domain.Ontology) *Extractor {
 	return &Extractor{model: model, vocabulary: vocabulary}
+}
+
+// NewWith builds an extractor over both closed sets: the relations it may admit, and the terms that
+// cannot be a subject.
+func NewWith(model Model, v domain.Vocabulary) *Extractor {
+	return &Extractor{model: model, vocabulary: v.Ontology, unresolvable: v.Unresolvable}
 }
 
 // Extract returns the claims one message supports.
@@ -108,6 +118,16 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 		predicate, admitted := e.vocabulary.Lookup(p.Predicate)
 		if !admitted {
 			out.Rejected = append(out.Rejected, reject(p, domain.ReasonUnmappedRelation, message.Ordinal))
+			continue
+		}
+
+		// A subject that names nothing the message established.
+		//
+		// Before the quote is located, because a pronoun subject is wrong regardless of whether its
+		// quote can be found — and reporting it as uncitable would send whoever reads the refusals
+		// looking at the model's quoting when the problem is that there is nothing to be about.
+		if _, blank := e.unresolvable[domain.NormalizeName(p.Subject)]; blank {
+			out.Rejected = append(out.Rejected, reject(p, domain.ReasonUnresolvableSubject, message.Ordinal))
 			continue
 		}
 

@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -126,5 +127,70 @@ func TestTheVocabularyStaysWithinItsDeclaredBounds(t *testing.T) {
 	}
 	if n < 30 || n > 50 {
 		t.Fatalf("the vocabulary has %d relations; the decision is 30 to 50", n)
+	}
+}
+
+// ── #45: the closed set of terms that cannot be a subject ─────────────────────────────────────
+
+// The set is in the database, for the reason the predicate vocabulary is: a closed set belongs where
+// it is enforced, not where it is remembered.
+func TestTheUnresolvableTermsAreAClosedSetInTheSchema(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
+
+	var n int
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT count(*) FROM {schema}.unresolvable_term WHERE lang = 'en'`)).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n < 20 {
+		t.Fatalf("%d unresolvable terms; pronouns and demonstratives are a closed class and this is "+
+			"meant to be the whole of it for subject position", n)
+	}
+
+	// The measured case is in it.
+	var reason string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT reason FROM {schema}.unresolvable_term WHERE lang = 'en' AND term = 'that'`)).
+		Scan(&reason); err != nil {
+		t.Fatalf("the term from the measured defect is not in the set: %v", err)
+	}
+	if reason == "" {
+		t.Fatal("a term with no reason is one nobody can safely remove")
+	}
+}
+
+// Every term is stored in the form the resolver would compare against. One stored any other way is
+// one the check silently misses.
+func TestEveryUnresolvableTermIsStoredNormalised(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
+
+	rows, err := pool.Query(ctx, schema.SQL(`SELECT term FROM {schema}.unresolvable_term`))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var term string
+		if err := rows.Scan(&term); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if term != strings.ToLower(strings.TrimSpace(term)) {
+			t.Fatalf("term %q is not normalised, so the check will never match it", term)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// And the constraint refuses one that is not.
+	if _, err := pool.Exec(ctx, schema.SQL(
+		`INSERT INTO {schema}.unresolvable_term (term, lang, reason) VALUES ('That', 'en', 'x')`)); err == nil {
+		t.Fatal("an unnormalised term was accepted")
 	}
 }
