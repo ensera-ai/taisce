@@ -883,6 +883,63 @@ is a constant and changing it changes what a deep read returns, so it moves with
 than with an opinion. Reverting to the non-recursive read would be straightforward and would lose the
 property that every bound is written once.
 
+### D57 — Thematic reports are stored, are never shared, and are rebuilt from what survives
+
+A report over a community of entities is written once and kept. It is registered to every observation
+that contributed to it, an erasure deletes every report a departing subject contributed to, and what
+replaces them is generated from the facts that remain.
+
+**The collision this resolves.** A thematic answer needs something to search that no single message
+states, which argues for a stored artefact. Erasure has to be provable by counting rows against the
+predicate that selected the deletions, which argues against storing model-written prose about many
+people at once. Both are load-bearing: without the first there is no thematic retrieval, and without
+the second the product's central governance claim becomes a belief.
+
+**They do not collide once the artefact is deleted rather than repaired.** The proof obligation is
+that nothing derived from an erased source survives — not that the surviving text be inspected. A
+report row registered to an erased observation is deleted and counted like any other projection, and
+what is generated afterwards is a function of the facts that are still there. That is a stronger claim
+than regeneration-and-belief, and it is the same claim every other projection already makes.
+
+**The exemption that would break it, named so it is not inherited.** Erasure keeps a projection that
+another subject also registered — `Ensera` is registered by everyone who mentioned it, and removing it
+because one person left would take a node out of everybody else's graph. A report must not inherit
+that rule. An entity is a shared *identity*: the row means the same thing to everybody who registered
+it. A report is shared *text*: it contains what each contributor said, so keeping it because somebody
+else also contributed is exactly the leak. The keep-if-shared predicate therefore has to become a
+property of the projection kind rather than a rule applied to all of them, and a kind that aggregates
+content declares that it does not survive a contributor's erasure.
+
+**Not generated per question.** That would put a model call on the read path for every thematic
+question, which is the cost this system refuses elsewhere for the same reason: anchoring resolves
+entity names with a lookup rather than a model precisely so a caller waits on a query rather than on
+inference. A thematic path that pays generation per question is slower than the passage search it is
+meant to beat, and it makes read latency a function of how much has been stored.
+
+**What a caller sees between an erasure and a rebuild.** Fewer reports, and a bundle that says so.
+Regeneration is a pass on the driver's tick, not something a request triggers — a read that rebuilt
+what an erasure removed would make one caller pay for another's governance operation, and would put
+model calls on the read path by the back door.
+
+**The cost, stated rather than discovered.** Erasing one subject can invalidate every report they
+contributed to, which in a small scope is most of them, and rebuilding is a model call per community.
+A subject who erases repeatedly forces repeated rebuilds — the amplification is bounded by communities
+touched rather than by the number of requests, and the rebuild is a background budget the operator
+controls rather than an unbounded reaction. It is a real cost and it is the price of the residual
+count meaning what it says.
+
+**Rejected:** persisting with the residual claim narrowed to name reports as regenerated-not-counted
+(the narrowing is exactly the sentence a customer would be told, and a guarantee with one exception is
+one everybody has to check for the exception); generating per question (a model call on the read path,
+and read latency that grows with the corpus); inheriting the keep-if-shared rule (keeps text about a
+person who asked to be forgotten because somebody else is also in it); regenerating inside the erasure
+transaction (a governance operation that cannot complete while a model provider is down).
+
+**How hard to undo.** The storage shape is a migration. What is expensive to reverse is the residual
+claim: a deployment that once said reports are counted cannot later say they are approximate without
+retracting what it told its users, so the decision is taken in the direction that keeps the stronger
+claim available.
+
 ---
 
 ## Substrate
