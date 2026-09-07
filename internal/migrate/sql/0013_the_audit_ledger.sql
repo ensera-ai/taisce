@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS {schema}.audit_entry (
     occurred_at timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT audit_operation_chk CHECK (operation IN (
-        'observe', 'recall', 'erase', 'freshness',
+        'observe', 'recall', 'erase', 'freshness', 'export',
         'project.create', 'project.suspend', 'project.resume',
         'credential.issue', 'credential.revoke',
         'authenticate'

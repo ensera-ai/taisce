@@ -38,6 +38,7 @@ const Version = "v1"
 type Server struct {
 	credentials  *credential.Store
 	audit        *pg.AuditStore
+	exporter     *pg.Exporter
 	projects     *pg.ProjectStore
 	observations *pg.ObservationStore
 	eraser       *pg.Eraser
@@ -50,15 +51,16 @@ type Server struct {
 //
 // The credential store is separate from every other argument because it is the only one that reaches
 // the registry connection. That separation is the point: a memory query cannot read a key.
-func NewServer(credentials *credential.Store, audit *pg.AuditStore, projects *pg.ProjectStore,
-	observations *pg.ObservationStore, eraser *pg.Eraser, recaller *recall.Recaller,
-	schema pg.Schema, log *slog.Logger) *Server {
+func NewServer(credentials *credential.Store, audit *pg.AuditStore, exporter *pg.Exporter,
+	projects *pg.ProjectStore, observations *pg.ObservationStore, eraser *pg.Eraser,
+	recaller *recall.Recaller, schema pg.Schema, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Server{
-		credentials: credentials, audit: audit, projects: projects, observations: observations,
-		eraser: eraser, recaller: recaller, schema: schema, log: log,
+		credentials: credentials, audit: audit, exporter: exporter, projects: projects,
+		observations: observations,
+		eraser:       eraser, recaller: recaller, schema: schema, log: log,
 	}
 }
 
@@ -131,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET "+p+"/freshness", s.authenticated(s.freshness))
 	mux.Handle("POST "+p+"/recalls", s.authenticated(s.recallHandler))
 	mux.Handle("POST "+p+"/erasures", s.authenticated(s.erase))
+	mux.Handle("POST "+p+"/exports", s.authenticated(s.export))
 
 	return mux
 }
@@ -447,6 +450,58 @@ func (s *Server) erase(w http.ResponseWriter, r *http.Request, grant credential.
 		RequestID: receipt.RequestID, Scope: receipt.Scope, DataSubjectID: receipt.DataSubjectID,
 		CompletedAt: receipt.CompletedAt, Deleted: receipt.Deleted, Residual: receipt.Residual,
 		Clean: receipt.Clean(),
+	})
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────────────────────
+
+type exportRequest struct {
+	DataSubjectID string `json:"data_subject_id"`
+}
+
+type exportResponse struct {
+	Scope         string `json:"scope"`
+	DataSubjectID string `json:"data_subject_id"`
+	// Sections keyed by what produced them, plus the messages everything derives from. Raw rows
+	// rather than a shaped view: an export has to include a column a migration added without
+	// anybody remembering to add it here.
+	Sections map[string][]json.RawMessage `json:"sections"`
+	// Rows is the count per section, so a reader can compare an export against an erasure receipt
+	// without parsing either. The two walks agreeing is what says neither has forgotten a projection.
+	Rows map[string]int `json:"rows"`
+}
+
+// export answers what is held about one person.
+//
+// A POST although it reads, for the same reason recall and erase are: the subject reference
+// identifies a person, and in a URL it would land in an access log, a proxy log and a browser
+// history — places this product cannot account for.
+func (s *Server) export(w http.ResponseWriter, r *http.Request, grant credential.Grant) {
+	var req exportRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.DataSubjectID) == "" {
+		writeError(w, http.StatusBadRequest, "no_subject",
+			"an export names the person it is for; one without a subject would be a copy of the project")
+		return
+	}
+
+	out, err := s.exporter.Export(r.Context(), s.schema, grant.Project, req.DataSubjectID)
+	if err != nil {
+		s.log.Error("export", "error", err, "project", grant.Project)
+		writeError(w, http.StatusInternalServerError, "internal", "the export could not be produced")
+		return
+	}
+
+	total := 0
+	for _, n := range out.Rows() {
+		total += n
+	}
+	s.record(r, domain.AuditExport, grant, domain.OutcomeAllowed, total)
+	writeJSON(w, http.StatusOK, exportResponse{
+		Scope: out.Scope, DataSubjectID: out.DataSubjectID,
+		Sections: out.Sections, Rows: out.Rows(),
 	})
 }
 

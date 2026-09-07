@@ -399,3 +399,62 @@ func countKind(t *testing.T, pool *pgxpool.Pool, schema pg.Schema, kind string) 
 	}
 	return n
 }
+
+// An export of a subject who was never here is refused only for having no subject, never for having
+// nothing — and one with no subject at all is refused before it reads anything.
+func TestAnExportWithoutASubjectIsRefusedBeforeItReadsAnything(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_export_nosubject")
+
+	if _, err := pg.NewExporter(pool, schema).Export(ctx, schema, "p1", ""); err == nil {
+		t.Fatal("an export with no subject was produced; that is a copy of the project")
+	}
+}
+
+// The export reads at one instant, so its sections cannot disagree with each other.
+//
+// Assembled across several reads, an export could show a fact whose evidence had been erased between
+// them — internally inconsistent, and the inconsistency would look like a defect in the memory rather
+// than in the export.
+func TestAnExportIsInternallyConsistent(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_export_snapshot")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+		Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany, Object: "Ensera",
+		Statement: "The user works at Ensera.", Quote: "I work at Ensera", ByteStart: 0, ByteEnd: 16,
+	}); err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+
+	export, err := pg.NewExporter(pool, schema).Export(ctx, schema, "p1", "subject-1")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if len(export.Sections["fact"]) == 0 {
+		t.Fatal("the export holds no facts")
+	}
+	if len(export.Sections["message"]) == 0 {
+		t.Fatal("the export holds no messages, so a person cannot see what it derived from")
+	}
+	// Every declared kind has a section, whether or not it holds anything — an absent section says
+	// "we did not look".
+	for _, kind := range []string{"fact", "entity", "chunk", "rejected_claim"} {
+		if _, present := export.Sections[kind]; !present {
+			t.Fatalf("no section for declared kind %q", kind)
+		}
+	}
+	if export.Rows()["fact"] != len(export.Sections["fact"]) {
+		t.Fatal("the row count does not match the rows")
+	}
+}

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -368,6 +369,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 	server := httptest.NewServer(api.NewServer(
 		credentials,
 		pg.NewAuditStore(pool, schema),
+		pg.NewExporter(pool, schema),
 		pg.NewProjectStore(pool, schema),
 		pg.NewObservationStore(pool),
 		pg.NewEraser(pool),
@@ -801,4 +803,125 @@ func TestARefusedCredentialIsRecorded(t *testing.T) {
 	if refused < 2 {
 		t.Fatalf("%d refused authentications recorded, wanted both", refused)
 	}
+}
+
+// ── #56: the other half of the pair ───────────────────────────────────────────────────────────
+
+// An export produces what an erasure would delete, and the two walks agree.
+//
+// This is the assertion that matters, and it is why export reads the same registry erasure does: a
+// projection missing from a deletion leaves data behind, which the residual count catches. A
+// projection missing from an EXPORT leaves data out, and nothing catches that — an export nobody
+// compares against anything looks complete.
+func TestAnExportProducesWhatAnErasureWouldDelete(t *testing.T) {
+	h := newHarness(t, "api_export")
+
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"data_subject_id": "subject-1",
+		"messages": []map[string]any{
+			{"role": "user", "content": "I work at Ensera and I live in Dublin."},
+		},
+	}, http.StatusCreated, nil)
+	h.form(t)
+
+	var export struct {
+		Sections map[string][]json.RawMessage `json:"sections"`
+		Rows     map[string]int               `json:"rows"`
+	}
+	h.do(t, http.MethodPost, "/v1/exports", map[string]any{"data_subject_id": "subject-1"},
+		http.StatusOK, &export)
+
+	// The person's own words are in it. An export of derivations without the messages they came from
+	// is an export missing the part a person actually recognises.
+	if len(export.Sections["message"]) == 0 {
+		t.Fatal("the export contains no messages")
+	}
+	if !bytes.Contains([]byte(fmt.Sprint(export.Sections["message"])), []byte("I work at Ensera")) {
+		t.Fatalf("the export does not contain what the person said: %s", export.Sections["message"])
+	}
+	if export.Rows["fact"] == 0 {
+		t.Fatal("the export contains no facts, though formation produced some")
+	}
+
+	// Now erase, and compare the two walks. Every kind the erasure touched must have appeared in the
+	// export — that is the test that fails the day somebody adds a projection to one and not the
+	// other.
+	var receipt struct {
+		Deleted map[string]int `json:"deleted"`
+	}
+	h.do(t, http.MethodPost, "/v1/erasures", map[string]any{
+		"data_subject_id": "subject-1", "reason": "comparing the two walks",
+	}, http.StatusOK, &receipt)
+
+	for kind, deleted := range receipt.Deleted {
+		if kind == "observation" {
+			// Erasure counts the observation itself; the export produces its messages instead,
+			// which is the same data in the form a person can read.
+			continue
+		}
+		if _, present := export.Sections[kind]; !present {
+			t.Fatalf("the erasure deleted %d rows of %q and the export did not have a section for it",
+				deleted, kind)
+		}
+	}
+}
+
+// An export names the person it is for, or it is a copy of the project wearing a governance label.
+func TestAnExportWithoutASubjectIsRefused(t *testing.T) {
+	h := newHarness(t, "api_export_nosubject")
+	status, body := h.raw(t, http.MethodPost, "/v1/exports", map[string]any{}, h.token)
+	if status != http.StatusBadRequest {
+		t.Fatalf("an export with no subject returned %d: %s", status, body)
+	}
+}
+
+// An export for somebody with nothing held is empty sections rather than absent ones.
+//
+// "We hold none of this" and "we did not look" are different statements, and a caller exercising a
+// right needs the first said explicitly.
+func TestAnExportForSomebodyWithNothingHeldIsEmptyRatherThanAbsent(t *testing.T) {
+	h := newHarness(t, "api_export_empty")
+
+	var export struct {
+		Sections map[string][]json.RawMessage `json:"sections"`
+		Rows     map[string]int               `json:"rows"`
+	}
+	h.do(t, http.MethodPost, "/v1/exports", map[string]any{"data_subject_id": "never-heard-of-them"},
+		http.StatusOK, &export)
+
+	for _, kind := range []string{"message", "fact", "entity", "chunk", "rejected_claim"} {
+		rows, present := export.Sections[kind]
+		if !present {
+			t.Fatalf("section %q is absent rather than empty", kind)
+		}
+		if rows == nil {
+			t.Fatalf("section %q is null, which says 'we did not look'", kind)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("section %q has %d rows for a subject we have never seen", kind, len(rows))
+		}
+	}
+}
+
+// An export is recorded in the ledger like every other operation.
+func TestAnExportIsRecordedInTheLedger(t *testing.T) {
+	h := newHarness(t, "api_export_audit")
+	ctx := context.Background()
+
+	h.do(t, http.MethodPost, "/v1/exports", map[string]any{"data_subject_id": "subject-1"},
+		http.StatusOK, nil)
+
+	entries, err := pg.NewAuditStore(h.pool, h.schema).Recent(ctx, 50)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	for _, e := range entries {
+		if e.Operation == domain.AuditExport {
+			if e.Principal == "" || e.Project != "p1" {
+				t.Fatalf("the export was recorded as %+v", e)
+			}
+			return
+		}
+	}
+	t.Fatal("an export left no ledger row")
 }

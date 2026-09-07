@@ -6,6 +6,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -469,6 +470,7 @@ const (
 	AuditRecall           = "recall"
 	AuditErase            = "erase"
 	AuditFreshness        = "freshness"
+	AuditExport           = "export"
 	AuditProjectCreate    = "project.create"
 	AuditProjectSuspend   = "project.suspend"
 	AuditProjectResume    = "project.resume"
@@ -527,7 +529,7 @@ type AuditEntry struct {
 // a constraint violation four frames down naming a column.
 func (e AuditEntry) Validate() error {
 	switch e.Operation {
-	case AuditObserve, AuditRecall, AuditErase, AuditFreshness,
+	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
 		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,
 		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate:
 	default:
@@ -550,4 +552,33 @@ func (e AuditEntry) Validate() error {
 		return fmt.Errorf("audit entry has a negative magnitude")
 	}
 	return nil
+}
+
+// Export is everything held about one person in one project.
+//
+// The other half of the pair erasure belongs to: a system that can prove what it deleted and cannot
+// produce what it holds has answered half the question, and the missing half is the one asked first.
+//
+// Sections are keyed by projection kind, plus the messages every projection derives from. Rows are
+// raw JSON rather than typed structures on purpose: an export has to include a column added by a
+// migration without anybody remembering to add it here, and a typed shape is exactly the place that
+// would be forgotten.
+type Export struct {
+	Scope         string
+	DataSubjectID string
+	// Sections is empty-not-absent per kind: "we hold none of this" and "we did not look" are
+	// different statements, and only one of them is true.
+	Sections map[string][]json.RawMessage
+}
+
+// Rows counts what an export contains, per section.
+//
+// The number an export is checked against: an erasure receipt reports what it deleted per kind, and
+// the two walks agreeing is what says neither has forgotten a projection.
+func (e Export) Rows() map[string]int {
+	out := make(map[string]int, len(e.Sections))
+	for kind, rows := range e.Sections {
+		out[kind] = len(rows)
+	}
+	return out
 }

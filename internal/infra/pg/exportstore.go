@@ -1,0 +1,119 @@
+package pg
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ensera-ai/taisce/internal/domain"
+)
+
+// Exporter answers "what do you hold about me".
+//
+// # Why it walks the same registry erasure does
+//
+// Erasure discovers what to delete from `projection_kind` rather than from a list in code (D9), so a
+// projection added by a migration is swept without anybody remembering to add it. Export has exactly
+// the same obligation and the opposite failure mode: a projection missing from a deletion leaves data
+// behind, which a residual count catches — a projection missing from an export leaves data out, and
+// nothing catches that at all. An export nobody compares against anything looks complete.
+//
+// So it reads the same table. A kind that erasure would delete is a kind export must produce, and
+// there is a test that fails when the two disagree.
+//
+// # Why it includes what was refused
+//
+// `rejected_claim` holds verbatim quotes from a person's messages — claims the vocabulary would not
+// admit or whose quote could not be located. They were not stored as facts and they are unambiguously
+// that person's words. An export that omitted them would understate what is held, which is the one
+// direction an export must not err in.
+type Exporter struct {
+	pool   *pgxpool.Pool
+	schema Schema
+}
+
+func NewExporter(pool *pgxpool.Pool, schema Schema) *Exporter {
+	return &Exporter{pool: pool, schema: schema}
+}
+
+// Export gathers everything held about one data subject in one project.
+//
+// Read in a single transaction at one snapshot. An export assembled across several reads could show a
+// fact whose evidence had been erased between them — internally inconsistent, and the inconsistency
+// would look like a defect in the memory rather than in the export.
+func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubjectID string) (domain.Export, error) {
+	if dataSubjectID == "" {
+		// The same refusal erasure makes, for the same reason: without a subject this is not an
+		// export, it is a copy of the whole project wearing a governance label.
+		return domain.Export{}, fmt.Errorf("an export names the person it is for")
+	}
+
+	out := domain.Export{Scope: scope, DataSubjectID: dataSubjectID, Sections: map[string][]json.RawMessage{}}
+	err := pgx.BeginTxFunc(ctx, e.pool, pgx.TxOptions{
+		// Repeatable read, so every section is the same instant. See above.
+		IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly,
+	}, func(tx pgx.Tx) error {
+		kinds, err := declaredKinds(ctx, tx, schema)
+		if err != nil {
+			return err
+		}
+
+		// The observations themselves, which are the person's own words and the thing every
+		// projection derives from. Not a projection kind — projections are what was DERIVED, and an
+		// export that returned only derivations would omit the messages they came from.
+		messages, err := exportRows(ctx, tx, schema, `
+			SELECT to_jsonb(m) - 'observation_id'
+			  FROM {schema}.turn_message m
+			  JOIN {schema}.observation o ON o.observation_id = m.observation_id
+			 WHERE o.scope = $1 AND o.data_subject_id = $2
+			 ORDER BY o.log_offset, m.ordinal`, scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Sections["message"] = messages
+
+		for _, k := range kinds {
+			// The same interpolation erasure uses, and safe for the same reason: these identifiers
+			// come from `projection_kind`, whose constraints permit nothing that is not one.
+			rows, err := exportRows(ctx, tx, schema, fmt.Sprintf(`
+				SELECT to_jsonb(p)
+				  FROM {schema}.%s p
+				  JOIN {schema}.projection_dependency d
+				    ON d.projection_id = p.%s::text AND d.projection_kind = '%s'
+				 WHERE d.scope = $1 AND d.data_subject_id = $2`, k.table, k.idCol, k.kind),
+				scope, dataSubjectID)
+			if err != nil {
+				return fmt.Errorf("export %s: %w", k.kind, err)
+			}
+			out.Sections[k.kind] = rows
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.Export{}, err
+	}
+	return out, nil
+}
+
+func exportRows(ctx context.Context, tx pgx.Tx, schema Schema, sql string, args ...any) ([]json.RawMessage, error) {
+	rows, err := tx.Query(ctx, schema.SQL(sql), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Never nil. An absent section and an empty one are different statements — "we hold none of
+	// this" versus "we did not look" — and a JSON null would say the second when it meant the first.
+	out := []json.RawMessage{}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		out = append(out, json.RawMessage(raw))
+	}
+	return out, rows.Err()
+}
