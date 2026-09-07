@@ -342,3 +342,34 @@ func TestATruncatedBundleSaysSo(t *testing.T) {
 		t.Fatal("the bundle was cut and did not say so")
 	}
 }
+
+// A bundle cap of zero or less falls back rather than returning nothing.
+//
+// A cap is a bound on how much comes back, and a caller who passes a nonsense one has made a
+// configuration mistake — answering every question with an empty bundle would look exactly like a
+// memory that holds nothing, which is the most expensive way to report a typo.
+func TestANonsenseBundleCapFallsBackRatherThanReturningNothing(t *testing.T) {
+	for _, limit := range []int{0, -1, -100} {
+		r := recall.New(stubStore{}, limit)
+		bundle, err := r.Recall(context.Background(), []string{"p1"}, "anything at all")
+		if err != nil {
+			t.Fatalf("cap %d: %v", limit, err)
+		}
+		// The stub returns nothing, so what is asserted is that the call is well-formed rather than
+		// short-circuited by a cap of zero.
+		if bundle.Truncated {
+			t.Fatalf("cap %d reported a truncated bundle from an empty store", limit)
+		}
+	}
+}
+
+// stubStore answers nothing, which is enough to exercise the cap.
+type stubStore struct{}
+
+func (stubStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
+	return nil, nil
+}
+
+func (stubStore) FactsAbout(context.Context, []string, []string, int) ([]domain.CitedFact, error) {
+	return nil, nil
+}

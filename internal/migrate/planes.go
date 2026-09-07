@@ -51,6 +51,34 @@ func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, d
 		// the grant below decorative.
 		return fmt.Errorf("both plane identities need a password")
 	}
+	// Serialised across every process that might run this at once.
+	//
+	// Bootstrap is documented as safe to run on every start, and the chart starts several replicas
+	// together. Two of them altering the same role concurrently is not a race the database resolves
+	// quietly — it is `tuple concurrently updated`, and the loser exits non-zero, which for a
+	// bootstrap step means a deployment that fails to come up for a reason that is not wrong with it.
+	//
+	// A session-level advisory lock over the whole of this, rather than a transaction: role and
+	// database DDL below cannot all run inside one transaction, so the lock has to outlive the
+	// statements it protects. Taken on its own connection so returning it to the pool cannot leave
+	// the lock held by whoever borrows that connection next.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire a connection to establish the planes: %w", err)
+	}
+	defer conn.Release()
+
+	const lockKey = "taisce:establish-planes"
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtext($1)::bigint)`, lockKey); err != nil {
+		return fmt.Errorf("take the bootstrap lock: %w", err)
+	}
+	defer func() {
+		// WithoutCancel so a cancelled context still releases it. A held session lock outlives the
+		// caller and would block the next start rather than the current one.
+		_, _ = conn.Exec(context.WithoutCancel(ctx),
+			`SELECT pg_advisory_unlock(hashtext($1)::bigint)`, lockKey)
+	}()
+
 	for _, role := range []struct{ name, password string }{
 		{ControlRole, controlPassword},
 		{DataRole, dataPassword},

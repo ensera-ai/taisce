@@ -42,9 +42,15 @@
 // # Why some cases are marked pending
 //
 // Several fixtures describe behaviour this system does not have yet. Those are marked with the issue
-// that owns them. A pending case that still misbehaves is logged and does not fail; a pending case
-// that starts behaving FAILS, because the marker is then a lie and the only way it gets removed is if
-// something makes noise.
+// that owns them, and they are logged rather than failed — a suite red for a defect nobody is
+// currently fixing is one that gets ignored, and then so is the case beside it that just broke.
+//
+// A pending case that behaves correctly is reported loudly and still does not fail. That is a
+// reversal of the first design here, which failed on it so a stale marker could not survive. It was
+// wrong for the defects in this list, because they are intermittent: a clean run says the sampler was
+// kind rather than that anything was fixed. Automatic pruning is given up because it was never sound
+// against a non-deterministic dependency, and a marker now comes off when a person reads the line
+// saying it might.
 //
 // # What the first live runs found, including about this file
 //
@@ -315,11 +321,23 @@ func TestTheExtractionCorpus(t *testing.T) {
 					t.Errorf("produced %s", strings.Join(wrong, ", "))
 				}
 			case len(missing) == 0 && len(wrong) == 0:
-				// The marker has become a lie. Failing is the only thing that gets it removed —
-				// a pending list nobody prunes is a list of defects the corpus stops reporting.
+				// Reported loudly and NOT failed, which is a deliberate reversal.
+				//
+				// Failing here was the original design: a marker that has become a lie should make
+				// noise, because a pending list nobody prunes is a list of defects the corpus stops
+				// reporting. It was wrong for the defects actually in this list. They are
+				// intermittent — `I do not live in London.` produces the false fact on some attempts
+				// and not others — so a clean run says the sampler was kind, not that anything was
+				// fixed, and failing on it would make the suite red at random.
+				//
+				// A corpus that fails at random is one people stop reading, which costs more than
+				// having none. So the trade is explicit: automatic pruning is given up, because it
+				// was never sound against a non-deterministic dependency, and the price is that a
+				// marker is removed by a person who read this line.
 				fixed = append(fixed, c.name+" ("+c.pending+")")
-				t.Errorf("this case is marked pending on %s and it now behaves correctly; "+
-					"remove the marker so a regression here goes red", c.pending)
+				t.Logf("CHECK %s: this case behaved correctly in all %d attempts. If it is fixed, "+
+					"remove the pending marker so a regression goes red. If it is intermittent, it "+
+					"was luck — the failure is in %s.", c.pending, attempts, c.pending)
 			default:
 				t.Logf("KNOWN GAP %s: missing=%v wrong=%v", c.pending, missing, wrong)
 			}
@@ -327,7 +345,10 @@ func TestTheExtractionCorpus(t *testing.T) {
 	}
 
 	if len(fixed) > 0 {
-		t.Logf("no longer pending: %s", strings.Join(fixed, "; "))
+		// Printed at the end as well as beside the case, because the point is to be seen by whoever
+		// ran this rather than found by whoever greps the output later.
+		t.Logf("PENDING CASES THAT BEHAVED CORRECTLY THIS RUN — check whether the marker can go: %s",
+			strings.Join(fixed, "; "))
 	}
 }
 

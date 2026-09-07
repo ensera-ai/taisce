@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -167,5 +168,40 @@ func TestAPlaneIdentityWithoutAPasswordIsRefused(t *testing.T) {
 	pool := testPool(t)
 	if err := EstablishPlanes(context.Background(), pool, "taisce-test-control", ""); err == nil {
 		t.Fatal("an identity with no password was established")
+	}
+}
+
+// Several processes establishing the planes at once all succeed.
+//
+// Bootstrap is documented as safe to run on every start, and a chart running several replicas starts
+// them together. Two altering the same role concurrently is not a race PostgreSQL resolves quietly —
+// it is `tuple concurrently updated`, and the loser exits non-zero, which for a bootstrap step means
+// a deployment that fails to come up for a reason that is not wrong with it.
+//
+// Found by the test suite failing intermittently once three packages called this, which is the
+// cheapest possible place to find it.
+func TestEstablishingThePlanesConcurrentlyIsSafe(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+
+	const starters = 6
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make([]error, starters)
+	for i := 0; i < starters; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs[i] = EstablishPlanes(ctx, pool, "taisce-test-control", "taisce-test-data")
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("starter %d failed while another was establishing the planes: %v", i, err)
+		}
 	}
 }

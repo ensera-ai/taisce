@@ -3,7 +3,10 @@ package pg_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,7 +85,7 @@ func TestAnAssistantsSentenceDoesNotBecomeTheUsersFact(t *testing.T) {
 
 	// The user's own claim is accepted.
 	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
-		Subject: "user", Predicate: "lives_in", Object: "Dublin",
+		Subject: "user", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: "Dublin",
 		Statement: "The user lives in Dublin.", Confidence: 0.9,
 		Quote: "I moved to Dublin", ByteStart: 0, ByteEnd: 17, SourceOrdinal: 0,
 	}); err != nil {
@@ -91,7 +94,7 @@ func TestAnAssistantsSentenceDoesNotBecomeTheUsersFact(t *testing.T) {
 
 	// The assistant's inference about the same person is not.
 	_, err = facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleAssistant, "subject-1", domain.Claim{
-		Subject: "user", Predicate: "prefers", Object: "Dublin food scene",
+		Subject: "user", Predicate: "prefers", Cardinality: domain.CardinalityMany, Object: "Dublin food scene",
 		Statement: "The user likes the Dublin food scene.", Confidence: 0.8,
 		Quote: "You must love the Dublin food scene.", ByteStart: 0, ByteEnd: 36, SourceOrdinal: 1,
 	})
@@ -137,10 +140,10 @@ func TestTheSameNameUnderTwoTypesIsOneEntity(t *testing.T) {
 	}
 
 	for _, c := range []domain.Claim{
-		{Subject: "Dublin Office", Predicate: "located_in", Object: "Grand Canal",
+		{Subject: "Dublin Office", Predicate: "located_in", Cardinality: domain.CardinalityOne, Object: "Grand Canal",
 			Statement: "The Dublin Office is on Grand Canal.", SubjectType: "place",
 			Quote: "The Dublin Office is on Grand Canal", ByteStart: 0, ByteEnd: 35},
-		{Subject: "dublin office", Predicate: "part_of", Object: "Ensera",
+		{Subject: "dublin office", Predicate: "part_of", Cardinality: domain.CardinalityMany, Object: "Ensera",
 			Statement: "The Dublin office is part of Ensera.", SubjectType: "thing",
 			Quote: "dublin office is part of Ensera", ByteStart: 37, ByteEnd: 68},
 	} {
@@ -205,7 +208,7 @@ func TestAnEvidenceSpanResolvesAgainstItsOwnMessage(t *testing.T) {
 	}
 
 	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", domain.Claim{
-		Subject: "Marta", Predicate: "works_at", Object: "Ensera",
+		Subject: "Marta", Predicate: "works_at", Cardinality: domain.CardinalityMany, Object: "Ensera",
 		Statement: "Marta works at Ensera.", Quote: quote,
 		ByteStart: start, ByteEnd: end, SourceOrdinal: 1,
 	}); err != nil {
@@ -248,7 +251,7 @@ func TestEverythingWrittenRegistersForErasure(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
-		Subject: "Marta", Predicate: "works_at", Object: "Ensera",
+		Subject: "Marta", Predicate: "works_at", Cardinality: domain.CardinalityMany, Object: "Ensera",
 		Statement: "Marta works at Ensera.", Quote: "Marta works at Ensera",
 		ByteStart: 0, ByteEnd: 21,
 	}); err != nil {
@@ -418,7 +421,7 @@ func TestAnUnmappedRelationIsRefusedAndLeavesNothingBehind(t *testing.T) {
 	// A synonym of an admitted relation, which is the realistic failure: not a typo, but a second
 	// spelling that no traversal asking for `works_at` would ever match.
 	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", domain.Claim{
-		Subject: "Marta", Predicate: "employed_by", Object: "Ensera",
+		Subject: "Marta", Predicate: "employed_by", Cardinality: domain.CardinalityMany, Object: "Ensera",
 		Statement: "Marta is employed by Ensera.", Quote: "Marta is employed by Ensera",
 		ByteStart: 0, ByteEnd: 27,
 	}); err == nil {
@@ -603,7 +606,7 @@ func TestACitationResolvesAgainstTheMessageItsEvidenceNames(t *testing.T) {
 	}
 
 	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", domain.Claim{
-		Subject: "Marta", Predicate: "works_at", Object: "Ensera",
+		Subject: "Marta", Predicate: "works_at", Cardinality: domain.CardinalityMany, Object: "Ensera",
 		Statement: "Marta works at Ensera in Cork.", Quote: quote,
 		ByteStart: start, ByteEnd: end, SourceOrdinal: 1,
 	}); err != nil {
@@ -672,5 +675,402 @@ func TestEveryRefusalReasonTheCodeNamesIsOneTheSchemaAdmits(t *testing.T) {
 		Quote: "I work at Ensera", Reason: "because_i_said_so",
 	}); err == nil {
 		t.Fatal("a reason no reader knows about was accepted; the set is not closed")
+	}
+}
+
+// ── #9: a fact that stops being true ──────────────────────────────────────────────────────────
+//
+// Eleven of the thirty-nine relations hold one value at a time. Asserting a new one closes the old
+// one rather than sitting beside it, and the database refuses the overlapping state outright — so
+// the invariant survives a write path written by somebody who never read this test.
+func TestASingleCardinalityFactSupersedesRatherThanAccumulates(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_supersede")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I live in Dublin. Now I live in Amman."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	first := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	second := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+
+	assert := func(object string, at time.Time) string {
+		t.Helper()
+		id, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+			Subject: "the user", Predicate: "lives_in", Object: object,
+			Statement: "The user lives in " + object + ".", Confidence: 0.9,
+			Quote: "I live in " + object, ByteStart: 0, ByteEnd: 1, SourceOrdinal: 0,
+			SemanticType: "identity", Cardinality: domain.CardinalityOne, ValidFrom: at,
+		})
+		if err != nil {
+			t.Fatalf("assert %s: %v", object, err)
+		}
+		return id
+	}
+
+	older := assert("Dublin", first)
+	newer := assert("Amman", second)
+
+	// The old fact is still there — the history is the product — and it now has an end.
+	var upperInf bool
+	var upper *time.Time
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT upper_inf(valid), upper(valid) FROM {schema}.fact WHERE fact_id = $1`), older).
+		Scan(&upperInf, &upper); err != nil {
+		t.Fatalf("read the superseded fact: %v", err)
+	}
+	if upperInf {
+		t.Fatal("the earlier fact is still current, so the subject lives in two places")
+	}
+	// The intervals meet exactly, so a question about any instant has one answer rather than none.
+	if upper == nil || !upper.Equal(second) {
+		t.Fatalf("the earlier fact ends at %v and the later one starts at %v — a gap or an overlap",
+			upper, second)
+	}
+
+	var currentObjects []string
+	rows, err := pool.Query(ctx, schema.SQL(
+		`SELECT e.canonical_name FROM {schema}.fact f
+		   JOIN {schema}.entity e ON e.entity_id = f.object_entity_id
+		  WHERE f.predicate = 'lives_in' AND upper_inf(f.valid)`))
+	if err != nil {
+		t.Fatalf("read current facts: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		currentObjects = append(currentObjects, name)
+	}
+	if len(currentObjects) != 1 || currentObjects[0] != "Amman" {
+		t.Fatalf("current lives_in facts are %v, wanted exactly Amman", currentObjects)
+	}
+	_ = newer
+}
+
+// A many-cardinality relation accumulates, and must not be superseded.
+//
+// Getting this backwards would be worse than the defect being fixed: working at two organisations is
+// ordinary, and closing the first would delete a true fact every time a second arrived.
+func TestAManyCardinalityFactAccumulatesRatherThanSuperseding(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_accumulate")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera and at Acme."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	for _, org := range []string{"Ensera", "Acme"} {
+		if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+			Subject: "the user", Predicate: "works_at", Object: org,
+			Statement: "The user works at " + org + ".", Confidence: 0.9,
+			Quote: "I work at", ByteStart: 0, ByteEnd: 1, SourceOrdinal: 0,
+			SemanticType: "identity", Cardinality: domain.CardinalityMany,
+			ValidFrom: time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC),
+		}); err != nil {
+			t.Fatalf("assert %s: %v", org, err)
+		}
+	}
+
+	var current int
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT count(*) FROM {schema}.fact WHERE predicate = 'works_at' AND upper_inf(valid)`)).
+		Scan(&current); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if current != 2 {
+		t.Fatalf("%d current works_at facts; a many-cardinality relation was superseded", current)
+	}
+}
+
+// The invariant is in the substrate, so a write that goes around the application cannot break it.
+//
+// This is the test that says the rule MOVED. It writes the overlapping state directly, with no Go in
+// the path at all, and the database refuses it.
+func TestTheDatabaseRefusesTwoOverlappingSingleCardinalityFacts(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_excl")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I live in Dublin."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	factID, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+		Subject: "the user", Predicate: "lives_in", Object: "Dublin",
+		Statement: "The user lives in Dublin.", Confidence: 0.9,
+		Quote: "I live in Dublin", ByteStart: 0, ByteEnd: 16, SourceOrdinal: 0,
+		SemanticType: "identity", Cardinality: domain.CardinalityOne,
+		ValidFrom: time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+
+	var subject string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT subject_entity_id::text FROM {schema}.fact WHERE fact_id = $1`), factID).
+		Scan(&subject); err != nil {
+		t.Fatalf("read subject: %v", err)
+	}
+
+	// A second open interval for the same subject and relation, inserted directly.
+	_, err = pool.Exec(ctx, schema.SQL(
+		`INSERT INTO {schema}.fact
+		     (fact_id, scope, subject_entity_id, predicate, statement, valid, confidence, cardinality)
+		 VALUES (gen_random_uuid(), 'p1', $1::uuid, 'lives_in', 'A second current residence.',
+		         tstzrange(now(), NULL), 0.9, 'one')`), subject)
+	if err == nil {
+		t.Fatal("the database stored two overlapping current facts for a single-cardinality relation")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "fact_single_cardinality_excl") {
+		t.Fatalf("refused for the wrong reason, which may not survive a schema change: %v", err)
+	}
+}
+
+// The copy of cardinality cannot disagree with the vocabulary, because a composite foreign key makes
+// the disagreeing row unstorable. Without this the denormalisation would be a second definition of a
+// closed set, which is what this schema refuses everywhere else.
+func TestAFactCannotClaimACardinalityTheVocabularyDoesNotGiveIt(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_cardfk")
+
+	_, err := pool.Exec(ctx, schema.SQL(
+		`INSERT INTO {schema}.fact
+		     (fact_id, scope, predicate, statement, valid, confidence, cardinality)
+		 VALUES (gen_random_uuid(), 'p1', 'lives_in', 'A relation with the wrong cardinality.',
+		         tstzrange(now(), NULL), 0.9, 'many')`))
+	if err == nil {
+		t.Fatal("a fact claimed a cardinality its predicate does not have")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "fact_cardinality_matches_vocabulary") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+}
+
+// The invariant holds under concurrency with no application lock in the path.
+//
+// This is the test that says the rule moved. Several workers assert conflicting single-cardinality
+// facts for one subject at the same time, through the ordinary write path, with nothing coordinating
+// them. Some transactions fail — that is the constraint doing its work — and what must be true
+// afterwards is that the subject has exactly one current value.
+//
+// The old answer was a lock per slot on the write path. It would also produce this outcome, and it
+// would produce it only for as long as every future write path remembered to take it. Here there is
+// nothing to remember.
+func TestConcurrentWritersCannotProduceTwoCurrentFacts(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_race")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I live somewhere."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	const workers = 8
+	// One instant for all of them, so every interval starts at the same point and every pair
+	// genuinely overlaps. Staggering the times would let them supersede one another in sequence and
+	// the race would never happen.
+	at := time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	results := make([]error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			_, results[i] = facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1",
+				domain.Claim{
+					Subject: "the user", Predicate: "lives_in", Object: fmt.Sprintf("City%d", i),
+					Statement: "The user lives somewhere.", Confidence: 0.9,
+					Quote: "I live somewhere", ByteStart: 0, ByteEnd: 16, SourceOrdinal: 0,
+					SemanticType: "identity", Cardinality: domain.CardinalityOne, ValidFrom: at,
+				})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	succeeded := 0
+	for _, err := range results {
+		if err == nil {
+			succeeded++
+		}
+	}
+	if succeeded == 0 {
+		t.Fatalf("every writer failed, so the constraint is refusing more than the overlap: %v", results)
+	}
+
+	// The assertion that matters. Whatever happened between the writers, the subject holds one
+	// current residence.
+	var current int
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT count(*) FROM {schema}.fact
+		  WHERE predicate = 'lives_in' AND upper_inf(valid) AND subject_entity_id IS NOT NULL`)).
+		Scan(&current); err != nil {
+		t.Fatalf("count current: %v", err)
+	}
+	if current != 1 {
+		t.Fatalf("%d current lives_in facts after %d concurrent writers (%d succeeded); "+
+			"the subject lives in more than one place", current, workers, succeeded)
+	}
+	t.Logf("%d of %d writers committed; the rest were refused by the constraint", succeeded, workers)
+}
+
+// A claim that does not say its cardinality is refused before it reaches the database.
+//
+// The foreign key would refuse it too, as a constraint violation naming a column — correct, and
+// useless to whoever has to work out what they did wrong. Cardinality decides whether an assertion
+// supersedes an earlier fact or sits beside it, so a claim without one is a claim whose meaning
+// nobody has decided.
+func TestAClaimWithNoCardinalityIsRefusedWithAReason(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_nocard")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I live in Dublin."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	for name, cardinality := range map[string]domain.Cardinality{
+		"absent":  "",
+		"invalid": "sometimes",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", domain.Claim{
+				Subject: "the user", Predicate: "lives_in", Cardinality: cardinality, Object: "Dublin",
+				Statement: "The user lives in Dublin.", Quote: "I live in Dublin",
+				ByteStart: 0, ByteEnd: 16,
+			})
+			if err == nil {
+				t.Fatal("a claim with no usable cardinality was stored")
+			}
+			if !strings.Contains(err.Error(), "cardinality") {
+				t.Fatalf("the refusal does not name what was wrong: %v", err)
+			}
+			// And it did not reach the database, so nothing partial was written.
+			var facts int
+			if err := pool.QueryRow(ctx, schema.SQL(
+				`SELECT count(*) FROM {schema}.fact`)).Scan(&facts); err != nil {
+				t.Fatalf("count: %v", err)
+			}
+			if facts != 0 {
+				t.Fatalf("%d facts were written by a refused assertion", facts)
+			}
+		})
+	}
+}
+
+// Superseding leaves the earlier fact's evidence intact.
+//
+// The old fact is history rather than a mistake, and history without its evidence is an assertion
+// nobody can check — which is the one thing this product does not ship.
+func TestASupersededFactKeepsItsEvidence(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_supersede_ev")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I live in Dublin. Now I live in Amman."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	older, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+		Subject: "the user", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: "Dublin",
+		Statement: "The user lives in Dublin.", Quote: "I live in Dublin", ByteStart: 0, ByteEnd: 16,
+		SourceOrdinal: 0, ValidFrom: time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("assert first: %v", err)
+	}
+	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+		Subject: "the user", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: "Amman",
+		Statement: "The user lives in Amman.", Quote: "I live in Amman", ByteStart: 22, ByteEnd: 37,
+		SourceOrdinal: 0, ValidFrom: time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("assert second: %v", err)
+	}
+
+	var quote string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT quote FROM {schema}.fact_evidence WHERE fact_id = $1`), older).Scan(&quote); err != nil {
+		t.Fatalf("the superseded fact lost its evidence: %v", err)
+	}
+	if quote != "I live in Dublin" {
+		t.Fatalf("the evidence changed under supersession: %q", quote)
+	}
+}
+
+// A fact with a blank end is stored with that end unresolved, not refused.
+//
+// The claim is still worth keeping: its quote is real and its other end is a real entity. What it is
+// not is a node in the graph, so traversal skips it — which is different from discarding the fact and
+// its evidence because one string was empty.
+func TestABlankEndIsUnresolvedRatherThanRefused(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_blankend")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	id, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", domain.Claim{
+		Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany,
+		// Blank, and blank after normalisation, which is the case that matters: whitespace is not
+		// an entity either.
+		Object: "   ", Statement: "The user works somewhere.", Quote: "I work at",
+		ByteStart: 0, ByteEnd: 9, SourceOrdinal: 0,
+	})
+	if err != nil {
+		t.Fatalf("a claim with one blank end was refused: %v", err)
+	}
+
+	var objectResolved bool
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT object_entity_id IS NOT NULL FROM {schema}.fact WHERE fact_id = $1`), id).
+		Scan(&objectResolved); err != nil {
+		t.Fatalf("read fact: %v", err)
+	}
+	if objectResolved {
+		t.Fatal("whitespace resolved to an entity, which puts a node named nothing in the graph")
 	}
 }

@@ -196,7 +196,11 @@ type Claim struct {
 	SubjectType   string
 	ObjectType    string
 	SemanticType  string
-	ValidFrom     time.Time
+	// Cardinality comes from the vocabulary and travels with the claim so the write path can tell a
+	// relation that supersedes from one that accumulates. Carried rather than looked up at insert
+	// time: a lookup is somewhere to forget, and this decides whether an earlier fact is closed.
+	Cardinality Cardinality
+	ValidFrom   time.Time
 }
 
 // Evidence is the stored receipt for a fact: which message, which bytes, which extractor.

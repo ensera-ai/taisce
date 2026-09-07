@@ -143,6 +143,7 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 			SubjectType:   p.SubjectType,
 			ObjectType:    objectType,
 			SemanticType:  predicate.SemanticType,
+			Cardinality:   predicate.Cardinality,
 			ValidFrom:     message.OccurredAt,
 		})
 	}

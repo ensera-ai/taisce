@@ -51,6 +51,14 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 	if dataSubjectID != "" && !speaker.SpeaksForPrincipal() {
 		return "", fmt.Errorf("%w: message %d has role %q", ErrNotSpokenByPrincipal, claim.SourceOrdinal, speaker)
 	}
+	// Refused here rather than by the foreign key, which would also refuse it — as a constraint
+	// violation from four frames down, naming a column instead of the mistake. Cardinality decides
+	// whether this assertion supersedes an earlier fact or sits beside it, so a claim that does not
+	// carry one is a claim nobody has decided the meaning of.
+	if claim.Cardinality != domain.CardinalityOne && claim.Cardinality != domain.CardinalityMany {
+		return "", fmt.Errorf("claim for %q carries no cardinality, so whether it supersedes an "+
+			"earlier fact is undecided; it comes from the vocabulary", claim.Predicate)
+	}
 
 	var factID string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -68,10 +76,29 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 		if validFrom.IsZero() {
 			validFrom = time.Now().UTC()
 		}
+
+		// Supersession, for the eleven relations that hold one value at a time.
+		//
+		// The exclusion constraint refuses two overlapping valid intervals for one subject, so this
+		// is not an optimisation — without it the second `lives_in` for a person is an error rather
+		// than a move. Closing the earlier interval at the new one's start is what a move IS: the
+		// old fact stays, with an end, which is the history the product exists to keep.
+		//
+		// Both statements are in the same transaction as the insert, so a crash between them cannot
+		// leave a subject with no current value. And the constraint is still the guarantee: if two
+		// writers race past this close, one of their inserts is refused by the database rather than
+		// both succeeding.
+		if claim.Cardinality == domain.CardinalityOne && subjectID != "" {
+			if _, err := tx.Exec(ctx, schema.SQL(supersedeSQL),
+				scope, subjectID, claim.Predicate, validFrom); err != nil {
+				return fmt.Errorf("supersede the earlier fact: %w", err)
+			}
+		}
+
 		if _, err := tx.Exec(ctx, schema.SQL(insertFactSQL),
 			id, scope, nullIfEmptyString(subjectID), nullIfEmptyString(objectID),
 			claim.Predicate, claim.Statement, validFrom, claim.Confidence,
-			nullIfEmpty(dataSubjectID)); err != nil {
+			nullIfEmpty(dataSubjectID), string(claim.Cardinality)); err != nil {
 			return fmt.Errorf("insert fact: %w", err)
 		}
 
@@ -191,8 +218,27 @@ UPDATE {schema}.entity
 const insertFactSQL = `
 INSERT INTO {schema}.fact
     (fact_id, scope, subject_entity_id, object_entity_id, predicate, statement,
-     valid, confidence, data_subject_id)
-VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9)`
+     valid, confidence, data_subject_id, cardinality)
+VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9, $10)`
+
+// Closes whatever this subject currently holds for this relation, at the moment the new one starts.
+//
+// `upper_inf(valid)` rather than "contains now": the interval being closed is the OPEN one, and a
+// fact that was already given an end is history that must not be rewritten. Ends are set to the new
+// fact's start rather than to now(), so the two intervals meet exactly and a question about any
+// instant has one answer.
+//
+// A range that would become empty or backwards — a fact arriving with a timestamp before the current
+// one started — is left alone. Out-of-order arrival is real, and the right answer to it is a
+// bitemporal correction rather than an interval this statement invents.
+const supersedeSQL = `
+UPDATE {schema}.fact
+   SET valid = tstzrange(lower(valid), $4)
+ WHERE scope = $1
+   AND subject_entity_id = $2::uuid
+   AND predicate = $3
+   AND upper_inf(valid)
+   AND lower(valid) < $4`
 
 const insertEvidenceSQL = `
 INSERT INTO {schema}.fact_evidence
