@@ -331,6 +331,12 @@ else's vector store.
 
 ## What is not settled, and should not be invented
 
+**The development machine cannot produce performance evidence, and its numbers must never be
+presented as any.** It is a laptop, it runs the model and the database and the service at once, and a
+figure taken there measures that arrangement rather than this system. Setup timings are fair to quote
+as setup timings; anything about latency, throughput or scale waits for hardware that can be held
+still, and saying so is part of rule 9 rather than an apology for it.
+
 No latency budget, throughput target, corpus size, RTO or RPO has been agreed. `docs/00-goals.md`
 states the *shape* of the scaling claim and the issue list holds the work that would measure it —
 until then, any specific number is a guess and saying so is part of rule 11. This applies to

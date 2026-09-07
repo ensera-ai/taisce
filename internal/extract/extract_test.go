@@ -117,6 +117,7 @@ func TestEveryReturnedSpanReproducesItsQuote(t *testing.T) {
 			e := extract.New(stubModel{proposals: []extract.Proposal{{
 				Subject: "user", Predicate: tc.predicate, Object: "Dublin",
 				Statement: "The user moved to Dublin.", Confidence: 0.9, Quote: tc.quote,
+				Polarity: domain.PolarityAsserted,
 			}}}, vocabulary(t))
 
 			got, err := e.Extract(context.Background(), message(content))
@@ -161,7 +162,7 @@ func TestEveryReturnedSpanReproducesItsQuote(t *testing.T) {
 func TestTheStoredQuoteIsTheMessagesTextNotTheModels(t *testing.T) {
 	content := "I moved to Dublin\n  last month."
 	e := extract.New(stubModel{proposals: []extract.Proposal{{
-		Subject: "user", Predicate: "lives_in", Object: "Dublin",
+		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Object: "Dublin",
 		Quote: "moved to Dublin last month",
 	}}}, vocabulary(t))
 
@@ -185,7 +186,7 @@ func TestTheStoredQuoteIsTheMessagesTextNotTheModels(t *testing.T) {
 func TestASpanIsCorrectInBytesWhenTheTextIsNotASCII(t *testing.T) {
 	content := "Tá mé i mo chónaí i mBaile Átha Cliath\nfaoi láthair."
 	e := extract.New(stubModel{proposals: []extract.Proposal{{
-		Subject: "user", Predicate: "lives_in", Object: "Baile Átha Cliath",
+		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Object: "Baile Átha Cliath",
 		Quote: "i mo chónaí i mBaile Átha Cliath faoi láthair",
 	}}}, vocabulary(t))
 
@@ -239,7 +240,7 @@ func TestAModelFailureIsAnError(t *testing.T) {
 func TestTheVocabularyTypesTheObjectWhenTheModelDidNot(t *testing.T) {
 	content := "The review is scheduled for Friday."
 	e := extract.New(stubModel{proposals: []extract.Proposal{{
-		Subject: "the review", Predicate: "scheduled_for", Object: "Friday",
+		Subject: "the review", Predicate: "scheduled_for", Polarity: domain.PolarityAsserted, Object: "Friday",
 		Quote: "scheduled for Friday",
 	}}}, vocabulary(t))
 
@@ -262,7 +263,7 @@ func TestTheVocabularyTypesTheObjectWhenTheModelDidNot(t *testing.T) {
 // enough to accept this is wide enough to accept a sentence the model composed.
 func TestAQuoteThatChangedCaseIsRefused(t *testing.T) {
 	e := extract.New(stubModel{proposals: []extract.Proposal{{
-		Subject: "user", Predicate: "lives_in", Object: "Dublin", Quote: "i moved to dublin",
+		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Object: "Dublin", Quote: "i moved to dublin",
 	}}}, vocabulary(t))
 
 	got, err := e.Extract(context.Background(), message("I moved to Dublin last month."))
@@ -288,8 +289,8 @@ func TestAQuoteThatChangedCaseIsRefused(t *testing.T) {
 func TestARelationAssertedTwiceInOneMessageIsOneClaim(t *testing.T) {
 	content := "I work at Ensera. Yes, Ensera — I work at Ensera."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
-		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera"},
-		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera."},
+		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera.", Polarity: domain.PolarityAsserted},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -316,8 +317,8 @@ func TestARelationAssertedTwiceInOneMessageIsOneClaim(t *testing.T) {
 func TestARepeatIsFoundThroughTheSameNormalisationEntitiesUse(t *testing.T) {
 	content := "I work at Ensera. I work at  ENSERA  as it happens."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
-		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera"},
-		{Subject: "i", Predicate: "works_at", Object: "  ENSERA  ", Quote: "I work at  ENSERA "},
+		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "i", Predicate: "works_at", Object: "  ENSERA  ", Quote: "I work at  ENSERA ", Polarity: domain.PolarityAsserted},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -332,9 +333,9 @@ func TestARepeatIsFoundThroughTheSameNormalisationEntitiesUse(t *testing.T) {
 func TestDifferentRelationsAndDifferentEndsAreNotRepeats(t *testing.T) {
 	content := "I work at Ensera, I live in Dublin, and I work at Acme too."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
-		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera"},
-		{Subject: "I", Predicate: "lives_in", Object: "Dublin", Quote: "I live in Dublin"},
-		{Subject: "I", Predicate: "works_at", Object: "Acme", Quote: "I work at Acme"},
+		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "lives_in", Object: "Dublin", Quote: "I live in Dublin", Polarity: domain.PolarityAsserted},
+		{Subject: "I", Predicate: "works_at", Object: "Acme", Quote: "I work at Acme", Polarity: domain.PolarityAsserted},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -352,13 +353,128 @@ func TestDifferentRelationsAndDifferentEndsAreNotRepeats(t *testing.T) {
 func TestARepeatWithAnInventedQuoteIsRefusedAsUncitable(t *testing.T) {
 	content := "I work at Ensera."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
-		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera"},
-		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "employed by Ensera"},
+		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "employed by Ensera", Polarity: domain.PolarityAsserted},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
 	if len(result.Rejected) != 1 || result.Rejected[0].Reason != domain.ReasonUnlocatableQuote {
 		t.Fatalf("wanted one uncitable refusal, got %+v", result.Rejected)
+	}
+}
+
+// ── #73: a claim the message did not assert ───────────────────────────────────────────────────
+//
+// Measured against a live model: `I do not live in London.` produced `lives_in(I, London)` on some
+// attempts, with a quote that verified exactly — because the words really are in the message. The
+// span rule cannot help; it is a rule about citation, and a denial cites perfectly.
+//
+// This is the only refusal whose alternative is writing a FALSE fact rather than losing a true one.
+func TestAClaimTheMessageDidNotAssertIsRefused(t *testing.T) {
+	content := "I do not live in London. I think John works at Acme. If I moved to Amman I would like it."
+
+	for name, polarity := range map[string]domain.Polarity{
+		"denied":       domain.PolarityDenied,
+		"uncertain":    domain.PolarityUncertain,
+		"hypothetical": domain.PolarityHypothetical,
+		"reported":     domain.PolarityReported,
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+				{Subject: "I", Predicate: "lives_in", Object: "London",
+					Statement: "The user lives in London.", Quote: "I do not live in London",
+					Polarity: polarity},
+			}}, vocabulary(t)).Extract(context.Background(), message(content))
+			if err != nil {
+				t.Fatalf("extract: %v", err)
+			}
+			if len(result.Claims) != 0 {
+				t.Fatalf("a %s claim became a fact: %+v", name, result.Claims[0])
+			}
+			if len(result.Rejected) != 1 || result.Rejected[0].Reason != domain.ReasonNotAsserted {
+				t.Fatalf("wanted one not_asserted refusal, got %+v", result.Rejected)
+			}
+		})
+	}
+}
+
+// A polarity the model did not give, or gave a value nobody recognises, is refused.
+//
+// Rule 8: every default is chosen for what happens when something upstream forgets, and the thing
+// upstream is a model. Treating absence as "asserted" would mean a field omitted, a value spelled
+// differently, or a reply shaped by a provider that ignores the request each writes a fact nobody
+// vouched for — on the one path where a false fact is indistinguishable from a true one.
+func TestAnAbsentOrUnrecognisedPolarityIsRefusedRatherThanAssumed(t *testing.T) {
+	content := "I live in Dublin."
+	for name, polarity := range map[string]domain.Polarity{
+		"absent":       "",
+		"unrecognised": "probably",
+		"wrong case":   "Asserted",
+		"close":        "assert",
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+				{Subject: "I", Predicate: "lives_in", Object: "Dublin",
+					Statement: "The user lives in Dublin.", Quote: "I live in Dublin",
+					Polarity: polarity},
+			}}, vocabulary(t)).Extract(context.Background(), message(content))
+			if err != nil {
+				t.Fatalf("extract: %v", err)
+			}
+			if len(result.Claims) != 0 {
+				t.Fatalf("%q was treated as an assertion", polarity)
+			}
+			if result.Rejected[0].Reason != domain.ReasonNotAsserted {
+				t.Fatalf("refused as %q", result.Rejected[0].Reason)
+			}
+		})
+	}
+}
+
+// The polarity check runs before the duplicate check, so the row carries the reason that is true.
+//
+// A claim the message never asserted is not a repeat of anything, and recording it as a duplicate
+// would make the counts agree when they should not — the whole reason the reason set is closed is
+// that each member drives a different response.
+func TestAnUnassertedRepeatIsRefusedForNotBeingAssertedRatherThanForRepeating(t *testing.T) {
+	content := "I do not live in London. I really do not live in London."
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "I", Predicate: "lives_in", Object: "London", Quote: "I do not live in London",
+			Polarity: domain.PolarityDenied},
+		{Subject: "I", Predicate: "lives_in", Object: "London", Quote: "I really do not live in London",
+			Polarity: domain.PolarityDenied},
+	}}, vocabulary(t)).Extract(context.Background(), message(content))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Rejected) != 2 {
+		t.Fatalf("wanted both refused, got %+v", result.Rejected)
+	}
+	for _, r := range result.Rejected {
+		if r.Reason != domain.ReasonNotAsserted {
+			t.Fatalf("a denied claim was refused as %q", r.Reason)
+		}
+	}
+}
+
+// An asserted claim still becomes a fact, which is the property a conservative fix is most likely to
+// break. A refusal that also refuses the ordinary case has traded precision for nothing.
+func TestAnAssertedClaimStillBecomesAFact(t *testing.T) {
+	content := "I live in Dublin and I work at Ensera."
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "I", Predicate: "lives_in", Object: "Dublin", Quote: "I live in Dublin",
+			Polarity: domain.PolarityAsserted},
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera",
+			Polarity: domain.PolarityAsserted},
+	}}, vocabulary(t)).Extract(context.Background(), message(content))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Claims) != 2 {
+		t.Fatalf("got %d claims from two plain assertions: %+v", len(result.Claims), result.Rejected)
+	}
+	if len(result.Rejected) != 0 {
+		t.Fatalf("an asserted claim was refused: %+v", result.Rejected)
 	}
 }

@@ -39,6 +39,7 @@ type promptFile struct {
 	Task         string `yaml:"task"`
 	Relations    string `yaml:"relations"`
 	QuoteRule    string `yaml:"quote_rule"`
+	Polarity     string `yaml:"polarity"`
 	ReplyShape   string `yaml:"reply_shape"`
 	DataBoundary string `yaml:"data_boundary"`
 }
@@ -72,6 +73,7 @@ func loadPrompt(raw []byte) (promptFile, error) {
 		{"task", p.Task},
 		{"relations", p.Relations},
 		{"quote_rule", p.QuoteRule},
+		{"polarity", p.Polarity},
 		{"reply_shape", p.ReplyShape},
 		{"data_boundary", p.DataBoundary},
 	} {
@@ -107,6 +109,7 @@ func systemPrompt(vocabulary domain.Ontology) string {
 		extractionPrompt.Task,
 		relations,
 		extractionPrompt.QuoteRule,
+		extractionPrompt.Polarity,
 		extractionPrompt.ReplyShape,
 		extractionPrompt.DataBoundary,
 	}, "\n\n")

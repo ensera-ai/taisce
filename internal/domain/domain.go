@@ -328,7 +328,43 @@ const (
 	// message. The claim is not wrong and not uncitable; it is already recorded, and admitting it
 	// again would spend one of a bundle's rows on a repeat of a fact the caller already has.
 	ReasonDuplicateClaim = "duplicate_claim"
+	// ReasonNotAsserted — the message contains the words but does not assert the relation. A denial,
+	// a hedge, a hypothetical, or somebody else's statement being reported.
+	//
+	// It is the only refusal whose alternative is writing a FALSE fact rather than losing a true
+	// one. The other three are absences, and an absence is visible: a question gets a thin answer.
+	// This one would be a presence — cited, current, and indistinguishable from a correct fact by
+	// every mechanism downstream.
+	ReasonNotAsserted = "not_asserted"
 )
+
+// Polarity is what a claim's own message does with it.
+//
+// Reported by the extractor's model, and treated as a gate rather than as data: anything that is not
+// a plain present assertion is refused and written down. That is deliberately a smaller promise than
+// storing the distinction — a fact carrying "this was denied" is one every read path has to remember
+// to filter, and the one that forgets returns the negation as an assertion.
+type Polarity string
+
+const (
+	// PolarityAsserted — the message states the relation as being so.
+	PolarityAsserted Polarity = "asserted"
+	// PolarityDenied — the message denies it. "I do not live in London."
+	PolarityDenied Polarity = "denied"
+	// PolarityUncertain — the message hedges. "I think John works at Acme."
+	PolarityUncertain Polarity = "uncertain"
+	// PolarityHypothetical — the message supposes or intends it. "If I moved to Amman…"
+	PolarityHypothetical Polarity = "hypothetical"
+	// PolarityReported — somebody else said it. `John said: "I live in London."`
+	PolarityReported Polarity = "reported"
+)
+
+// Asserts reports whether a claim with this polarity may become a fact.
+//
+// Written as an allowlist of one rather than a denylist of four, because the failure mode of a
+// denylist is a value nobody anticipated passing through — and the values here come from a model,
+// which is precisely where an unanticipated value comes from.
+func (p Polarity) Asserts() bool { return p == PolarityAsserted }
 
 // RejectedClaim is a proposal that did not become a fact, kept with the words that were proposed.
 //

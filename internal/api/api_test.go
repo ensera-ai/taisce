@@ -398,7 +398,7 @@ func (scriptedModel) Propose(_ context.Context, message domain.Message, _ domain
 		return nil, nil
 	}
 	return []extract.Proposal{
-		{Subject: "the user", Predicate: "works_at", Object: "Ensera",
+		{Subject: "the user", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera",
 			Statement: "The user works at Ensera.", Confidence: 0.9, Quote: "I work at Ensera"},
 		{Subject: "the user", Predicate: "lives_in", Object: "Dublin",
 			Statement: "The user lives in Dublin.", Confidence: 0.9, Quote: "I live in Dublin"},

@@ -26,12 +26,17 @@ computed on your own substrate rather than asserted by somebody you have to trus
 
 ## Running it
 
-One machine, one command. Measured cold-to-serving: **15 seconds**, and a first memory formed **27
-seconds** after that on a local model.
+One machine, one command.
 
 ```
 docker compose up
 ```
+
+On the laptop this was written on, that reached a serving instance in about fifteen seconds and
+formed its first memory about half a minute later. **Those are setup timings, not performance
+numbers** — the second is almost entirely a 35B model on a laptop GPU, and it says nothing about how
+this system behaves under load. No latency target, throughput target or corpus size has been agreed,
+and none will be quoted here until it has been measured somewhere that can measure it.
 
 That brings up PostgreSQL, applies every migration, creates a project, mints a credential and serves
 on `:8080`. The credential is printed once by the bootstrap step:

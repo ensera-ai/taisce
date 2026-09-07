@@ -137,6 +137,9 @@ func parseProposals(content string) ([]extract.Proposal, error) {
 			Quote:       c.Quote,
 			SubjectType: c.SubjectType,
 			ObjectType:  c.ObjectType,
+			// Passed through as the model said it, including empty. The extractor decides what an
+			// unrecognised value means; this package proposes and does not judge.
+			Polarity: domain.Polarity(c.Polarity),
 		})
 	}
 	return proposals, nil
@@ -206,6 +209,7 @@ type claimEnvelope struct {
 		Quote       string  `json:"quote"`
 		SubjectType string  `json:"subject_type"`
 		ObjectType  string  `json:"object_type"`
+		Polarity    string  `json:"polarity"`
 	} `json:"claims"`
 }
 

@@ -58,7 +58,7 @@ func TestTheVocabularyIsRenderedWhereTheFileMarksIt(t *testing.T) {
 // removing is the one whose absence produces no error and no visible change until somebody plants
 // a fact.
 func TestAFileMissingASectionIsRefused(t *testing.T) {
-	for _, section := range []string{"task", "relations", "quote_rule", "reply_shape", "data_boundary"} {
+	for _, section := range []string{"task", "relations", "quote_rule", "polarity", "reply_shape", "data_boundary"} {
 		t.Run(section, func(t *testing.T) {
 			_, err := loadPrompt([]byte(withoutSection(section)))
 			if err == nil {
@@ -151,6 +151,8 @@ relations: |-
   {{relations}}
 quote_rule: |-
   Quote exactly.
+polarity: |-
+  Say what the message does with it.
 reply_shape: |-
   Reply with JSON.
 data_boundary: |-

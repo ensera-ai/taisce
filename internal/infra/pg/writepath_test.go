@@ -1074,3 +1074,39 @@ func TestABlankEndIsUnresolvedRatherThanRefused(t *testing.T) {
 		t.Fatal("whitespace resolved to an entity, which puts a node named nothing in the graph")
 	}
 }
+
+// The fourth refusal reason is one the schema admits, and the set is still closed.
+//
+// Widening a check constraint and dropping it look identical from Go, so both directions are
+// asserted: every reason the code names must store, and a reason nobody has heard of must not.
+func TestAClaimTheMessageDidNotAssertIsStorableAsARefusal(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_notasserted")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I do not live in London."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := facts.Reject(ctx, schema, "p1", stored.ID, "subject-1", domain.RejectedClaim{
+		Predicate: "lives_in", Statement: "The user lives in London.",
+		Quote: "I do not live in London", Reason: domain.ReasonNotAsserted,
+	}); err != nil {
+		t.Fatalf("the schema refused a reason the code writes: %v", err)
+	}
+
+	// The words survive, which is what makes a refusal auditable: somebody asking why a relation is
+	// missing from memory can read exactly what was proposed and why it was declined.
+	var quote, reason string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT quote, reason FROM {schema}.rejected_claim`)).Scan(&quote, &reason); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if quote != "I do not live in London" || reason != domain.ReasonNotAsserted {
+		t.Fatalf("the refusal lost what was proposed: %q / %q", quote, reason)
+	}
+}

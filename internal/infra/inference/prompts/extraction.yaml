@@ -46,17 +46,59 @@ quote_rule: |-
   relation because it is probably true. Most messages assert nothing at all, and an empty list is the
   correct answer far more often than not.
 
+# What the message DOES with the relation, which is not the same as whether the words are present.
+#
+# The measured failure this exists for: `I do not live in London.` produced `lives_in(I, London)` on
+# some attempts, with a quote that verified exactly — because the words really are in the message.
+# The span rule cannot help here; it is a rule about citation, and a denial cites perfectly.
+#
+# The wording asks for a judgement rather than a detection, because that is what the model is for and
+# because a list of negation words in the code would be a rule that a sentence can walk around. What
+# the code does with the answer is not negotiable and is not here: anything other than `asserted` is
+# refused and written down, and an omitted value is refused too.
+polarity: |-
+  SAY WHAT THE MESSAGE DOES WITH EACH RELATION.
+
+  Every claim carries a "polarity" field. It is not about whether you believe the relation, and not
+  about how clearly it is written. It is about what this message does with it:
+
+    asserted      the message states it as being so
+                  "I live in Dublin."  "Marta manages the Cork team."
+    denied        the message says it is not so
+                  "I do not live in London."  "I have never worked at Acme."
+    uncertain     the message hedges, guesses, or reports it as possible
+                  "I think John works at Acme."  "John may live in Amman."
+    hypothetical  the message supposes it, or makes it depend on something that has not happened
+                  "If I moved to Amman..."  "Were I to join Acme..."
+    reported      somebody else said it and this message is repeating them
+                  John said: "I live in London."
+
+  A relation is not asserted merely because the words appear. "I do not live in London" contains the
+  words "live in London" and denies them. Report that as denied, with the quote that shows the
+  denial, and let the reader decide what to do with it.
+
+  A STATED PLAN IS ASSERTED, and the relation is the intention rather than the outcome. "I will move
+  to Germany next year" does not assert that the person lives in Germany — they do not — but it does
+  assert that they intend to move. Report the intention with `intends_to` and polarity `asserted`.
+  Only a supposition that depends on something which has not happened is hypothetical.
+
+  When more than one applies, choose the one furthest from asserted. A reported hedge is reported.
+
+  If you are unsure, do not guess "asserted".
+
 # The reply contract, which the parse depends on.
 reply_shape: |-
   Reply with JSON only, in this shape:
 
   {"claims": [{"subject": "...", "predicate": "...", "object": "...", "statement": "...",
-               "confidence": 0.0, "quote": "...", "subject_type": "...", "object_type": "..."}]}
+               "confidence": 0.0, "quote": "...", "polarity": "...",
+               "subject_type": "...", "object_type": "..."}]}
 
     subject, object   the two ends, named as the message names them
     statement         the claim as one plain sentence a person would read
     confidence        0 to 1, how certain you are the message says this
     quote             the exact stretch of the message, copied
+    polarity          asserted, denied, uncertain, hypothetical or reported
     subject_type      person, organisation, place, time, value or thing; omit if unsure
 
   If the message asserts nothing, reply {"claims": []}.

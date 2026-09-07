@@ -32,6 +32,12 @@ type Proposal struct {
 	// what is stored is the text found in the message, which is the only string a byte span can
 	// honestly index.
 	Quote string
+	// Polarity is what the message does with the relation: states it, denies it, hedges it, supposes
+	// it, or reports somebody else saying it. Only the first becomes a fact.
+	//
+	// An empty value is not "asserted". It means the model did not answer, and a claim nobody has
+	// decided the polarity of is refused — see the reasoning at the refusal site.
+	Polarity domain.Polarity
 }
 
 // Model proposes claims for one message.
@@ -105,6 +111,25 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 		start, end, found := Locate(message.Content, p.Quote)
 		if !found {
 			out.Rejected = append(out.Rejected, reject(p, domain.ReasonUnlocatableQuote, message.Ordinal))
+			continue
+		}
+
+		// Before the duplicate check, because a claim the message never asserted is not a repeat of
+		// anything — recording it as a duplicate would put the wrong reason on the row and make the
+		// counts that drive different responses agree when they should not.
+		//
+		// # Why an empty polarity is refused rather than assumed
+		//
+		// Rule 8: every default is chosen for what happens when something upstream forgets. The
+		// thing upstream here is a model, and the forgetting is routine — a field omitted, a value
+		// spelled differently, a reply shaped by a provider that ignores the request. Treating
+		// absence as "asserted" would mean every one of those writes a fact nobody vouched for, on
+		// the path where a false fact is indistinguishable from a true one.
+		//
+		// So the allowlist is one value long. Anything else, including nothing, is written down and
+		// not admitted.
+		if !p.Polarity.Asserts() {
+			out.Rejected = append(out.Rejected, reject(p, domain.ReasonNotAsserted, message.Ordinal))
 			continue
 		}
 
