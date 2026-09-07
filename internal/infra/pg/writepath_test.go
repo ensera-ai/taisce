@@ -656,10 +656,16 @@ func TestEveryRefusalReasonTheCodeNamesIsOneTheSchemaAdmits(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
+	// Every reason the code names, not a sample of them: the point of this test is that the constraint
+	// and the constants cannot disagree, and a list holding half the constants would let the other
+	// half disagree quietly.
 	for _, reason := range []string{
 		domain.ReasonUnmappedRelation,
 		domain.ReasonUnlocatableQuote,
 		domain.ReasonDuplicateClaim,
+		domain.ReasonNotAsserted,
+		domain.ReasonUnresolvableSubject,
+		domain.ReasonNotCurrent,
 	} {
 		if err := facts.Reject(ctx, schema, "p1", stored.ID, "subject-1", domain.RejectedClaim{
 			Predicate: "works_at", Statement: "The user works at Ensera.",

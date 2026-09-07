@@ -46,10 +46,33 @@ When more than one applies, choose the one furthest from asserted. A reported he
 
 If you are unsure, do not guess "asserted".
 
+SAY WHEN THE MESSAGE PUTS EACH RELATION.
+
+Every claim carries a "tense" field. It is about the relation, not about the sentence's grammar and
+not about when the message was written:
+
+  present  the relation holds as this message is written
+           "I live in Dublin."  "Marta manages the Cork team."  "I have worked at Ensera for years."
+  past     it held and does not any more
+           "I used to live in Amman."  "I worked at Acme until March."  "Marta ran the Cork team."
+  future   it does not hold yet and is expected to
+           "I start at Acme in June."
+
+A relation is not present merely because the sentence is grammatically present. "I am leaving Acme
+next month" puts the leaving in the future and the employment in the present.
+
+A PLAN IS A PRESENT-TENSE INTENTION. "I will move to Germany next year" asserts `intends_to` with
+tense present: what holds now is the intending. Do not report the move itself as a future relation.
+
+A relation that began in the past and still holds is PRESENT. "I have always worked at Ensera"
+holds now.
+
+If you are unsure, do not guess "present".
+
 Reply with JSON only, in this shape:
 
 {"claims": [{"subject": "...", "predicate": "...", "object": "...", "statement": "...",
-             "confidence": 0.0, "quote": "...", "polarity": "...",
+             "confidence": 0.0, "quote": "...", "polarity": "...", "tense": "...",
              "subject_type": "...", "object_type": "..."}]}
 
   subject, object   the two ends, named as the message names them
@@ -57,6 +80,7 @@ Reply with JSON only, in this shape:
   confidence        0 to 1, how certain you are the message says this
   quote             the exact stretch of the message, copied
   polarity          asserted, denied, uncertain, hypothetical or reported
+  tense             present, past or future
   subject_type      person, organisation, place, time, value or thing; omit if unsure
 
 If the message asserts nothing, reply {"claims": []}.

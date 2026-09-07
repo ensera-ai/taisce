@@ -545,9 +545,13 @@ func (scriptedModel) Propose(_ context.Context, message domain.Message, _ domain
 		return nil, nil
 	}
 	return []extract.Proposal{
-		{Subject: "the user", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera",
+		{Subject: "the user", Predicate: "works_at", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Ensera",
 			Statement: "The user works at Ensera.", Confidence: 0.9, Quote: "I work at Ensera"},
+		// Both proposals carry a polarity and a tense. The second carried neither for a while and was
+		// silently refused on every run, so the journey it drives formed one fact while reading as
+		// though it formed two — a fixture weaker than it looks is worse than a missing one.
 		{Subject: "the user", Predicate: "lives_in", Object: "Dublin",
+			Polarity: domain.PolarityAsserted, Tense: domain.TensePresent,
 			Statement: "The user lives in Dublin.", Confidence: 0.9, Quote: "I live in Dublin"},
 	}, nil
 }

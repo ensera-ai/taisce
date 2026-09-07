@@ -6,7 +6,7 @@
 SUBSTRATE_VERSION ?= 0.1.0
 TEST_DSN ?= postgres://postgres:taisce@localhost:55432/taisce?sslmode=disable
 
-.PHONY: substrate db-up db-down test licence signoff version test-inference build contract
+.PHONY: substrate db-up db-down test licence signoff version test-inference golden build contract
 
 substrate:
 	docker build -t taisce-postgres:$(SUBSTRATE_VERSION) deploy/postgres
@@ -76,6 +76,15 @@ signoff:
 #                               not being one.
 test-inference:
 	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v ./internal/infra/inference/
+
+# Rewrite the prompt golden from the prompt file.
+#
+# Run this AFTER test-inference, never instead of it. The golden is what makes a prompt edit visible;
+# the corpus is what says the edit was an improvement rather than a trade nobody priced. Regenerating
+# without measuring turns a failing test into a passing one and changes nothing about the behaviour it
+# was warning about.
+golden:
+	go test ./internal/infra/inference/ -run TestTheComposedPrompt -update-golden -count=1
 
 # What this commit is. x.y.z on the working history, and the x.y.0 it would be released as.
 version:

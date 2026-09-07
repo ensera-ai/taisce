@@ -785,6 +785,57 @@ interval (a historical answer that reads as a current one).
 is the part that is expensive to change later: every superseded row ever written carries a rewritten
 interval, and no migration can recover what those rows said before.
 
+### D55 — Tense is asked separately from polarity, and only the present becomes a fact
+
+A proposal carries a `tense` — present, past or future — and anything but present is refused and kept
+with its words, exactly as a denial is.
+
+**They are independent and both have to be right.** "I do not live in London" is a denial. "I used to
+live in Amman" is an assertion, positive and unhedged, about a period that is over. It passes the
+polarity gate correctly, and what lands is a fact saying the person lives in Amman now. One field
+covering both would make a model choose between two true answers, and whichever it dropped would be
+the one nobody was checking.
+
+**This is the worse of the two presences.** A denial that slips through is a fact about something the
+person went out of their way to call untrue, and it tends to read oddly to whoever sees it. A past
+tense that slips through reads perfectly: it is the answer to "where does this person live", it is
+cited, it is current, and the only thing wrong with it is a date nobody recorded.
+
+**Refused rather than stored with an interval, because only half the interval is knowable.** The
+sentence says the relation ended at or before the message. It says nothing about when it began, and
+`valid` cannot be left unbounded below: every read is a containment test, so an unbounded start
+answers a question about 1990 with yes, on evidence nobody has, and a bounded one is a date this
+system invented and would then cite. The claim is kept in `rejected_claim` with its own reason, so
+nothing is lost, the rate is countable, and the sentences are the corpus a later decision would be
+made against.
+
+**Asked of the model rather than detected in code.** A list of past-tense markers in Go is a rule a
+sentence walks around — "worked at Acme until March" carries none of the obvious ones — and it would
+also misfire on the perfect aspect, where "I have worked at Ensera since 2019" is a current fact. The
+model is asked the question and the code refuses the answer it cannot use, which is the same division
+the polarity gate already draws: the wording is in the prompt file, the refusal is in the code.
+
+**The default is refusal.** An omitted tense is not "present": it is a model that did not answer, and
+the failure of a widening default is that a provider ignoring a field silently writes facts nobody
+vouched for.
+
+**What this deliberately does not do:** using a past tense to close a fact already held. If memory
+holds an open `lives_in(user, Amman)`, this sentence is testimony that it ended and closing the
+interval is the honest response. That needs an evidence model for an ending — the receipt comes from a
+different message than the one that opened the fact — and a read that survives a second evidence row,
+which today's inner join does not. Held in its own issue rather than assumed here.
+
+**Rejected:** one field carrying polarity and tense together (makes a model drop one true answer);
+detecting tense in code (a rule a sentence walks around, and one that breaks the perfect aspect);
+storing a past relation with a fabricated or unbounded start (a date this system invented, cited back
+as evidence); treating an absent tense as present (a widening default on the path where a false fact
+is indistinguishable from a true one).
+
+**How hard to undo.** The refusal is a line, and the claims it refuses are kept — so admitting past
+relations later is a decision made against a corpus rather than from scratch. What is not recoverable
+is the intervals for sentences said while this was in force, because the messages behind them are
+subject to retention like anything else.
+
 ---
 
 ## Substrate

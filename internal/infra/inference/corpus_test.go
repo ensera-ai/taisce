@@ -159,10 +159,25 @@ func corpus() []corpusCase {
 			name:    "a relation that has ended",
 			content: "I used to live in Amman.",
 			mustNot: []string{"lives_in"},
-			pending: "#8",
 			why: "measured surviving the polarity gate, correctly: \"used to live\" IS an assertion, " +
-				"about the past. Tense is not polarity and no gate over it can be — this needs a " +
-				"valid range that has ended, which is #8",
+				"about a period that is over. #100 asks the model for the tense as a separate " +
+				"question and refuses anything but present, so this now measures whether the model " +
+				"answers that question rather than whether it happens to omit the relation",
+		},
+		{
+			name:    "a relation that ended at a named time",
+			content: "I worked at Acme until March.",
+			mustNot: []string{"works_at"},
+			why: "the past tense without \"used to\" — the phrasing a tense rule keyed on wording " +
+				"would miss, and the one a person is most likely to write",
+		},
+		{
+			name:    "a relation that began in the past and still holds",
+			content: "I have worked at Ensera since 2019.",
+			must:    []string{"works_at"},
+			why: "what the tense gate costs if it is read as grammar rather than as the relation: " +
+				"this is present-perfect and it holds now, so refusing it would trade a false fact " +
+				"for a lost true one",
 		},
 		{
 			name:    "a relation that has not started",
@@ -301,10 +316,18 @@ func TestTheExtractionCorpus(t *testing.T) {
 			// than over one draw.
 			everProduced := map[string]string{}
 			producedAtLeastOnce := map[string]int{}
+			// What was refused, and why. Without it a case that produces nothing reads the same
+			// whether the model omitted the relation or proposed it and a gate refused it — which is
+			// the difference between a model that understood the sentence and a mechanism that
+			// caught it, and the only one of the two that survives a model change.
+			refusals := map[string]int{}
 			for attempt := 0; attempt < attempts; attempt++ {
 				result, err := extractor.Extract(ctx, message)
 				if err != nil {
 					t.Fatalf("attempt %d: extract: %v", attempt+1, err)
+				}
+				for _, r := range result.Rejected {
+					refusals[r.Reason+" "+r.Predicate]++
 				}
 				seen := map[string]bool{}
 				for _, claim := range result.Claims {
@@ -338,8 +361,8 @@ func TestTheExtractionCorpus(t *testing.T) {
 				}
 			}
 
-			t.Logf("%s\n  produced over %d attempts: %s\n  why this case exists: %s",
-				c.content, attempts, describe(everProduced), c.why)
+			t.Logf("%s\n  produced over %d attempts: %s\n  refused: %s\n  why this case exists: %s",
+				c.content, attempts, describe(everProduced), describeCounts(refusals), c.why)
 
 			switch {
 			case c.pending == "":
@@ -379,6 +402,24 @@ func TestTheExtractionCorpus(t *testing.T) {
 		t.Logf("PENDING CASES THAT BEHAVED CORRECTLY THIS RUN — check whether the marker can go: %s",
 			strings.Join(fixed, "; "))
 	}
+}
+
+// describeCounts renders what was refused and how often, so a run is readable without opening this
+// file or the extractor.
+func describeCounts(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "(nothing)"
+	}
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+" ×"+strconv.Itoa(counts[k]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func describe(produced map[string]string) string {

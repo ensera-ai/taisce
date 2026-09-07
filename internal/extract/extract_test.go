@@ -117,7 +117,7 @@ func TestEveryReturnedSpanReproducesItsQuote(t *testing.T) {
 			e := extract.New(stubModel{proposals: []extract.Proposal{{
 				Subject: "user", Predicate: tc.predicate, Object: "Dublin",
 				Statement: "The user moved to Dublin.", Confidence: 0.9, Quote: tc.quote,
-				Polarity: domain.PolarityAsserted,
+				Polarity: domain.PolarityAsserted, Tense: domain.TensePresent,
 			}}}, vocabulary(t))
 
 			got, err := e.Extract(context.Background(), message(content))
@@ -162,7 +162,7 @@ func TestEveryReturnedSpanReproducesItsQuote(t *testing.T) {
 func TestTheStoredQuoteIsTheMessagesTextNotTheModels(t *testing.T) {
 	content := "I moved to Dublin\n  last month."
 	e := extract.New(stubModel{proposals: []extract.Proposal{{
-		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Object: "Dublin",
+		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Dublin",
 		Quote: "moved to Dublin last month",
 	}}}, vocabulary(t))
 
@@ -186,7 +186,7 @@ func TestTheStoredQuoteIsTheMessagesTextNotTheModels(t *testing.T) {
 func TestASpanIsCorrectInBytesWhenTheTextIsNotASCII(t *testing.T) {
 	content := "Tá mé i mo chónaí i mBaile Átha Cliath\nfaoi láthair."
 	e := extract.New(stubModel{proposals: []extract.Proposal{{
-		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Object: "Baile Átha Cliath",
+		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Baile Átha Cliath",
 		Quote: "i mo chónaí i mBaile Átha Cliath faoi láthair",
 	}}}, vocabulary(t))
 
@@ -240,7 +240,7 @@ func TestAModelFailureIsAnError(t *testing.T) {
 func TestTheVocabularyTypesTheObjectWhenTheModelDidNot(t *testing.T) {
 	content := "The review is scheduled for Friday."
 	e := extract.New(stubModel{proposals: []extract.Proposal{{
-		Subject: "the review", Predicate: "scheduled_for", Polarity: domain.PolarityAsserted, Object: "Friday",
+		Subject: "the review", Predicate: "scheduled_for", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Friday",
 		Quote: "scheduled for Friday",
 	}}}, vocabulary(t))
 
@@ -263,7 +263,7 @@ func TestTheVocabularyTypesTheObjectWhenTheModelDidNot(t *testing.T) {
 // enough to accept this is wide enough to accept a sentence the model composed.
 func TestAQuoteThatChangedCaseIsRefused(t *testing.T) {
 	e := extract.New(stubModel{proposals: []extract.Proposal{{
-		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Object: "Dublin", Quote: "i moved to dublin",
+		Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Dublin", Quote: "i moved to dublin",
 	}}}, vocabulary(t))
 
 	got, err := e.Extract(context.Background(), message("I moved to Dublin last month."))
@@ -289,8 +289,8 @@ func TestAQuoteThatChangedCaseIsRefused(t *testing.T) {
 func TestARelationAssertedTwiceInOneMessageIsOneClaim(t *testing.T) {
 	content := "I work at Ensera. Yes, Ensera — I work at Ensera."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
-		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera", Quote: "I work at Ensera"},
-		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera.", Polarity: domain.PolarityAsserted},
+		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera.", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -317,8 +317,8 @@ func TestARelationAssertedTwiceInOneMessageIsOneClaim(t *testing.T) {
 func TestARepeatIsFoundThroughTheSameNormalisationEntitiesUse(t *testing.T) {
 	content := "I work at Ensera. I work at  ENSERA  as it happens."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
-		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera", Quote: "I work at Ensera"},
-		{Subject: "i", Predicate: "works_at", Object: "  ENSERA  ", Quote: "I work at  ENSERA ", Polarity: domain.PolarityAsserted},
+		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "i", Predicate: "works_at", Object: "  ENSERA  ", Quote: "I work at  ENSERA ", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -333,9 +333,9 @@ func TestARepeatIsFoundThroughTheSameNormalisationEntitiesUse(t *testing.T) {
 func TestDifferentRelationsAndDifferentEndsAreNotRepeats(t *testing.T) {
 	content := "I work at Ensera, I live in Dublin, and I work at Acme too."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
-		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera", Quote: "I work at Ensera"},
-		{Subject: "I", Predicate: "lives_in", Object: "Dublin", Quote: "I live in Dublin", Polarity: domain.PolarityAsserted},
-		{Subject: "I", Predicate: "works_at", Object: "Acme", Quote: "I work at Acme", Polarity: domain.PolarityAsserted},
+		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "lives_in", Object: "Dublin", Quote: "I live in Dublin", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
+		{Subject: "I", Predicate: "works_at", Object: "Acme", Quote: "I work at Acme", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -353,8 +353,8 @@ func TestDifferentRelationsAndDifferentEndsAreNotRepeats(t *testing.T) {
 func TestARepeatWithAnInventedQuoteIsRefusedAsUncitable(t *testing.T) {
 	content := "I work at Ensera."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
-		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera", Quote: "I work at Ensera"},
-		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "employed by Ensera", Polarity: domain.PolarityAsserted},
+		{Subject: "I", Predicate: "works_at", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Ensera", Quote: "I work at Ensera"},
+		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "employed by Ensera", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -464,9 +464,9 @@ func TestAnAssertedClaimStillBecomesAFact(t *testing.T) {
 	content := "I live in Dublin and I work at Ensera."
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
 		{Subject: "I", Predicate: "lives_in", Object: "Dublin", Quote: "I live in Dublin",
-			Polarity: domain.PolarityAsserted},
+			Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 		{Subject: "I", Predicate: "works_at", Object: "Ensera", Quote: "I work at Ensera",
-			Polarity: domain.PolarityAsserted},
+			Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 	}}, vocabulary(t)).Extract(context.Background(), message(content))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -499,7 +499,7 @@ func TestASubjectThatNamesNothingIsRefused(t *testing.T) {
 		result, err := extract.NewWith(&stubModel{proposals: []extract.Proposal{
 			{Subject: subject, Predicate: "lives_in", Object: "Dublin",
 				Statement: "It lives in Dublin.", Quote: "that worked perfectly",
-				Polarity: domain.PolarityAsserted},
+				Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 		}}, v).Extract(context.Background(), message(content))
 		if err != nil {
 			t.Fatalf("extract: %v", err)
@@ -524,7 +524,7 @@ func TestAPronounSubjectIsRefusedForNamingNothingRatherThanForItsQuote(t *testin
 	// A quote that is NOT in the message, so both checks would fire. The subject one runs first.
 	result, err := extract.NewWith(&stubModel{proposals: []extract.Proposal{
 		{Subject: "that", Predicate: "lives_in", Object: "Dublin",
-			Quote: "a quote that was never in the message", Polarity: domain.PolarityAsserted},
+			Quote: "a quote that was never in the message", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 	}}, v).Extract(context.Background(), message("Thanks, that worked perfectly."))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -543,7 +543,7 @@ func TestARealSubjectIsNotRefused(t *testing.T) {
 	for _, subject := range []string{"Marta", "the user", "Ensera", "Italy", "Ito"} {
 		result, err := extract.NewWith(&stubModel{proposals: []extract.Proposal{
 			{Subject: subject, Predicate: "works_at", Object: "Ensera",
-				Quote: "I work at Ensera", Polarity: domain.PolarityAsserted},
+				Quote: "I work at Ensera", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 		}}, v).Extract(context.Background(), message("I work at Ensera."))
 		if err != nil {
 			t.Fatalf("extract: %v", err)
@@ -562,12 +562,119 @@ func TestARealSubjectIsNotRefused(t *testing.T) {
 func TestAnExtractorWithNoTermSetStillWorks(t *testing.T) {
 	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
 		{Subject: "that", Predicate: "works_at", Object: "Ensera",
-			Quote: "I work at Ensera", Polarity: domain.PolarityAsserted},
+			Quote: "I work at Ensera", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
 	}}, vocabulary(t)).Extract(context.Background(), message("I work at Ensera."))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
 	if len(result.Claims) != 1 {
 		t.Fatal("an extractor with no term set refused a claim")
+	}
+}
+
+// ── #100: a relation the message puts in the past ─────────────────────────────────────────────
+//
+// "I used to live in Amman." asserts the relation — positively, not hedged, not reported — so every
+// check before this one passes and the fact that lands says the person lives there now. It is the
+// second refusal whose alternative is a false fact rather than a missing one, and the worse of the
+// two: a denial that slips through reads oddly, and this one reads perfectly.
+func TestARelationThePastHoldsIsRefusedRatherThanStoredAsCurrent(t *testing.T) {
+	content := "I used to live in Amman. I start at Acme in June."
+
+	for name, tense := range map[string]domain.Tense{
+		"past":   domain.TensePast,
+		"future": domain.TenseFuture,
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+				{Subject: "I", Predicate: "lives_in", Object: "Amman",
+					Statement: "The user lives in Amman.", Quote: "I used to live in Amman",
+					Polarity: domain.PolarityAsserted, Tense: tense},
+			}}, vocabulary(t)).Extract(context.Background(), message(content))
+			if err != nil {
+				t.Fatalf("extract: %v", err)
+			}
+			if len(result.Claims) != 0 {
+				t.Fatalf("a %s relation became a currently-valid fact: %+v", name, result.Claims[0])
+			}
+			if len(result.Rejected) != 1 || result.Rejected[0].Reason != domain.ReasonNotCurrent {
+				t.Fatalf("wanted one not_current refusal, got %+v", result.Rejected)
+			}
+			// The words are kept. A refused claim nobody can read is a rate with nothing behind it,
+			// and this is the corpus a later decision about intervals would be made against.
+			if result.Rejected[0].Quote == "" {
+				t.Fatal("the refusal did not keep the sentence it refused")
+			}
+		})
+	}
+}
+
+// A tense the model did not give, or gave a value nobody recognises, is refused.
+//
+// The same argument as the polarity default and the same failure it prevents: the thing upstream is a
+// model, forgetting a field is routine, and treating absence as "present" would write a fact nobody
+// vouched for on the one path where a false one is indistinguishable from a true one.
+func TestAnAbsentOrUnrecognisedTenseIsRefusedRatherThanAssumed(t *testing.T) {
+	content := "I live in Dublin."
+	for name, tense := range map[string]domain.Tense{
+		"absent":       "",
+		"unrecognised": "ongoing",
+		"wrong case":   "Present",
+		"close":        "present tense",
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+				{Subject: "I", Predicate: "lives_in", Object: "Dublin",
+					Statement: "The user lives in Dublin.", Quote: "I live in Dublin",
+					Polarity: domain.PolarityAsserted, Tense: tense},
+			}}, vocabulary(t)).Extract(context.Background(), message(content))
+			if err != nil {
+				t.Fatalf("extract: %v", err)
+			}
+			if len(result.Claims) != 0 {
+				t.Fatalf("%q was treated as present: %+v", tense, result.Claims[0])
+			}
+			if result.Rejected[0].Reason != domain.ReasonNotCurrent {
+				t.Fatalf("refused as %q", result.Rejected[0].Reason)
+			}
+		})
+	}
+}
+
+// The tense check runs after polarity, so a denial about the past is recorded as the denial it is.
+//
+// The counts drive different responses — a rising not_asserted is a model reading modality badly, a
+// rising not_current is a corpus about the past — and a refusal filed under the wrong reason makes
+// them agree when they should not.
+func TestADeniedPastTenseIsRefusedForTheDenial(t *testing.T) {
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "I", Predicate: "works_at", Object: "Acme",
+			Statement: "The user works at Acme.", Quote: "I never worked at Acme",
+			Polarity: domain.PolarityDenied, Tense: domain.TensePast},
+	}}, vocabulary(t)).Extract(context.Background(), message("I never worked at Acme."))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Rejected) != 1 || result.Rejected[0].Reason != domain.ReasonNotAsserted {
+		t.Fatalf("wanted the denial recorded as the denial, got %+v", result.Rejected)
+	}
+}
+
+// And a relation that began in the past and holds now is present, so the gate costs nothing here.
+//
+// This is what a tense rule keyed on grammar would break: "I have worked at Ensera since 2019" is
+// perfect aspect and a current fact, and refusing it would trade a false fact for a lost true one.
+func TestARelationThatBeganInThePastAndStillHoldsIsAFact(t *testing.T) {
+	content := "I have worked at Ensera since 2019."
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "I", Predicate: "works_at", Object: "Ensera",
+			Statement: "The user works at Ensera.", Quote: "I have worked at Ensera",
+			Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
+	}}, vocabulary(t)).Extract(context.Background(), message(content))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Claims) != 1 {
+		t.Fatalf("a relation that holds now was refused: %+v", result.Rejected)
 	}
 }

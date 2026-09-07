@@ -27,7 +27,7 @@ func (erasureModel) Propose(_ context.Context, message domain.Message, _ domain.
 		{"Tomas works at Ensera", "works_at", "Tomas", "Ensera"},
 	} {
 		if i := strings.Index(message.Content, p.phrase); i >= 0 {
-			out = append(out, extract.Proposal{Polarity: domain.PolarityAsserted,
+			out = append(out, extract.Proposal{Polarity: domain.PolarityAsserted, Tense: domain.TensePresent,
 				Subject: p.subject, Predicate: p.predicate, Object: p.object,
 				Statement: p.phrase + ".", Confidence: 0.9,
 				Quote: message.Content[i : i+len(p.phrase)],
@@ -38,7 +38,7 @@ func (erasureModel) Propose(_ context.Context, message domain.Message, _ domain.
 		// Refused by the vocabulary, so the erasure has a rejected_claim to remove as well — the
 		// projection that is easiest to forget, because it holds what was NOT stored as a fact.
 		out = append(out, extract.Proposal{
-			Subject: "Marta", Predicate: "cycles_to", Polarity: domain.PolarityAsserted, Object: "work",
+			Subject: "Marta", Predicate: "cycles_to", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "work",
 			Statement: "Marta cycles to work.", Quote: "cycles to work",
 		})
 	}

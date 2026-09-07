@@ -69,14 +69,14 @@ func (scriptedModel) Propose(_ context.Context, message domain.Message, _ domain
 	var out []extract.Proposal
 	if i := strings.Index(message.Content, "work at Ensera"); i >= 0 {
 		out = append(out, extract.Proposal{
-			Subject: "user", Predicate: "works_at", Polarity: domain.PolarityAsserted, Object: "Ensera",
+			Subject: "user", Predicate: "works_at", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Ensera",
 			Statement: "The user works at Ensera.", Confidence: 0.9,
 			Quote: message.Content[i : i+len("work at Ensera")],
 		})
 	}
 	if i := strings.Index(message.Content, "love Dublin"); i >= 0 {
 		out = append(out, extract.Proposal{
-			Subject: "user", Predicate: "prefers", Polarity: domain.PolarityAsserted, Object: "Dublin",
+			Subject: "user", Predicate: "prefers", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Dublin",
 			Statement: "The user likes Dublin.", Confidence: 0.6,
 			Quote: message.Content[i : i+len("love Dublin")],
 		})
@@ -84,7 +84,7 @@ func (scriptedModel) Propose(_ context.Context, message domain.Message, _ domain
 	if strings.Contains(message.Content, "commutes by bicycle") {
 		out = append(out, extract.Proposal{
 			// Not in the vocabulary. Refused before the span is considered.
-			Subject: "user", Predicate: "commutes_by", Polarity: domain.PolarityAsserted, Object: "bicycle",
+			Subject: "user", Predicate: "commutes_by", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "bicycle",
 			Statement: "The user commutes by bicycle.", Quote: "commutes by bicycle",
 		})
 	}

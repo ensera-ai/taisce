@@ -95,7 +95,7 @@ func (scriptedModel) Propose(_ context.Context, message domain.Message, _ domain
 		{"I live in Cork", "lives_in", "user", "Cork"},
 	} {
 		if i := strings.Index(message.Content, p.phrase); i >= 0 {
-			out = append(out, extract.Proposal{Polarity: domain.PolarityAsserted,
+			out = append(out, extract.Proposal{Polarity: domain.PolarityAsserted, Tense: domain.TensePresent,
 				Subject: p.subject, Predicate: p.predicate, Object: p.object,
 				Statement: p.phrase + ".", Confidence: 0.9,
 				Quote: message.Content[i : i+len(p.phrase)],

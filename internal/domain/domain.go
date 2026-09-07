@@ -500,6 +500,18 @@ const (
 	// verbatim quote and an exact span. Every check in the path is about form, and this one is about
 	// whether there is anything to be about.
 	ReasonUnresolvableSubject = "unresolvable_subject"
+	// ReasonNotCurrent — the message asserts the relation and puts it in the past. "I used to live
+	// in Amman."
+	//
+	// Refused rather than stored, because storing it means inventing an interval. What the sentence
+	// licenses is that the relation ended somewhere at or before this message; it says nothing about
+	// when it began, and `valid` cannot be left unbounded below — every read is containment, so an
+	// unbounded start answers "did they live there in 1990" with yes, on evidence nobody has.
+	//
+	// The second refusal whose alternative is a FALSE fact rather than a missing one, and the worse
+	// of the two: a denial at least reads as absent, while this would come back as the answer to
+	// "where do they live" with a verbatim quote behind it.
+	ReasonNotCurrent = "not_current"
 )
 
 // Vocabulary is the closed sets an extractor is given, read from the tables that enforce them.
@@ -546,6 +558,37 @@ const (
 // denylist is a value nobody anticipated passing through — and the values here come from a model,
 // which is precisely where an unanticipated value comes from.
 func (p Polarity) Asserts() bool { return p == PolarityAsserted }
+
+// Tense is when the message puts the relation. The set is closed, and only one value becomes a fact.
+//
+// # Why this is separate from polarity
+//
+// They are independent and both have to be right. "I do not live in London" is asserted-about-nothing;
+// "I used to live in Amman" is asserted, positively, about a period that is over. A single field
+// mixing them would make a model choose between two true answers, and the one it dropped would be the
+// one nobody was checking.
+type Tense string
+
+const (
+	// TensePresent — the relation holds as the message is written. "I live in Dublin."
+	TensePresent Tense = "present"
+	// TensePast — it held and does not now. "I used to work at Acme."
+	TensePast Tense = "past"
+	// TenseFuture — it is expected to hold and does not yet. "I am moving to Berlin in March."
+	//
+	// A stated plan is a present-tense intention rather than a future-tense relation: what holds now
+	// is the intending. This value is for a model that reports the relation itself as future, and it
+	// is refused for the same reason the past is — the date it would start is one nobody has.
+	TenseFuture Tense = "future"
+)
+
+// IsCurrent reports whether a relation with this tense may become a currently-valid fact.
+//
+// An allowlist of one, for the reason the polarity allowlist is one long: the values arrive from a
+// model, which is exactly where an unanticipated value comes from, and the failure of a denylist is
+// the value nobody anticipated passing through. An omitted tense is not "present" — it is a model
+// that did not answer, and a fact nobody vouched for is the thing this refuses to write.
+func (t Tense) IsCurrent() bool { return t == TensePresent }
 
 // RejectedClaim is a proposal that did not become a fact, kept with the words that were proposed.
 //

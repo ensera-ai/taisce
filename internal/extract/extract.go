@@ -41,6 +41,12 @@ type Proposal struct {
 	// An empty value is not "asserted". It means the model did not answer, and a claim nobody has
 	// decided the polarity of is refused — see the reasoning at the refusal site.
 	Polarity domain.Polarity
+	// Tense is when the message puts the relation: now, over, or not yet. Only the first becomes a
+	// fact, and an empty value is refused for the same reason an empty polarity is.
+	//
+	// Separate from polarity because they are independent and both have to be right: "I used to live
+	// in Amman" is asserted, positively, about a period that is over.
+	Tense domain.Tense
 }
 
 // Model proposes claims for one message.
@@ -153,6 +159,26 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 		// not admitted.
 		if !p.Polarity.Asserts() {
 			out.Rejected = append(out.Rejected, reject(p, domain.ReasonNotAsserted, message.Ordinal))
+			continue
+		}
+
+		// And then when the message puts it. A past tense passes every check above: the relation is
+		// admitted, the subject is real, the quote is verbatim, and the polarity is asserted —
+		// because "I used to live in Amman" does assert the relation. What it also says is that the
+		// relation is over, and a fact written from it is the answer to "where do they live" with a
+		// verbatim quote behind it.
+		//
+		// Refused rather than stored with an interval, because only half the interval is knowable:
+		// the sentence says it ended at or before this message and says nothing about when it began.
+		// Every read is a containment test, so an unbounded start answers a question about 1990 with
+		// yes, and a bounded one is a date this system invented.
+		//
+		// After polarity, so a denied past tense is recorded as the denial it is. The counts drive
+		// different responses — a rising not_asserted is a model reading modality badly, a rising
+		// not_current is a corpus about the past — and a refusal filed under the wrong reason makes
+		// them agree when they should not.
+		if !p.Tense.IsCurrent() {
+			out.Rejected = append(out.Rejected, reject(p, domain.ReasonNotCurrent, message.Ordinal))
 			continue
 		}
 
