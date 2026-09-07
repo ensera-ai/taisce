@@ -1,85 +1,87 @@
 # Taisce Individual Contributor License Agreement
 
-> **This text is derived from the Apache Software Foundation's Individual Contributor License
-> Agreement v2.0 and adapted for Ensera. It has not been reviewed by a lawyer. It must be before this
-> repository accepts an external contribution.**
+> **Not legal advice, and not final.** This text is modelled on the short, plain-language contributor
+> agreements used by Microsoft's open-source projects. It must be reviewed by a lawyer qualified in
+> Jordan before this repository accepts an external contribution. Two questions are flagged for that
+> review in [`review-notes.md`](review-notes.md).
 
-Thank you for your interest in Taisce, a project of **Ensera** ("Ensera"). This agreement clarifies
-the intellectual property licence granted with Contributions from any person or entity, and protects
-you as much as it protects Ensera: it is a licence, not a transfer of ownership, and **you keep the
-copyright in everything you write**.
+Thank you for contributing to Taisce.
 
-You accept and agree to the following terms for your present and future Contributions to Taisce.
-Except for the licences granted here, you reserve all right, title and interest in your Contributions.
+This agreement records the terms on which you contribute. **You keep the copyright in everything you
+write** — this is a licence, not a transfer of ownership.
 
-## 1. Definitions
+You accept these terms for your present and future Contributions to Taisce.
 
-**"You"** means the copyright owner, or the legal entity authorised by the copyright owner, entering
-into this agreement with Ensera.
+## 1. What the words mean
 
-**"Contribution"** means any original work of authorship, including any modification to or addition to
-an existing work, that is intentionally submitted by You to Ensera for inclusion in, or documentation
-of, any of the products owned or managed by Ensera. "Submitted" means any form of electronic, verbal
-or written communication sent to Ensera or its representatives, including but not limited to
-communication on source code repositories, issue trackers and mailing lists managed by or on behalf of
-Ensera — excluding communication conspicuously marked or otherwise designated in writing by You as
-"Not a Contribution".
+**"Ensera"** means Baserat Al Mustaqbal, an establishment registered in Jordan, trading as Ensera.
+
+**"You"** means the copyright owner, or a legal entity authorised by the copyright owner, agreeing to
+these terms.
+
+**"Contribution"** means any work of authorship you intentionally submit to Ensera for inclusion in
+Taisce — code, documentation, or anything else — including changes to work already there.
+
+**"Submit"** means to send it by any means to Ensera or its representatives, including through the
+project's repository, issues and discussions. It does not include anything you clearly mark as "Not a
+Contribution".
 
 ## 2. Copyright licence
 
-You grant to Ensera, and to recipients of software distributed by Ensera, a perpetual, worldwide,
-non-exclusive, no-charge, royalty-free, irrevocable copyright licence to reproduce, prepare derivative
-works of, publicly display, publicly perform, sublicense and distribute Your Contributions and such
-derivative works.
+You grant Ensera, and everyone who receives software distributed by Ensera, a perpetual, worldwide,
+non-exclusive, royalty-free, irrevocable licence to reproduce, modify, publicly display, publicly
+perform, sublicense and distribute your Contribution and works derived from it.
 
-**This licence permits Ensera to distribute Your Contribution under terms other than the licence the
-project currently uses**, including as part of a commercially licensed edition. Ensera's stated
-intention is to publish Taisce under the Apache License 2.0; this agreement does not bind Ensera to
-that, and you should not sign it unless you are content with that possibility.
+**This licence allows Ensera to distribute your Contribution under terms other than the licence the
+project uses today**, including as part of a commercially licensed edition.
+
+Ensera's stated intention is that Taisce is and remains open source under the Apache License 2.0. This
+agreement does not oblige Ensera to that. **Read this section before signing, and do not sign if that
+possibility is not acceptable to you.**
 
 ## 3. Patent licence
 
-You grant to Ensera, and to recipients of software distributed by Ensera, a perpetual, worldwide,
-non-exclusive, no-charge, royalty-free, irrevocable (except as stated below) patent licence to make,
-have made, use, offer to sell, sell, import and otherwise transfer the Work. This licence applies only
-to those patent claims licensable by You that are necessarily infringed by Your Contribution alone or
-by combination of Your Contribution with the Work to which it was submitted.
+You grant Ensera, and everyone who receives software distributed by Ensera, a perpetual, worldwide,
+non-exclusive, royalty-free, irrevocable patent licence to make, use, sell, offer to sell, import and
+otherwise transfer your Contribution. This covers only the patent claims you can license that your
+Contribution infringes, alone or in combination with the project it was submitted to.
 
-If any entity institutes patent litigation against You or any other entity alleging that Your
-Contribution, or the Work to which You contributed, constitutes direct or contributory patent
-infringement, then any patent licences granted to that entity under this agreement for that
-Contribution or Work terminate as of the date such litigation is filed.
+If you begin patent litigation against anyone alleging that the project, or a Contribution to it,
+infringes a patent, the patent licences granted to you under this agreement end on the day you file.
 
-## 4. You have the right to grant this
+## 4. You are entitled to grant this
 
-You represent that You are legally entitled to grant the above licences. If your employer has rights
-to intellectual property that You create, You represent that You have received permission to make
-Contributions on behalf of that employer, that your employer has waived such rights, or that your
-employer has executed a Corporate Contributor License Agreement with Ensera.
+You confirm that you can legally grant the licences above.
+
+**If your employer has rights to what you create**, you confirm that you have their permission to
+contribute, or that they have waived those rights, or that they have signed the
+[Corporate agreement](corporate.md) and named you on it. If you are unsure whether this applies to
+you, ask your employer before signing — an agreement you were not entitled to make protects nobody,
+including you.
 
 ## 5. It is your own work
 
-You represent that each of Your Contributions is Your original creation. You represent that Your
-Contribution submissions include complete details of any third-party licence or other restriction
-(including, but not limited to, related patents and trademarks) of which You are personally aware and
-which are associated with any part of Your Contributions.
+You confirm that each Contribution is your own creation, and that you have identified anything in it
+that comes from somewhere else, together with any licence, patent or trademark restriction you are
+aware of.
 
-## 6. No obligation of support, and no warranty
+If you want to submit work that is not your own, submit it separately, say where it came from and
+what restrictions apply, and mark it clearly as **"Submitted on behalf of a third party: [name]"**.
 
-You are not expected to provide support for Your Contributions, except to the extent You desire to
-provide support. Unless required by applicable law or agreed to in writing, You provide Your
-Contributions on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT,
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+## 6. No obligation, no warranty
 
-## 7. Contributions you did not author
+You are not expected to support your Contribution, though you are welcome to. Unless the law requires
+it or you agree otherwise in writing, you provide your Contribution **"as is", without warranties or
+conditions of any kind**, express or implied — including any warranty of title, non-infringement,
+merchantability or fitness for a particular purpose.
 
-Should You wish to submit work that is not Your original creation, You may submit it to Ensera
-separately from any Contribution, identifying the complete details of its source and of any licence or
-other restriction of which You are personally aware, and conspicuously marking the work as
-"Submitted on behalf of a third party: [named here]".
+## 7. Tell us if it changes
 
-## 8. Telling us when it changes
+If you become aware of anything that makes a statement above inaccurate, tell Ensera.
 
-You agree to notify Ensera of any facts or circumstances of which You become aware that would make
-these representations inaccurate in any respect.
+## 8. What is recorded when you sign
+
+Signing records your name, the email address and account you sign with, and the date, kept for as long
+as the project distributes your Contribution. It is the evidence that the licences above were granted,
+so it cannot be deleted on request without removing your Contribution from the project. It is not used
+for anything else. See [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for the same statement in context.

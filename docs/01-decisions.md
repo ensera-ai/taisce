@@ -385,9 +385,26 @@ carve-out, and section 5's automatic inbound licensing — see D36.
 **How hard to undo.** Dropping a CLA later is easy. Adding one later is not, which is why it is
 decided before the repository is readable.
 
-**This is not a lawyer's opinion and the text is not final.** The agreement in `docs/cla/` is derived
-from a standard template and needs review by somebody qualified before the repository accepts an
-external contribution.
+**The counterparty is Baserat Al Mustaqbal, an establishment registered in Jordan, trading as Ensera.**
+Named because a contract needs one, and because the form matters: where an establishment is a
+registered trading name for a sole proprietor rather than a legal person distinct from its owner, the
+agreement is in substance with the owner personally. That is not a problem in itself, and it decides
+whether the chain of title this entry is built on survives a sale, a change of owner or a later
+incorporation — which is the whole reason for preferring an agreement to a sign-off.
+
+**What is recorded, and that it cannot be erased.** Signing records a name, an email address, an
+account and a date, kept for as long as the project distributes the contribution, because it is the
+evidence the licence was granted. It therefore cannot be deleted on request without removing the
+contribution it accounts for. That is stated to contributors in `CONTRIBUTING.md` rather than left in
+a privacy policy nobody opens — a project arguing that a system should say what it holds about a
+person is a poor place to hold something quietly.
+
+**This is not a lawyer's opinion and the text is not final.** `docs/cla/` holds the agreements and
+`docs/cla/review-notes.md` holds the questions that are beyond an engineer to settle: whether the
+establishment is a separate legal person, whether to name a governing law and what naming Jordan costs
+in international contributions, and whether a source-file copyright notice should name Ensera or the
+authors — since this is a licence and not an assignment, contributors keep their copyright and a
+blanket notice stops being accurate the moment somebody else contributes.
 
 ### D46 — Nothing bakes in a public address
 

@@ -1,39 +1,48 @@
 # Taisce Corporate Contributor License Agreement
 
-> **Derived from the Apache Software Foundation's Corporate Contributor License Agreement v2.0 and
-> adapted for Ensera. Not reviewed by a lawyer. It must be before this repository accepts a
-> contribution made on an employer's behalf.**
+> **Not legal advice, and not final.** See the note at the top of the
+> [Individual agreement](individual.md) and the open questions in [`review-notes.md`](review-notes.md).
 
-This agreement is for a **company or other legal entity** whose employees contribute to Taisce. It
-exists because the individual agreement asks a contributor to represent that they are entitled to
-license their own work, and an employee often is not: intellectual property created in the course of
-employment usually belongs to the employer. Where that is the case, the employer signs this instead,
-and names the people it covers.
+This agreement is for a **company or other organisation** whose people contribute to Taisce.
 
-The substantive terms — the copyright licence in section 2, the patent licence in section 3, the
-representations in sections 4 and 5, and the absence of warranty in section 6 — are those of the
-[Individual Contributor License Agreement](individual.md), granted by the Corporation rather than by a
-person, and are incorporated here by reference.
+It exists because the individual agreement asks a contributor to confirm they are entitled to license
+their own work — and an employee often is not. Work created in the course of employment usually
+belongs to the employer. Where that is so, the employer agrees to these terms instead, and names the
+people it covers.
 
-In addition:
+**"Ensera"** means Baserat Al Mustaqbal, an establishment registered in Jordan, trading as Ensera.
+**"Corporation"** means the organisation agreeing to these terms.
 
-## Schedule of contributors
+## The terms
 
-The Corporation lists the individuals authorised to submit Contributions on its behalf, and keeps that
-list current. Contributions from a person not on the list are not covered by this agreement.
+The Corporation grants Ensera the same copyright licence (section 2), patent licence (section 3), and
+makes the same confirmations about entitlement and originality (sections 4 and 5), on the same "as
+is" basis (section 6), as set out in the [Individual agreement](individual.md) — granted by the
+Corporation rather than by a person, and incorporated here by reference.
 
-| Name | GitHub account | Date added |
-|---|---|---|
-| | | |
+Read section 2 of that document before agreeing. It permits Ensera to distribute Contributions under
+terms other than the project's current licence.
 
-## Scope
+## Who it covers
 
-This agreement covers Contributions submitted by the listed individuals in the course of their
-employment or engagement by the Corporation. It does not cover their personal work, which is covered
-by the Individual Contributor License Agreement if they choose to sign one.
+The Corporation lists the people authorised to contribute on its behalf and keeps the list current. A
+Contribution from somebody not on the list is not covered by this agreement.
 
-## Termination
+| Name | GitHub account | Date added | Date removed |
+|---|---|---|---|
+| | | | |
 
-Either party may terminate this agreement in writing. Termination does not affect the licences already
-granted for Contributions submitted before it, which are irrevocable — a project cannot have code
-withdrawn from under it after building on it.
+It covers work those people submit in the course of their employment or engagement. It does not cover
+their personal work, which is covered by the Individual agreement if they choose to sign one.
+
+## Ending it
+
+Either party may end this agreement in writing. **Ending it does not affect Contributions already
+submitted** — those licences are irrevocable, because a project cannot have code withdrawn from
+underneath it after building on it.
+
+## What is recorded
+
+The signatory's name and contact details, the Corporation's name, the schedule of covered people, and
+the dates. Kept for as long as the project distributes the Contributions it covers, as evidence that
+the licences were granted.

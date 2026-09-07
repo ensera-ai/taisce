@@ -106,5 +106,28 @@ open, because it licenses a contribution only as far as you were able to license
 
 The reasoning, and what was rejected, is in [`docs/01-decisions.md`](docs/01-decisions.md), D45.
 
-Ownership: Taisce is developed and maintained by Ensera. Commits before 2026-09 carry an earlier
-address for the same author, which is why the history shows two.
+## What signing records about you
+
+Signing records **your name, the email address and GitHub account you sign with, and the date**. If
+your employer signs the corporate agreement, it records the same for the signatory plus the list of
+people it covers.
+
+**It is kept for as long as the project distributes your contribution**, because it is the evidence
+that you granted the licences in the agreement. That has a consequence worth stating plainly rather
+than leaving you to find: **it cannot be deleted on request while your contribution is still in the
+project.** Removing the record would mean removing the code it accounts for.
+
+It is used for nothing else. Not analytics, not a mailing list, not shared with anyone but the service
+that operates the signing.
+
+This project's own argument is that a system should be able to say what it holds about a person and
+prove what it deleted. It would be a poor start to hold something about contributors and not mention
+it.
+
+## Ownership
+
+Taisce is developed and maintained by **Baserat Al Mustaqbal**, an establishment registered in Jordan,
+trading as **Ensera**.
+
+Commits before 2026-09 carry an earlier address for the same author, which is why the history shows
+two.
