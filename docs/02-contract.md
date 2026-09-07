@@ -70,7 +70,7 @@ POST `/v1/recalls` → 200
 | Field | Type |
 |---|---|
 | `anchors` | array of {entity_id: string, name: string, type: string, matched: string} |
-| `facts` | array of {fact_id: string, subject: string, predicate: string, object: string, statement: string, confidence: number, anchored_on: string, source_role: string, evidence: {observation_id: string, source_ordinal: integer, quote: string, byte_start: integer, byte_end: integer}} |
+| `facts` | array of {fact_id: string, subject: string, predicate: string, object: string, statement: string, confidence: number, anchored_on: string, source_role: string, co_derived_with: array of string, evidence: {observation_id: string, source_ordinal: integer, quote: string, byte_start: integer, byte_end: integer}} |
 | `truncated` | boolean |
 
 

@@ -131,6 +131,10 @@ func (r *Recaller) RecallFrom(ctx context.Context, scopes []string, question str
 		bundle.Facts = facts[:r.limit]
 		bundle.Truncated = true
 	}
+
+	// After the cut, not before. Co-derivation is a statement about what is IN the bundle, and naming
+	// a fact the caller cannot see would be a citation that resolves to nothing.
+	markCoDerived(bundle.Facts)
 	return bundle, nil
 }
 
@@ -173,3 +177,54 @@ func Terms(question string) []string {
 	}
 	return terms
 }
+
+// markCoDerived says which facts in a bundle are not independent of each other.
+//
+// Two facts from the same message about the same subject are one person saying one thing once. They
+// may be restatements at different granularities, or genuinely different claims that happen to share
+// a sentence — this does not decide which, because nothing deterministic can.
+//
+// What it prevents is the reader's error: counting them as corroboration. A model given a bundle with
+// two rows saying nearly the same thing treats the repetition as weight, and the repetition is an
+// artefact of how one sentence was extracted rather than evidence of anything.
+//
+// Computed here rather than stored, because it is a property of a BUNDLE and not of a fact: the same
+// two facts in a bundle that contains only one of them are independent of nothing.
+func markCoDerived(facts []domain.CitedFact) {
+	// Keyed on the message, not the turn. Evidence names the message ordinal for the reason a span
+	// does: two messages of one turn are two speakers, and facts from different ones are genuinely
+	// independent even inside a single exchange.
+	type origin struct {
+		observation string
+		ordinal     int
+		subject     string
+	}
+	groups := map[origin][]int{}
+	for i, f := range facts {
+		if f.Evidence.SourceObservationID == "" || f.Subject == "" {
+			// A fact whose evidence or subject is gone — an erased entity — is independent of
+			// nothing rather than co-derived with everything, which is what an empty key would make
+			// it.
+			continue
+		}
+		key := origin{f.Evidence.SourceObservationID, f.Evidence.SourceOrdinal, NormalizeSubject(f.Subject)}
+		groups[key] = append(groups[key], i)
+	}
+
+	for _, members := range groups {
+		if len(members) < 2 {
+			continue
+		}
+		for _, i := range members {
+			for _, j := range members {
+				if i != j {
+					facts[i].CoDerivedWith = append(facts[i].CoDerivedWith, facts[j].ID)
+				}
+			}
+		}
+	}
+}
+
+// NormalizeSubject compares subjects the way entity resolution does, so two facts naming one person
+// in different casing are recognised as being about the same subject.
+func NormalizeSubject(s string) string { return domain.NormalizeName(s) }

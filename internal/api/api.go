@@ -444,8 +444,15 @@ type factPayload struct {
 	AnchoredOn string `json:"anchored_on"`
 	// SourceRole is who said it. Always present, because a fact shown without saying it came from a
 	// fetched page asks the reader to trust our sources as if they were their user's words.
-	SourceRole string          `json:"source_role"`
-	Evidence   evidencePayload `json:"evidence"`
+	SourceRole string `json:"source_role"`
+	// CoDerivedWith names the other facts in this bundle from the same message about the same
+	// subject. They are not independent of each other, and a reader counting them as corroboration
+	// is counting one sentence twice.
+	//
+	// Always present, empty when there are none: an absent field says "we did not check", and this
+	// is checked on every bundle.
+	CoDerivedWith []string        `json:"co_derived_with"`
+	Evidence      evidencePayload `json:"evidence"`
 }
 
 type evidencePayload struct {
@@ -496,7 +503,7 @@ func renderBundle(b domain.Bundle) recallResponse {
 		out.Facts = append(out.Facts, factPayload{
 			FactID: f.ID, Subject: f.Subject, Predicate: f.Predicate, Object: f.Object,
 			Statement: f.Statement, Confidence: f.Confidence, AnchoredOn: f.AnchoredOn,
-			SourceRole: f.SourceRole,
+			SourceRole: f.SourceRole, CoDerivedWith: coDerived(f.CoDerivedWith),
 			Evidence: evidencePayload{
 				ObservationID: f.Evidence.SourceObservationID,
 				SourceOrdinal: f.Evidence.SourceOrdinal,
@@ -689,4 +696,13 @@ var errorCodes = []errorCode{
 // writeError says what the caller can act on and nothing about how the system is built.
 func writeError(w http.ResponseWriter, status int, code errorCode, message string) {
 	writeJSON(w, status, errorBody{Error: errorDetail{Code: string(code), Message: message}})
+}
+
+// coDerived never renders null. An absent list says "we did not check"; this is checked on every
+// bundle, so the honest empty answer is an empty list.
+func coDerived(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }

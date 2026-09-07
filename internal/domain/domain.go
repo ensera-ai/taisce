@@ -437,6 +437,25 @@ type CitedFact struct {
 	// AnchoredOn is the entity that brought this fact into the bundle. A fact can name two anchors;
 	// this is the one it was reached through, which is what makes the path a caller can inspect.
 	AnchoredOn string
+	// CoDerivedWith names the other facts in this bundle that came from the SAME message and are
+	// about the SAME subject.
+	//
+	// # What this is for
+	//
+	// One sentence can produce several facts at different granularities — a preference stated
+	// broadly and the same preference stated as a rule. They are different triples, so nothing can
+	// collapse them: no key to be unique on, and no threshold that separates a restatement from a
+	// genuinely different claim. Measured elsewhere on an embedder's own held-out set, near misses
+	// reached higher similarity than true pairs began at, so the obvious automatic answer does not
+	// work and a word-overlap rule is a guess wearing a mechanism's clothes.
+	//
+	// What CAN be established, exactly and without a threshold, is that two facts are not
+	// independent: they came from one message about one subject. That is the harm — a reader seeing
+	// two rows and weighing them as two sources, when one person said one thing once.
+	//
+	// So nothing is discarded and nothing is merged. The relationship is reported, and what a caller
+	// does with it is theirs. It does not claim the facts say the same thing, because they may not.
+	CoDerivedWith []string
 	// SourceRole is the role of the message this fact was extracted from.
 	//
 	// It travels with the fact to the caller, always, because a fact shown without saying it came

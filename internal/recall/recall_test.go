@@ -2,6 +2,7 @@ package recall_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -372,4 +373,171 @@ func (stubStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, 
 
 func (stubStore) FactsAbout(context.Context, []string, []string, int, []string) ([]domain.CitedFact, error) {
 	return nil, nil
+}
+
+// ── #81: facts from one sentence are not two sources ──────────────────────────────────────────
+//
+// One sentence can produce several facts at different granularities — a preference stated broadly and
+// the same preference stated as a rule. They are different triples, so nothing collapses them: no key
+// to be unique on, and no similarity threshold that separates a restatement from a genuinely
+// different claim.
+//
+// What can be established exactly is that they are not independent. That is the harm — a reader
+// seeing two rows and weighing them as two sources, when one person said one thing once.
+
+func coDerivedStore(facts []domain.CitedFact) stubFactStore { return stubFactStore{facts: facts} }
+
+type stubFactStore struct{ facts []domain.CitedFact }
+
+func (s stubFactStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
+	return []domain.Anchor{{Entity: domain.Entity{ID: "e1", CanonicalName: "Marta"}, Matched: "marta"}}, nil
+}
+
+func (s stubFactStore) FactsAbout(context.Context, []string, []string, int, []string) ([]domain.CitedFact, error) {
+	return s.facts, nil
+}
+
+func TestFactsFromOneMessageAboutOneSubjectAreMarkedNotIndependent(t *testing.T) {
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "Marta", Predicate: "prefers", Object: "written docs",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+		{ID: "f2", Subject: "Marta", Predicate: "requires", Object: "writing things down",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+		// Same subject, a different message: genuinely independent.
+		{ID: "f3", Subject: "Marta", Predicate: "works_at", Object: "Ensera",
+			Evidence: domain.Evidence{SourceObservationID: "obs-2", SourceOrdinal: 0}},
+	}
+	bundle, err := recall.New(coDerivedStore(facts), 50).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+
+	by := map[string][]string{}
+	for _, f := range bundle.Facts {
+		by[f.ID] = f.CoDerivedWith
+	}
+	if len(by["f1"]) != 1 || by["f1"][0] != "f2" {
+		t.Fatalf("f1 co-derived with %v, wanted f2", by["f1"])
+	}
+	if len(by["f2"]) != 1 || by["f2"][0] != "f1" {
+		t.Fatalf("f2 co-derived with %v, wanted f1", by["f2"])
+	}
+	if len(by["f3"]) != 0 {
+		t.Fatalf("a fact from another message was marked co-derived: %v", by["f3"])
+	}
+}
+
+// Two messages in one turn are two speakers. Facts from different ones are genuinely independent, and
+// keying on the turn rather than the message would erase that.
+func TestFactsFromDifferentMessagesOfOneTurnAreIndependent(t *testing.T) {
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "Marta", Predicate: "prefers", Object: "docs",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+		{ID: "f2", Subject: "Marta", Predicate: "prefers", Object: "docs",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 1}},
+	}
+	bundle, err := recall.New(coDerivedStore(facts), 50).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	for _, f := range bundle.Facts {
+		if len(f.CoDerivedWith) != 0 {
+			t.Fatalf("fact %s from message %d was marked co-derived with %v",
+				f.ID, f.Evidence.SourceOrdinal, f.CoDerivedWith)
+		}
+	}
+}
+
+// Different subjects in one sentence are different claims. "Marta manages the Cork team" says
+// something about Marta and something about the team, and neither restates the other.
+func TestFactsAboutDifferentSubjectsAreIndependent(t *testing.T) {
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "Marta", Predicate: "manages", Object: "Cork team",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+		{ID: "f2", Subject: "Cork team", Predicate: "part_of", Object: "Ensera",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+	}
+	bundle, err := recall.New(coDerivedStore(facts), 50).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	for _, f := range bundle.Facts {
+		if len(f.CoDerivedWith) != 0 {
+			t.Fatalf("%s was marked co-derived with %v", f.ID, f.CoDerivedWith)
+		}
+	}
+}
+
+// The subject is compared the way entities are resolved, so casing does not make one person two.
+func TestCoDerivationComparesSubjectsTheWayEntitiesResolve(t *testing.T) {
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "Marta", Predicate: "prefers", Object: "docs",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+		{ID: "f2", Subject: "  MARTA ", Predicate: "requires", Object: "writing",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+	}
+	bundle, err := recall.New(coDerivedStore(facts), 50).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(bundle.Facts[0].CoDerivedWith) != 1 {
+		t.Fatal("casing made one subject into two")
+	}
+}
+
+// Only what is in the bundle is named. A truncated bundle that pointed at a fact the caller cannot
+// see would be a citation resolving to nothing.
+func TestCoDerivationNamesOnlyWhatTheCallerCanSee(t *testing.T) {
+	var facts []domain.CitedFact
+	for i := 0; i < 6; i++ {
+		facts = append(facts, domain.CitedFact{
+			ID: fmt.Sprintf("f%d", i), Subject: "Marta", Predicate: "prefers",
+			Object:   fmt.Sprintf("thing-%d", i),
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0},
+		})
+	}
+	bundle, err := recall.New(coDerivedStore(facts), 3).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if !bundle.Truncated {
+		t.Fatal("the fixture did not truncate")
+	}
+	visible := map[string]bool{}
+	for _, f := range bundle.Facts {
+		visible[f.ID] = true
+	}
+	for _, f := range bundle.Facts {
+		for _, id := range f.CoDerivedWith {
+			if !visible[id] {
+				t.Fatalf("%s points at %s, which was cut from the bundle", f.ID, id)
+			}
+		}
+	}
+}
+
+// A fact whose subject or evidence is gone — an erased entity — is independent of nothing rather than
+// co-derived with everything, which is what an empty key would make it.
+func TestAFactWithNoSubjectIsNotCoDerivedWithEverything(t *testing.T) {
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "", Predicate: "prefers", Object: "docs",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+		{ID: "f2", Subject: "", Predicate: "requires", Object: "writing",
+			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
+	}
+	bundle, err := recall.New(coDerivedStore(facts), 50).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	for _, f := range bundle.Facts {
+		if len(f.CoDerivedWith) != 0 {
+			t.Fatalf("a fact with no subject was grouped: %v", f.CoDerivedWith)
+		}
+	}
 }
