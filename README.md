@@ -21,6 +21,7 @@ computed on your own substrate rather than asserted by somebody you have to trus
 | [`docs/00-goals.md`](docs/00-goals.md) | What this is for, and what would prove each goal |
 | [`docs/01-decisions.md`](docs/01-decisions.md) | Every decision, closed, with what was rejected |
 | [`docs/02-contract.md`](docs/02-contract.md) | Every operation, field and refusal on the wire |
+| [`docs/03-market.md`](docs/03-market.md) | What is shipped elsewhere, dated, and what it obliges here |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How work is tracked |
 | [`CLAUDE.md`](CLAUDE.md) | The working rules, in full |
 | [issues](https://github.com/ensera-ai/taisce/issues) | The roadmap — the source of truth for scope |
