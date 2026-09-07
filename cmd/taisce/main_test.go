@@ -528,3 +528,94 @@ func TestAScopeListIgnoresEmptyEntries(t *testing.T) {
 		}
 	}
 }
+
+// ── Roles ─────────────────────────────────────────────────────────────────────────────────────
+//
+// One image, and its command decides what it does. Two binaries would be two build pipelines and two
+// version numbers that can disagree, paid permanently for a separation that is a runtime choice.
+
+// The api role serves and does not form. A deployment runs this to scale reads separately, or to
+// pause formation while a provider is unwell — turns still arrive and are stored, because the backlog
+// is in the database rather than in a process.
+func TestTheAPIRoleServesWithoutForming(t *testing.T) {
+	port := freePort(t)
+	env := complete(t)
+	env[envAddr] = fmt.Sprintf("127.0.0.1:%d", port)
+	env[envRole] = "api"
+	withEnv(t, env)
+	// Configured, so that what stops formation is the role rather than a missing endpoint.
+	t.Setenv("TAISCE_INFERENCE_ENDPOINT", "http://127.0.0.1:1/v1")
+	t.Setenv("TAISCE_INFERENCE_EXTRACTOR_MODEL", "unreachable-on-purpose")
+	t.Setenv("TAISCE_INFERENCE_ALLOWLIST", "127.0.0.1:1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- run(ctx, quiet()) }()
+
+	if !reachable(fmt.Sprintf("http://127.0.0.1:%d/health", port), 5*time.Second) {
+		cancel()
+		t.Fatal("the api role did not serve")
+	}
+	cancel()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the api role did not stop when its context ended")
+	}
+}
+
+// The worker role forms and binds nothing.
+//
+// No listener at all, deliberately: a worker holding a port is one an orchestrator can route traffic
+// to by accident, and a health check that passed would say the wrong thing about a process that
+// serves no reads.
+func TestTheWorkerRoleFormsAndBindsNothing(t *testing.T) {
+	port := freePort(t)
+	env := complete(t)
+	env[envAddr] = fmt.Sprintf("127.0.0.1:%d", port)
+	env[envRole] = "worker"
+	withEnv(t, env)
+	t.Setenv("TAISCE_INFERENCE_ENDPOINT", "http://127.0.0.1:1/v1")
+	t.Setenv("TAISCE_INFERENCE_EXTRACTOR_MODEL", "unreachable-on-purpose")
+	t.Setenv("TAISCE_INFERENCE_ALLOWLIST", "127.0.0.1:1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- run(ctx, quiet()) }()
+
+	// It must NOT answer. Given a moment to bind if it were going to.
+	if reachable(fmt.Sprintf("http://127.0.0.1:%d/health", port), 2*time.Second) {
+		cancel()
+		t.Fatal("the worker role bound a port, which an orchestrator could route traffic to")
+	}
+	cancel()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the worker role did not stop when its context ended")
+	}
+}
+
+// A role nobody defined is refused rather than defaulted.
+//
+// Defaulting a typo to "all" would give a deployment that quietly runs both halves in every pod —
+// which is the state the split existed to avoid, arrived at by a spelling mistake.
+func TestAnUnknownRoleIsRefused(t *testing.T) {
+	env := complete(t)
+	env[envRole] = "aip"
+	withEnv(t, env)
+
+	err := run(context.Background(), quiet())
+	if err == nil {
+		t.Fatal("started with a role nobody defined")
+	}
+	if !strings.Contains(err.Error(), envRole) {
+		t.Fatalf("the refusal does not name the setting: %v", err)
+	}
+}

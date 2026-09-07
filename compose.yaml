@@ -108,6 +108,21 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  # ── Splitting reads from formation ───────────────────────────────────────────────────────────
+  #
+  # The service above runs both halves, which is what one machine wants. They can be run apart from
+  # the SAME IMAGE by setting TAISCE_ROLE, and that is a deployment decision rather than a code one:
+  #
+  #   taisce:                       TAISCE_ROLE: api      serves reads, forms nothing
+  #   taisce-worker:                TAISCE_ROLE: worker   forms the backlog, binds no port
+  #
+  # Worth doing when formation and reads need scaling differently, or when extraction has to be
+  # paused during a provider incident without stopping reads — turns still arrive and are stored,
+  # because the backlog is in the database rather than in a process.
+  #
+  # Not the default, because nothing here has been measured needing it and a split adopted from a
+  # diagram is a second thing to operate with no argument behind it.
+
   # ── Optional: a model gateway ────────────────────────────────────────────────────────────────
   #
   # `docker compose --profile gateway up` puts LiteLLM in front, which is worth it when there are

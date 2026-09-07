@@ -197,6 +197,37 @@ timestamp on 46 comments; their text and authorship did.
 is the roadmap. An issue list that exists twice drifts, and the copy nobody is watching is the one
 that will be wrong.
 
+### D42 — One image, and its command decides what it does
+
+Serving reads and forming the backlog run in one process by default. A `TAISCE_ROLE` of `api` or
+`worker` runs one half, from the same image and the same binary.
+
+**They are genuinely different workloads.** The API is fast and database-bound; formation is slow and
+model-bound, and one of them wants pausing during a provider incident while the other keeps
+answering. Those are real reasons to RUN them apart.
+
+**They are not reasons to BUILD them apart.** Two binaries is two images, two build pipelines, two
+version numbers that can disagree, and a schema migration that has to land in both — paid forever,
+for a separation that is a runtime choice. With one image, running them apart is a line in a chart.
+
+**The default runs both, and splitting should follow a number.** Nothing here has been measured
+needing two deployments, and the development machine cannot produce that measurement. A split adopted
+from a diagram is complexity with no argument behind it.
+
+**What makes the split safe was already there.** The backlog lives in the database, not in a process,
+so a paused worker means turns accumulate rather than disappear; and formation takes a per-scope
+advisory lock, so several workers is a deployment decision rather than a code change.
+
+**Rejected:** separate `api` and `worker` binaries (the permanent cost above, for a runtime choice);
+one process always doing both (correct on a laptop and wrong the first time somebody needs to stop
+extraction without stopping reads); a role that defaults when misspelled (a typo would silently give
+every pod both halves, which is the state the split exists to avoid).
+
+**A worker binds no port at all.** One that did would be a process an orchestrator could route traffic
+to by accident, with a health check passing about reads it does not serve.
+
+**How hard to undo.** Easy. It is an environment variable and a switch.
+
 ---
 
 ## Substrate

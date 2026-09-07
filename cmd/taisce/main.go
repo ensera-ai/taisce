@@ -42,6 +42,29 @@ const (
 	// The identity that may change the schema. Only the operator commands use it; the server never
 	// holds a connection that can run DDL.
 	envAdminDSN = "TAISCE_ADMIN_DSN"
+	// Which halves of the service this process runs: "all" (default), "api" or "worker".
+	envRole = "TAISCE_ROLE"
+)
+
+// Roles.
+//
+// # Why one binary and not two
+//
+// Serving reads and forming the backlog have genuinely different shapes: the API is fast and
+// database-bound, formation is slow and model-bound, and one of them can be paused during a provider
+// incident while the other keeps answering. Those are real reasons to run them apart.
+//
+// They are not reasons to BUILD them apart. Two binaries is two images, two build pipelines, two
+// version numbers that can disagree, and a schema migration that has to land in both — paid
+// permanently, for a separation that is a runtime choice. So this is one image whose command decides
+// what it does, and running them apart becomes a line in a chart rather than a change to the code.
+//
+// The default runs both, because that is what one machine wants and because nothing here has been
+// measured needing otherwise. Splitting should follow a number, not a diagram.
+const (
+	roleAll    = "all"
+	roleAPI    = "api"
+	roleWorker = "worker"
 )
 
 // main owns the two things a process owns and a function should not: where the signals come from,
@@ -126,34 +149,35 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// work without one, and refusing to start would turn a five-minute install into a failure in
 	// minute one. What it must not do is look fine, so it says so at every level an operator might
 	// be reading.
-	driverStopped := make(chan struct{})
-	if inferenceConfig, cfgErr := inference.ConfigFromEnv(); cfgErr != nil {
-		log.Warn("MEMORY WILL NOT FORM: no model endpoint is configured, so turns will be stored "+
-			"and never extracted. Storage, recall of what is already formed, and erasure all work. "+
-			"Set TAISCE_INFERENCE_ENDPOINT, TAISCE_INFERENCE_EXTRACTOR_MODEL and "+
-			"TAISCE_INFERENCE_ALLOWLIST to start forming.", "reason", cfgErr.Error())
-		close(driverStopped)
-	} else {
-		vocabulary, vocErr := pg.LoadOntology(ctx, memory, schema)
-		if vocErr != nil {
-			return fmt.Errorf("load the relation vocabulary: %w", vocErr)
-		}
-		observations := pg.NewObservationStore(memory)
-		former := formation.NewFormer(observations, pg.NewFactStore(memory),
-			extract.New(inference.NewModel(inferenceConfig), vocabulary))
-		policy := formation.DefaultPolicy()
-		driver := formation.NewDriver(
-			formation.NewWorkerWithPolicy(memory, observations, former, policy),
-			observations, schema, policy, log)
+	role := strings.TrimSpace(os.Getenv(envRole))
+	if role == "" {
+		role = roleAll
+	}
+	if role != roleAll && role != roleAPI && role != roleWorker {
+		return fmt.Errorf("%s is %q; it is one of %q, %q or %q", envRole, role, roleAll, roleAPI, roleWorker)
+	}
 
-		go func() {
-			defer close(driverStopped)
-			// Run returns only when the context ends, and a scope busy with another replica is not
-			// an error here — that is the normal case when the chart runs more than one.
-			if err := driver.Run(ctx); err != nil {
-				log.Error("formation driver stopped early", "error", err)
-			}
-		}()
+	driverStopped := make(chan struct{})
+	switch {
+	case role == roleAPI:
+		// Reads only. A deployment runs this when formation is being scaled separately, or paused
+		// while a provider is unwell — turns still arrive and are stored, and they form when a
+		// worker returns, because the backlog is in the database rather than in a process.
+		log.Info("formation is not running in this process", "role", role)
+		close(driverStopped)
+	default:
+		if err := startDriver(ctx, log, memory, schema, driverStopped); err != nil {
+			return err
+		}
+	}
+
+	if role == roleWorker {
+		// No listener at all. A worker that also bound a port would be one an orchestrator could
+		// route traffic to by accident, and a health check that passed would say the wrong thing.
+		log.Info("forming only; no HTTP listener", "role", role)
+		<-ctx.Done()
+		<-driverStopped
+		return nil
 	}
 
 	addr := os.Getenv(envAddr)
@@ -224,4 +248,53 @@ func bundleLimit() int {
 		return fallback
 	}
 	return n
+}
+
+// startDriver brings up formation behind the append.
+//
+// Without it, turns are stored, freshness never advances, and a recall returns nothing — a deployment
+// that looks like it works and holds no memory.
+//
+// # Why a missing model does not stop the process
+//
+// Extraction needs one and none can be shipped: no key belongs in an open repository, and a hosted
+// provider would put a signup inside the first five minutes. Storage, recall of what is already
+// formed, and erasure all work without a model, so refusing to start would turn a five-minute install
+// into a failure in minute one.
+//
+// What it must not do is look fine. So it says so, loudly, at the level an operator reads.
+func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, schema pg.Schema,
+	stopped chan struct{}) error {
+
+	inferenceConfig, err := inference.ConfigFromEnv()
+	if err != nil {
+		log.Warn("MEMORY WILL NOT FORM: no model endpoint is configured, so turns will be stored "+
+			"and never extracted. Storage, recall of what is already formed, and erasure all work. "+
+			"Set TAISCE_INFERENCE_ENDPOINT, TAISCE_INFERENCE_EXTRACTOR_MODEL and "+
+			"TAISCE_INFERENCE_ALLOWLIST to start forming.", "reason", err.Error())
+		close(stopped)
+		return nil
+	}
+
+	vocabulary, err := pg.LoadOntology(ctx, memory, schema)
+	if err != nil {
+		return fmt.Errorf("load the relation vocabulary: %w", err)
+	}
+	observations := pg.NewObservationStore(memory)
+	former := formation.NewFormer(observations, pg.NewFactStore(memory),
+		extract.New(inference.NewModel(inferenceConfig), vocabulary))
+	policy := formation.DefaultPolicy()
+	driver := formation.NewDriver(
+		formation.NewWorkerWithPolicy(memory, observations, former, policy),
+		observations, schema, policy, log)
+
+	go func() {
+		defer close(stopped)
+		// Run returns only when the context ends, and a scope busy with another replica is not an
+		// error here — that is the normal case when more than one of these is running.
+		if err := driver.Run(ctx); err != nil {
+			log.Error("formation driver stopped early", "error", err)
+		}
+	}()
+	return nil
 }
