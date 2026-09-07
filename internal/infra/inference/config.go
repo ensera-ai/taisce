@@ -28,12 +28,37 @@ const (
 	// per message, embedding is a forward pass and runs once per entity and once per question.
 	// Operators pick different models for them, and a single variable would force one choice.
 	EnvEmbeddingModel = "TAISCE_INFERENCE_EMBEDDING_MODEL"
+	// EnvEmbeddingEndpoint and EnvEmbeddingAPIKey send embedding somewhere other than generation.
+	//
+	// # Why the two roles can be different providers
+	//
+	// They are different jobs with different shapes. Generation is slow, is the expensive part, and is
+	// where a better model shows — and it runs on a background pass, so nobody is waiting on it.
+	// Embedding is a forward pass over short text, is cheap, and is the one an operator is most likely
+	// to want on their own hardware because the vectors never leave anyway.
+	//
+	// So an operator may reasonably send extraction to a hosted provider and keep embedding local, and
+	// a single endpoint would force one choice for both.
+	//
+	// Both are OPTIONAL and fall back to the generation endpoint. One provider is the ordinary case
+	// and it should need one variable.
+	EnvEmbeddingEndpoint = "TAISCE_INFERENCE_EMBEDDING_ENDPOINT"
+	EnvEmbeddingAPIKey   = "TAISCE_INFERENCE_EMBEDDING_API_KEY"
 )
 
 // Config is where inference happens and what is permitted to see it.
+//
+// # Why the allowlist is one list across both roles
+//
+// It is a list of hosts permitted to receive somebody's words, and both roles send them: extraction
+// sends a message, embedding sends a report written from several messages. A list per role would be
+// two places to forget a host and two ways to widen the boundary by accident, and it would let a
+// deployment permit a host for one role while believing it had not permitted it at all.
+//
+// One list, every endpoint checked against it, empty permits nothing.
 type Config struct {
-	// Endpoint is the base URL. `/chat/completions` or `/embeddings` is appended, so this is the same
-	// value a vendor's own documentation calls the base URL.
+	// Endpoint is the base URL generation goes to. `/chat/completions` is appended, so this is the
+	// same value a vendor's own documentation calls the base URL.
 	Endpoint string
 	APIKey   string
 	Model    string
@@ -41,6 +66,10 @@ type Config struct {
 	// that extracts and never embeds is a working deployment; what must not happen is a caller
 	// silently getting a vector of zeros, so the embedder refuses at the point of use instead.
 	EmbeddingModel string
+	// EmbeddingEndpoint and EmbeddingAPIKey are where embedding goes when it is somewhere else. Both
+	// fall back to the generation endpoint's, so one provider needs one set of variables.
+	EmbeddingEndpoint string
+	EmbeddingAPIKey   string
 }
 
 // ConfigFromEnv reads the configuration and refuses anything that would send message content
@@ -64,7 +93,9 @@ func ConfigFromEnv() (Config, error) {
 		APIKey:   strings.TrimSpace(os.Getenv(EnvAPIKey)),
 		Model:    strings.TrimSpace(os.Getenv(EnvModel)),
 
-		EmbeddingModel: strings.TrimSpace(os.Getenv(EnvEmbeddingModel)),
+		EmbeddingModel:    strings.TrimSpace(os.Getenv(EnvEmbeddingModel)),
+		EmbeddingEndpoint: strings.TrimSuffix(strings.TrimSpace(os.Getenv(EnvEmbeddingEndpoint)), "/"),
+		EmbeddingAPIKey:   strings.TrimSpace(os.Getenv(EnvEmbeddingAPIKey)),
 	}
 	if cfg.Endpoint == "" {
 		return Config{}, fmt.Errorf("%s is not set", EnvEndpoint)
@@ -72,10 +103,32 @@ func ConfigFromEnv() (Config, error) {
 	if cfg.Model == "" {
 		return Config{}, fmt.Errorf("%s is not set", EnvModel)
 	}
-	if err := permitted(cfg.Endpoint, os.Getenv(EnvAllowlist)); err != nil {
+	allowlist := os.Getenv(EnvAllowlist)
+	if err := permitted(cfg.Endpoint, allowlist); err != nil {
 		return Config{}, err
 	}
+	// Checked separately and against the same list. An embedding endpoint that inherited the
+	// generation endpoint's permission would be a second host receiving somebody's words on the
+	// strength of a decision made about a different one.
+	if cfg.EmbeddingEndpoint != "" && cfg.EmbeddingEndpoint != cfg.Endpoint {
+		if err := permitted(cfg.EmbeddingEndpoint, allowlist); err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvEmbeddingEndpoint, err)
+		}
+	}
 	return cfg, nil
+}
+
+// EmbeddingsAt is where embedding goes, and with what key.
+//
+// Falling back rather than requiring both is what keeps one provider a one-variable deployment. The
+// key falls back with the endpoint and not independently: a key belongs to a provider, and carrying
+// the generation provider's key to a different host would send a credential somewhere it does not
+// belong — which is worse than the request failing.
+func (c Config) EmbeddingsAt() (endpoint, key string) {
+	if c.EmbeddingEndpoint == "" || c.EmbeddingEndpoint == c.Endpoint {
+		return c.Endpoint, c.APIKey
+	}
+	return c.EmbeddingEndpoint, c.EmbeddingAPIKey
 }
 
 // permitted reports whether the endpoint's host is one somebody listed.

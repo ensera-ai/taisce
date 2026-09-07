@@ -1124,6 +1124,49 @@ embedder is an afternoon rather than an argument. The index built on top is a mi
 pass, which is reversible; what is not reversible is a threshold shipped before there is evidence for
 it, which is why there is not one.
 
+### D61 — Generation and embedding may be different providers, against one allowlist
+
+The endpoint that writes may be somewhere other than the endpoint that embeds. Both fall back to one
+value when unset, and both are checked against the same list of permitted hosts.
+
+**They are different jobs.** Extraction is a generation, is the slow and expensive part, runs on a
+background pass where nobody is waiting, and is where a better model visibly changes what is stored.
+Embedding is a forward pass over short text, is cheap, and is the one an operator is most likely to
+want on their own hardware. Forcing one endpoint makes an operator choose a provider that is wrong for
+one of the two.
+
+**There is no third role, because there is no model on the read path.** Recall resolves entity names
+with a lookup, not with a model — a hop there is paid by every caller on the path they are waiting on,
+and it makes read latency a property of a provider. Freshness, erasure and export call no model
+either. So the roles are the ones that exist: generation on the write path, and embedding.
+
+**One allowlist across both, and a second endpoint inherits nothing.** Generation sends a message;
+embedding sends text written from several messages. Both are an egress of exactly the data this system
+exists to hold. A list per role would be two places to forget a host and would let a deployment permit
+a host for one role while believing it had permitted none — so there is one list, every endpoint is
+checked against it, and an unlisted host fails at startup before anything has been sent.
+
+**A key travels with its endpoint rather than falling back on its own.** A credential belongs to a
+provider. Carrying the generation provider's key to a different host would send a secret somewhere it
+does not belong, which is worse than the request failing — so an endpoint that differs uses its own
+key or none.
+
+**What this makes possible, and what it means.** A deployment can extract with a hosted model and
+embed locally. That sends conversation text to a third party, which is a decision only the operator
+can make: the mission is that data does not leave the operator's infrastructure, and the moment a
+hosted endpoint is listed, it does. The allowlist is where that decision is made and it cannot be
+arrived at by default — only by somebody writing the host down.
+
+**Rejected:** one endpoint for everything (forces one provider to be right for two different jobs); an
+allowlist per role (two places to forget a host, and a permission granted invisibly); a key that falls
+back independently of its endpoint (sends a credential to a host it does not belong to); adding a
+role for answering (there is no model on the read path, and inventing configuration for one would be a
+knob with nothing behind it).
+
+**How hard to undo.** Additive and per-deployment. The variables are optional, an existing deployment
+sets none of them and behaves exactly as before, and removing the split would be removing two
+environment variables nobody had to set.
+
 ---
 
 ## Substrate

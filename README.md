@@ -73,6 +73,29 @@ Two things that will otherwise cost you an hour, both of them mechanisms working
 works — and it says so loudly at startup, because a system that silently stores and never extracts
 looks like a memory that does not work.
 
+**Generation and embedding can be different providers.** They are different jobs: extraction is slow,
+is the expensive part, runs on a background pass where nobody is waiting, and is where a better model
+shows; embedding is a cheap forward pass over short text. So a hosted extractor with a local embedder
+is a reasonable arrangement:
+
+```
+TAISCE_INFERENCE_ENDPOINT=https://<provider>/v1
+TAISCE_INFERENCE_EXTRACTOR_MODEL=<a model that provider serves>
+TAISCE_INFERENCE_API_KEY=<their key>
+TAISCE_INFERENCE_EMBEDDING_ENDPOINT=http://host.docker.internal:11434/v1
+TAISCE_INFERENCE_EMBEDDING_MODEL=qwen3-embedding:4b-q8_0
+TAISCE_INFERENCE_ALLOWLIST=<provider host>,host.docker.internal:11434
+```
+
+Both endpoints are checked against the one allowlist and a second endpoint inherits nothing from the
+first, because both send somebody's words: generation sends a message, embedding sends text written
+from several of them. **A hosted provider means conversation text leaves your machine** — the
+allowlist is where you decide that, and it cannot be arrived at by default.
+
+**Nothing on the read path calls a model.** Recall resolves entity names with a lookup, and freshness,
+erasure and export call nothing at all — so a slow or absent provider costs you formation, never an
+answer.
+
 ### The journey, over HTTP
 
 ```bash

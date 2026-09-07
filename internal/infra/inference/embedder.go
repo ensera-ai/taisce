@@ -72,14 +72,19 @@ func (e *Embedder) Embed(ctx context.Context, inputs []string) ([][]float32, err
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.config.Endpoint+"/embeddings",
+	// Where embedding goes, which is not necessarily where generation goes: extraction is slow and is
+	// where a better model shows, embedding is a cheap forward pass an operator may want on their own
+	// hardware. The key travels with the endpoint rather than falling back separately, so a
+	// credential is never sent to a host it does not belong to.
+	endpoint, key := e.config.EmbeddingsAt()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/embeddings",
 		bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if e.config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.config.APIKey)
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
 	}
 
 	resp, err := e.client.Do(req)

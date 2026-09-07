@@ -187,3 +187,93 @@ func TestTheAllowlistIsHostAndPortRatherThanAURL(t *testing.T) {
 		t.Fatalf("host:port was refused: %v", err)
 	}
 }
+
+// ── Two providers, one allowlist ──────────────────────────────────────────────────────────────
+//
+// Generation is slow, is the expensive part, and runs on a background pass where nobody is waiting.
+// Embedding is a cheap forward pass an operator may want on their own hardware. So an operator may
+// send extraction to a hosted provider and keep embedding local — and every host that receives
+// somebody's words still has to be listed.
+
+func TestEmbeddingCanGoSomewhereElseAndStillHasToBeListed(t *testing.T) {
+	t.Setenv(inference.EnvEndpoint, "https://openrouter.ai/api/v1")
+	t.Setenv(inference.EnvModel, "qwen/qwen3.8-flash")
+	t.Setenv(inference.EnvAPIKey, "sk-generation")
+	t.Setenv(inference.EnvEmbeddingEndpoint, "http://localhost:11434/v1")
+	t.Setenv(inference.EnvEmbeddingModel, "qwen3-embedding:4b-q8_0")
+
+	// Only the generation host listed: the second host receives report text and nobody permitted it.
+	t.Setenv(inference.EnvAllowlist, "openrouter.ai")
+	if _, err := inference.ConfigFromEnv(); err == nil {
+		t.Fatal("a second endpoint inherited the first one's permission")
+	}
+
+	t.Setenv(inference.EnvAllowlist, "openrouter.ai,localhost:11434")
+	cfg, err := inference.ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("both hosts listed and it was refused: %v", err)
+	}
+
+	endpoint, key := cfg.EmbeddingsAt()
+	if endpoint != "http://localhost:11434/v1" {
+		t.Fatalf("embedding goes to %q", endpoint)
+	}
+	// The key travels with the endpoint. Carrying the generation provider's key to a different host
+	// would send a credential somewhere it does not belong, which is worse than the request failing.
+	if key != "" {
+		t.Fatalf("the generation provider's key was sent to another host: %q", key)
+	}
+
+	t.Setenv(inference.EnvEmbeddingAPIKey, "sk-embedding")
+	cfg, err = inference.ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	if _, key := cfg.EmbeddingsAt(); key != "sk-embedding" {
+		t.Fatalf("the embedding provider's own key was not used: %q", key)
+	}
+}
+
+// One provider is the ordinary case and needs one set of variables.
+func TestOneProviderNeedsOneEndpoint(t *testing.T) {
+	t.Setenv(inference.EnvEndpoint, "http://localhost:11434/v1")
+	t.Setenv(inference.EnvModel, "qwen3.6:35b-a3b-mxfp8")
+	t.Setenv(inference.EnvAPIKey, "sk-local")
+	t.Setenv(inference.EnvEmbeddingModel, "qwen3-embedding:4b-q8_0")
+	t.Setenv(inference.EnvEmbeddingEndpoint, "")
+	t.Setenv(inference.EnvEmbeddingAPIKey, "")
+	t.Setenv(inference.EnvAllowlist, "localhost:11434")
+
+	cfg, err := inference.ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	endpoint, key := cfg.EmbeddingsAt()
+	if endpoint != cfg.Endpoint || key != cfg.APIKey {
+		t.Fatalf("embedding fell back to %q with key %q", endpoint, key)
+	}
+}
+
+// A second endpoint on a host nobody listed is refused for the same reason the first one is: it is an
+// egress of exactly the data this product exists to hold, and the list is what makes permitting it a
+// deliberate act.
+func TestASecondEndpointObeysEveryRuleTheFirstOneDoes(t *testing.T) {
+	t.Setenv(inference.EnvEndpoint, "https://openrouter.ai/api/v1")
+	t.Setenv(inference.EnvModel, "qwen/qwen3.8-flash")
+	t.Setenv(inference.EnvEmbeddingModel, "some-embedder")
+	t.Setenv(inference.EnvAllowlist, "openrouter.ai,embeddings.example")
+
+	for name, endpoint := range map[string]string{
+		"plaintext to a remote host":    "http://embeddings.example/v1",
+		"a host that is not listed":     "https://elsewhere.example/v1",
+		"a prefix of a listed host":     "https://openrouter.ai.attacker.example/v1",
+		"a different port on that host": "https://embeddings.example:8443/v1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(inference.EnvEmbeddingEndpoint, endpoint)
+			if _, err := inference.ConfigFromEnv(); err == nil {
+				t.Fatalf("%s was permitted for embedding", name)
+			}
+		})
+	}
+}
