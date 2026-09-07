@@ -1,3 +1,6 @@
+// Copyright 2026 The Taisce Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package credential resolves what a caller presented into what they may reach.
 //
 // It is a separate package from the HTTP surface because the answer it gives is a security decision

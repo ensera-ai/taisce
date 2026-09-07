@@ -1,3 +1,6 @@
+// Copyright 2026 The Taisce Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package recall answers a question from entities outward.
 //
 // Retrieval starts at the entities a question names and returns the facts about them. It does not

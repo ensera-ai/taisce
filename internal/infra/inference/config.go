@@ -1,3 +1,6 @@
+// Copyright 2026 The Taisce Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package inference reaches a chat model over the OpenAI-compatible HTTP interface.
 //
 // One interface rather than one per vendor, because the shape is the same everywhere it matters and

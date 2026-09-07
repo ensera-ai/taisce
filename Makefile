@@ -6,7 +6,7 @@
 SUBSTRATE_VERSION ?= 0.1.0
 TEST_DSN ?= postgres://postgres:taisce@localhost:55432/taisce?sslmode=disable
 
-.PHONY: substrate db-up db-down test test-inference build
+.PHONY: substrate db-up db-down test licence signoff test-inference build
 
 substrate:
 	docker build -t taisce-postgres:$(SUBSTRATE_VERSION) deploy/postgres
@@ -29,9 +29,20 @@ db-down:
 # understates a codebase exercised end to end and would let the number fall while looking steady.
 COVER_PROFILE ?= coverage.out
 
-test:
+test: licence
 	TAISCE_TEST_DSN="$(TEST_DSN)" go test -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
 	./scripts/coverage-gate.sh $(COVER_PROFILE)
+
+# Every published file carries a copyright header. Checked rather than documented, because a licence
+# stated once at the root is one file move from a package published without one — and publishing is
+# irreversible.
+licence:
+	./scripts/licence-gate.sh
+
+# Who authored the commits in a change. It cannot decide who has signed the contributor agreement —
+# that record lives with the signing service — and it makes the question answerable.
+signoff:
+	./scripts/signoff-gate.sh
 
 # Extraction against a real model: the citability check, and the regression corpus.
 #

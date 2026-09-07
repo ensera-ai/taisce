@@ -1,3 +1,6 @@
+// Copyright 2026 The Taisce Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain holds the vocabulary the read and write paths share.
 //
 // No I/O, no clock, no database. A type here is a thing the product talks about, and the rule for

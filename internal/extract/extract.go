@@ -1,3 +1,6 @@
+// Copyright 2026 The Taisce Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package extract turns a message into claims that can be cited.
 //
 // The model is a port. What is in this package is everything that happens to a model's output before

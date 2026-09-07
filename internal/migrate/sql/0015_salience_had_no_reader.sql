@@ -1,0 +1,28 @@
+-- ── A column that existed because it was expected ─────────────────────────────────────────────
+--
+--  `fact.salience` was written into the first migration and has been zero for every fact ever
+--  stored. Nothing computes it. Nothing orders by it. Nothing reads it.
+--
+--  ── WHY IT GOES RATHER THAN GETTING A COMPUTATION ────────────────────────────────────────────
+--
+--  Salience is a ranking signal, and recall deliberately ranks nothing yet — a ranking stage
+--  introduced before the plain path is measured makes it impossible to say afterwards which stage is
+--  doing the work and which is doing harm. So salience arrives with the measurement that justifies
+--  it, or it does not arrive.
+--
+--  That measurement needs a corpus at scale on hardware that can be held still, which is not
+--  available. Keeping the column until then means shipping a schema where one column is a promise
+--  and every other is a fact — and a reader who finds it zero for the whole history learns that this
+--  schema contains things that are not true, which is the more expensive lesson.
+--
+--  ── WHAT THIS DOES NOT UNDO ──────────────────────────────────────────────────────────────────
+--
+--  The distinction it was created for stands: a confidence is REPORTED by the extractor and a
+--  salience would be COMPUTED from behaviour, and collapsing them would make a weakly-extracted fact
+--  mentioned often indistinguishable from a confidently-extracted one. `confidence` stays and keeps
+--  meaning exactly what it meant.
+--
+--  Adding the column back is one migration. Deciding it was needed is the part that requires
+--  evidence, and that is the part being deferred.
+
+ALTER TABLE {schema}.fact DROP COLUMN IF EXISTS salience;

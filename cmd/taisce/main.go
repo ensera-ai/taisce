@@ -1,3 +1,6 @@
+// Copyright 2026 The Taisce Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Command taisce serves one instance's memory over HTTP.
 //
 // One binary, two database identities. The registry connection resolves credentials and the memory

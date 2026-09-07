@@ -1,3 +1,6 @@
+// Copyright 2026 The Taisce Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package migrate applies the schema and provisions a project's storage.
 //
 // The SQL lives beside the code because go:embed cannot reach outside its package directory, and

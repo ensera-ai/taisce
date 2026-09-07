@@ -382,3 +382,31 @@ func TestProvisioningATenantIsRepeatableAndRefusesABadName(t *testing.T) {
 		t.Fatal("a tenant name reached a statement")
 	}
 }
+
+// A column that existed because it was expected rather than because something read it is gone.
+//
+// Salience was zero for every fact ever written. The distinction it was created for stands —
+// confidence is reported and salience would be computed — and a schema carrying one column that is a
+// promise while every other is a fact teaches a reader that this schema contains things which are not
+// true.
+func TestSalienceIsGoneAndConfidenceIsNot(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+
+	var salience, confidence bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		                WHERE table_schema = $1 AND table_name = 'fact' AND column_name = 'salience'),
+		       EXISTS (SELECT 1 FROM information_schema.columns
+		                WHERE table_schema = $1 AND table_name = 'fact' AND column_name = 'confidence')`,
+		tenant).Scan(&salience, &confidence); err != nil {
+		t.Fatalf("read columns: %v", err)
+	}
+	if salience {
+		t.Fatal("salience is still on the fact, with nothing computing or reading it")
+	}
+	if !confidence {
+		t.Fatal("confidence went with it; the distinction was the point, not the deletion")
+	}
+}

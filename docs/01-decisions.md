@@ -665,6 +665,18 @@ indistinguishable from a certain one, and extraction quality becomes unreviewabl
 
 ## Write path
 
+**Amended: the salience column is gone, and the distinction is not.** It was zero for every fact ever
+written, because nothing computed it and nothing read it. Salience is a ranking signal, recall
+deliberately ranks nothing yet, and a ranking stage introduced before the plain path is measured makes
+it impossible to say which stage is doing the work and which is doing harm — so it arrives with its
+measurement or not at all, and that measurement needs hardware this project does not have.
+
+The reasoning above is unchanged and is why `confidence` stays: a reported certainty and a computed
+importance are different things, and collapsing them would make a weakly-extracted fact mentioned
+often indistinguishable from a confidently-extracted one. What changed is only that one of the two had
+no reader, and a column that exists because it was expected teaches every reader that this schema
+contains things which are not true.
+
 ### D12 — Every observation carries its speaker, from the first migration
 
 `source_role` is `NOT NULL`.
