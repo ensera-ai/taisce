@@ -90,10 +90,17 @@ which appends `Signed-off-by: Your Name <your@email>`. It is the
 [Developer Certificate of Origin](https://developercertificate.org/): a statement that you wrote the
 change, or otherwise have the right to submit it under this project's licence.
 
-There is no contributor agreement to sign, deliberately. A CLA exists to let a project owner
-relicense — including to a proprietary edition — and this project is Apache-2.0 with no commercial
-line, so there is nothing for one to enable and no reason to put a signing step between your first
-patch and its review. The reasoning is in [`docs/01-decisions.md`](docs/01-decisions.md), D45.
+**Why a sign-off and not an agreement to sign.** Apache-2.0 already licenses your contribution to this
+project the moment you submit it — section 5 says so, patent grant included — so no agreement is
+needed to obtain the licence. What section 5 cannot establish is whether you had the *right* to submit
+it in the first place: code copied from elsewhere, or written under a contract that assigns it to an
+employer, is licensed only as far as you were able to license it. The sign-off is your statement that
+you were.
+
+A CLA would add something different again: rights beyond Apache-2.0, chiefly the ability to relicense
+your contribution under other terms. This project is Apache-2.0 with no commercial line, so there is
+nothing for that to enable — and it would put a signing step between your first patch and its review.
+The reasoning is in [`docs/01-decisions.md`](docs/01-decisions.md), D45.
 
 Ownership: Taisce is developed and maintained by Ensera. Commits before 2026-09 carry an earlier
 address for the same author, which is why the history shows two.

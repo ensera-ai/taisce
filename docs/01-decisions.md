@@ -307,6 +307,23 @@ A Developer Certificate of Origin: a contributor adds `Signed-off-by:` to each c
 wrote it and may submit it under this licence. Checked by CI. No document, no account, no rights
 transfer.
 
+**How this relates to the licence, because the two are easily confused.** Apache-2.0 is the OUTBOUND
+licence: what this project grants to everyone who receives it. A DCO or a CLA is INBOUND: what a
+contributor grants to this project when they hand over a patch.
+
+Apache-2.0 already settles the inbound licence by itself. Section 5: *"any Contribution intentionally
+submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of
+this License, without any additional terms or conditions."* A contributor opening a pull request has
+therefore already licensed that code under Apache-2.0, patent grant included. No agreement is needed
+to obtain it.
+
+**What section 5 does not say is whether they had the right to submit it.** It licenses the
+contribution; it does not establish that the contributor owned what they were licensing. Code pasted
+from a copyleft project, or written under an employment contract that assigns it to somebody else, is
+licensed by section 5 to the same extent the contributor could license it — which may be not at all,
+and the way that is discovered is the owner asking. A sign-off is the record that they said they
+could.
+
 **A CLA exists to let the project owner do something the licence otherwise would not permit** —
 usually relicensing, including to a proprietary or dual-licensed edition. D36 makes everything
 Apache-2.0 and D39 removes the commercial line, so there is nothing here for a CLA to enable. Note
