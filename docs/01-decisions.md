@@ -940,6 +940,70 @@ claim: a deployment that once said reports are counted cannot later say they are
 retracting what it told its users, so the decision is taken in the direction that keeps the stronger
 claim available.
 
+### D58 — Subjects are found by density, without randomness, and a level is a finer question
+
+The entity graph is partitioned by moving each entity into the group it improves most, splitting every
+group into its connected pieces, and collapsing groups into single nodes to start again. A group too
+large to be one subject is split by asking a stricter question of it rather than by cutting it.
+
+**Density against a resolution, not modularity.** Modularity compares a group's internal edges against
+what a random graph with the same degrees would hold, and that comparison has a resolution limit:
+below a size that depends on how big the WHOLE graph is, a genuine small group is always better merged
+into a neighbour. The same four entities, densely joined, would be a subject in a small scope and
+dissolved in a large one — and the dissolving would happen as somebody's memory grew. A retrieval
+surface that degrades with use is the failure mode that cannot be found in testing, because testing is
+done on small inputs. Density is local: a group's fate depends on the group, and nothing about it
+changes when unrelated memory is added elsewhere.
+
+**Connectedness is taken directly rather than emerging from a randomised phase.** A group in two
+pieces that no edge joins is two subjects with one name, and whatever summarises it writes one summary
+about two things. The published form of this algorithm gets that guarantee from a randomised search
+for sub-communities; splitting each group into its connected pieces gets the same guarantee from an
+operation with no parameter and no randomness. What that buys is not tidiness: it removes the
+determinism problem rather than solving it. There is no generator to pin, no stream a toolchain
+upgrade can change, and no way for a scope's themes to reorganise between two runs of the same input —
+which a customer could not tell from a defect.
+
+**What that costs, stated.** The randomised phase also escapes the arrangement the first pass settles
+into, and that is given up. It is a quality improvement with no measurement here saying it is needed
+(#102), and the day one says so, the refinement is what to add — with a generator whose stream is
+fixed by its own definition, because determinism stops being free at that point.
+
+**Aggregation is not an optimisation.** Moving relocates one entity at a time, so it can never merge
+two groups however much merging would improve — measured here on two dense subjects tied by sixteen
+relations, which stayed separate at every density until groups were collapsed into single nodes. What
+makes a merge possible is that a group becomes one node, carrying the weight already inside it, so the
+next round judges a merge by the same rule it judged a move.
+
+**A level is a finer question, not a repeat of the same one.** Re-partitioning a group at the density
+that chose it returns it whole, which is not a surprise. So a split raises the density, and takes the
+coarsest one that actually divides the group — which makes the multiplier a property of the group
+rather than another parameter. A group that only ever shatters into single entities has no structure
+inside it and stays whole: cutting it to satisfy a size bound produces two summaries of half a subject
+and no way to tell that is what happened.
+
+**Every component, not the largest.** A document corpus has a giant component with noise around it. A
+person's memory is work, family, a hobby and a trip, sharing no entity at all and of similar weight.
+Keeping only the largest would silently drop most of somebody's life, and the answers that remained
+would look fine.
+
+**The numbers are provisional and say so in the code.** How dense a group must be, and how large before
+it is split, have no derivation here — #102 holds what would settle them. A constant with a comment
+saying it has not been derived is honest; the same constant without one reads as a decision somebody
+made.
+
+**Rejected:** modularity (a resolution limit that dissolves real subjects as a scope grows); a
+randomised refinement (buys quality nobody has measured a need for, and costs determinism that is
+currently free); local moving without aggregation (cannot merge two groups at all — measured); a fixed
+multiplier for splitting (fragments a loosely joined group and leaves a tightly joined one whole); a
+third-party clustering library (its randomness would be outside our control, which is the one property
+the whole design turns on, and it is a supply-chain dependency for a core differentiator).
+
+**How hard to undo.** The partition is derived, not stored, so recomputing under different rules is a
+rebuild rather than a migration. What is expensive is anything downstream that has already been keyed
+to a community identifier — which is why the identifiers are a function of the graph rather than of
+the order the algorithm happened to visit it.
+
 ---
 
 ## Substrate
