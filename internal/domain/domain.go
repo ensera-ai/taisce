@@ -235,6 +235,28 @@ type Evidence struct {
 // message becomes reachable that was not already reachable through the fact it produced. It is the
 // difference between a receipt and a legible receipt.
 
+// Fanout is the most relations followed out of any one entity, per direction, on a single hop.
+//
+// # Why there is a cap at all
+//
+// A second hop multiplies. An anchor with ten thousand facts reaches ten thousand entities, and
+// expanding each of those is the query that takes the read path down — which is the first bottleneck
+// a traversal has, and it is a property of hub entities rather than of corpus size. The cap makes the
+// work bounded by depth rather than by whatever the busiest entity in the project happens to be.
+//
+// # Why this number, and what it costs
+//
+// Sixty-four either side of an entity, so one hop from one anchor reads at most 128 rows and two hops
+// at most about sixteen thousand — a bounded query on any corpus. What it costs is completeness at a
+// hub: a fact reachable only through the hundredth relation of a busy entity is not reached. That is
+// an arbitrary cut like the budget's, and the bundle says when it was made rather than pretending the
+// neighbourhood was smaller than it was.
+//
+// It is a constant because nothing has asked to vary it and because the number that would justify
+// changing it is a measurement nobody has taken yet — the corpus sizes in the scaling work are where
+// it comes from, not from a preference.
+const Fanout = 64
+
 // ContextWindow is how many bytes either side of a quote a citation carries.
 //
 // # Why a window rather than the message
@@ -680,6 +702,21 @@ type CitedFact struct {
 	ValidFrom  time.Time
 	ValidUntil *time.Time
 	Evidence   Evidence
+	// Hops is how many relations away from the question this fact was found. One is directly about
+	// something the question named.
+	Hops int
+	// Path and Via are the chain that reached it, and they are the reason a multi-hop answer can be
+	// believed: Marta → reports_to → Hamza → works_at → Ensera is something a reader can check,
+	// where the same fact with a distance score attached is something they have to trust.
+	//
+	// Path holds the entity names in order and Via the relations between them, so Path has exactly
+	// one more member than Via. Both are empty for a one-hop fact, where the chain would be a single
+	// name and no relations.
+	//
+	// An entity erased since the fact was written appears as an empty name rather than removing a
+	// step, because a chain with a step missing reads as a shorter chain, which is a different claim.
+	Path []string
+	Via  []string
 	// AnchoredOn is the entity that brought this fact into the bundle. A fact can name two anchors;
 	// this is the one it was reached through, which is what makes the path a caller can inspect.
 	AnchoredOn string

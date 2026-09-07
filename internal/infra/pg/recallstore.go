@@ -101,7 +101,7 @@ SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity
 // and gets everything, in the same way there is no read that omits the authorised project set and
 // gets every project (D24).
 func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int,
-	sources []string, at domain.AsOf) ([]domain.CitedFact, error) {
+	sources []string, at domain.AsOf, hops int) ([]domain.CitedFact, error) {
 
 	if len(sources) == 0 {
 		// An empty set returns nothing rather than everything. A caller that computed its source
@@ -112,8 +112,11 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 	// A statement per shape of the question, rather than one statement with an OR on the temporal
 	// predicate. `($6 IS NULL AND upper_inf(valid)) OR valid @> $6` is unindexable in both of its
 	// arms: the planner cannot know which branch it is planning for, so it plans for neither.
+	if hops < 1 {
+		hops = 1
+	}
 	stmt := selectFactsAboutSQL
-	args := []any{scopes, entityIDs, limit, sources, domain.ContextWindow}
+	args := []any{scopes, entityIDs, limit, sources, domain.ContextWindow, hops, domain.Fanout}
 	switch {
 	case at.HasValid() && at.HasKnown():
 		stmt, args = selectFactsBitemporalSQL, append(args, at.Valid.UTC(), at.Known.UTC())
@@ -134,11 +137,12 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 		var subject, object *string
 		var window []byte
 		var windowStart, messageBytes *int
+		var via, path []string
 		if err := rows.Scan(&f.ID, &f.Scope, &subject, &f.Predicate, &object, &f.Statement,
 			&f.Confidence, &f.ValidFrom, &f.ValidUntil, &f.AnchoredOn, &f.SourceRole,
 			&f.Evidence.SourceObservationID, &f.Evidence.SourceOrdinal, &f.Evidence.Quote,
 			&f.Evidence.ByteStart, &f.Evidence.ByteEnd, &f.Evidence.ExtractorVersion,
-			&window, &windowStart, &messageBytes); err != nil {
+			&window, &windowStart, &messageBytes, &f.Hops, &via, &path); err != nil {
 			return nil, err
 		}
 		// No message means no context, and the fact still comes back. A message can be gone because
@@ -154,6 +158,13 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 				MessageBytes: *messageBytes,
 			}.Legible()
 		}
+		// The chain, and only when there is one to show. A one-hop fact was reached directly from
+		// something the question named, and reporting a path of one entity and no relations would be
+		// ceremony on every row of the ordinary bundle.
+		if f.Hops > 1 {
+			f.Path, f.Via = path, via
+		}
+
 		// An end whose entity was erased is left blank rather than dropped. The fact is still a
 		// fact and its evidence still resolves; what it has lost is a hop, and reporting the loss
 		// is more honest than hiding the row.
@@ -191,35 +202,72 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 // Both joins are LEFT: an erased message leaves a fact whose quote and span are still what they
 // were, and dropping the row would make an erasure elsewhere in the turn look like memory loss.
 const factsAboutTemplate = `
-WITH reachable AS (
-    SELECT f.fact_id, f.scope, f.subject_entity_id, f.predicate, f.object_entity_id, f.statement,
-           f.confidence, lower(f.valid) AS valid_from, upper(f.valid) AS valid_until,
-           f.subject_entity_id AS anchored_on, f.source_role
-      FROM {schema}.fact f
-     WHERE f.scope = ANY($1)
-       AND f.subject_entity_id = ANY($2::uuid[])
-       AND f.source_role = ANY($4)
-       AND %[1]s
+WITH RECURSIVE reachable AS (
+    SELECT a.entity_id, a.entity_id AS anchor, 0 AS hops,
+           ARRAY[a.entity_id] AS path, ARRAY[]::text[] AS via,
+           NULL::uuid AS fact_id, NULL::text AS scope, NULL::uuid AS subject_entity_id,
+           NULL::text AS predicate, NULL::uuid AS object_entity_id, NULL::text AS statement,
+           NULL::real AS confidence, NULL::timestamptz AS valid_from,
+           NULL::timestamptz AS valid_until, NULL::text AS source_role
+      FROM unnest($2::uuid[]) AS a(entity_id)
     UNION ALL
-    SELECT f.fact_id, f.scope, f.subject_entity_id, f.predicate, f.object_entity_id, f.statement,
-           f.confidence, lower(f.valid) AS valid_from, upper(f.valid) AS valid_until,
-           f.object_entity_id AS anchored_on, f.source_role
-      FROM {schema}.fact f
-     WHERE f.scope = ANY($1)
-       AND f.object_entity_id = ANY($2::uuid[])
-       AND f.source_role = ANY($4)
-       AND %[1]s
+    SELECT step.other, r.anchor, r.hops + 1,
+           r.path || step.other, r.via || step.predicate,
+           step.fact_id, step.scope, step.subject_entity_id, step.predicate,
+           step.object_entity_id, step.statement, step.confidence, step.valid_from,
+           step.valid_until, step.source_role
+      FROM reachable r
+      CROSS JOIN LATERAL (
+          SELECT * FROM (
+              SELECT f.object_entity_id AS other, f.fact_id, f.scope, f.subject_entity_id,
+                     f.predicate, f.object_entity_id, f.statement, f.confidence,
+                     lower(f.valid) AS valid_from, upper(f.valid) AS valid_until, f.source_role
+                FROM {schema}.fact f
+               WHERE f.scope = ANY($1)
+                 AND f.subject_entity_id = r.entity_id
+                 AND f.source_role = ANY($4)
+                 AND %[1]s
+               ORDER BY f.fact_id
+               LIMIT $7
+          ) forward
+          UNION ALL
+          SELECT * FROM (
+              SELECT f.subject_entity_id AS other, f.fact_id, f.scope, f.subject_entity_id,
+                     f.predicate, f.object_entity_id, f.statement, f.confidence,
+                     lower(f.valid) AS valid_from, upper(f.valid) AS valid_until, f.source_role
+                FROM {schema}.fact f
+               WHERE f.scope = ANY($1)
+                 AND f.object_entity_id = r.entity_id
+                 AND f.source_role = ANY($4)
+                 AND %[1]s
+               ORDER BY f.fact_id
+               LIMIT $7
+          ) backward
+      ) step
+     WHERE r.hops < $6
+       AND step.other IS NOT NULL
+       AND NOT (step.other = ANY(r.path))
+),
+reached AS (
+    SELECT DISTINCT ON (r.fact_id) r.*
+      FROM reachable r
+     WHERE r.fact_id IS NOT NULL
+     ORDER BY r.fact_id, r.hops
 )
 SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name, r.statement,
-       r.confidence, r.valid_from, r.valid_until, r.anchored_on::text, r.source_role,
+       r.confidence, r.valid_from, r.valid_until, r.anchor::text, r.source_role,
        e.source_observation_id::text, e.source_ordinal, e.quote, e.byte_start, e.byte_end,
        e.extractor_version,
        substring(convert_to(m.content, 'UTF8')
                  from greatest(0, e.byte_start - $5) + 1
                  for  (e.byte_end + $5) - greatest(0, e.byte_start - $5)),
        greatest(0, e.byte_start - $5),
-       octet_length(m.content)
-  FROM reachable r
+       octet_length(m.content),
+       r.hops, r.via,
+       (SELECT array_agg(coalesce(pe.canonical_name, '') ORDER BY p.ord)
+          FROM unnest(r.path) WITH ORDINALITY AS p(id, ord)
+          LEFT JOIN {schema}.entity pe ON pe.entity_id = p.id AND pe.scope = ANY($1))
+  FROM reached r
   JOIN {schema}.fact_evidence e ON e.fact_id = r.fact_id
   LEFT JOIN {schema}.entity s ON s.entity_id = r.subject_entity_id
   LEFT JOIN {schema}.entity o ON o.entity_id = r.object_entity_id
@@ -229,7 +277,7 @@ SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name
   LEFT JOIN {schema}.turn_message m
          ON m.observation_id = src.observation_id
         AND m.ordinal = e.source_ordinal
- ORDER BY r.predicate, r.fact_id
+ ORDER BY r.hops, r.predicate, r.fact_id
  LIMIT $3`
 
 // The four reads the template makes, and every difference between them is in one predicate.
@@ -263,9 +311,9 @@ var (
 	selectFactsAboutSQL = fmt.Sprintf(factsAboutTemplate,
 		"upper_inf(f.valid) AND upper_inf(f.known)")
 	selectFactsValidAtSQL = fmt.Sprintf(factsAboutTemplate,
-		"f.valid @> $6::timestamptz AND upper_inf(f.known)")
+		"f.valid @> $8::timestamptz AND upper_inf(f.known)")
 	selectFactsKnownAtSQL = fmt.Sprintf(factsAboutTemplate,
-		"upper_inf(f.valid) AND f.known @> $6::timestamptz")
+		"upper_inf(f.valid) AND f.known @> $8::timestamptz")
 	selectFactsBitemporalSQL = fmt.Sprintf(factsAboutTemplate,
-		"f.valid @> $6::timestamptz AND f.known @> $7::timestamptz")
+		"f.valid @> $8::timestamptz AND f.known @> $9::timestamptz")
 )

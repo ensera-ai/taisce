@@ -422,6 +422,14 @@ type recallRequest struct {
 	// its own error code, for a mistake the first one already catches.
 	AsOf      *time.Time `json:"as_of"`
 	AsKnownAt *time.Time `json:"as_known_at"`
+	// Hops is how far from the entities the question names the answer may reach. One — the default —
+	// is facts about those entities. Two follows one relation further and returns the chain it
+	// followed, so "who does Marta's manager work for" is answerable and inspectable.
+	//
+	// Optional, because a second hop costs every caller who did not need one, and because at two hops
+	// a bundle contains facts about things the question never named. Whether that is the answer or
+	// noise depends on the question, and only the caller knows which they asked.
+	Hops int `json:"hops"`
 }
 
 // at is the pair of instants this request asks about.
@@ -503,6 +511,16 @@ type factPayload struct {
 	// SourceRole is who said it. Always present, because a fact shown without saying it came from a
 	// fetched page asks the reader to trust our sources as if they were their user's words.
 	SourceRole string `json:"source_role"`
+	// Hops is how many relations away from the question this fact was found, and Path and Via are the
+	// chain that reached it: Path holds the entity names in order, Via the relations between them, so
+	// Path has one more member than Via.
+	//
+	// Empty for a one-hop fact, where the chain is a single name and no relations. Present for
+	// anything further, because a fact about something the question did not name is only believable
+	// if the route to it can be read.
+	Hops int      `json:"hops"`
+	Path []string `json:"path"`
+	Via  []string `json:"via"`
 	// CoDerivedWith names the other facts in this bundle from the same message about the same
 	// subject. They are not independent of each other, and a reader counting them as corroboration
 	// is counting one sentence twice.
@@ -553,7 +571,7 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 	// The credential's project, and only ever that. The authorised set is still an argument on
 	// every read rather than a default (D24) — it has one member now, which is the whole of D47.
 	bundle, err := s.recaller.RecallAsOf(r.Context(), []string{grant.Project}, req.Question,
-		recall.PrincipalSources, req.at())
+		recall.PrincipalSources, req.at(), req.Hops)
 	if err != nil {
 		s.log.Error("recall", "error", err)
 		writeError(w, http.StatusInternalServerError, codeInternal, "the question could not be answered")
@@ -596,6 +614,7 @@ func renderBundle(b domain.Bundle) recallResponse {
 			Statement: f.Statement, Confidence: f.Confidence, AnchoredOn: f.AnchoredOn,
 			ValidFrom: f.ValidFrom, ValidUntil: f.ValidUntil,
 			SourceRole: f.SourceRole, CoDerivedWith: coDerived(f.CoDerivedWith),
+			Hops: f.Hops, Path: names(f.Path), Via: names(f.Via),
 			Evidence: evidencePayload{
 				ObservationID:   f.Evidence.SourceObservationID,
 				SourceOrdinal:   f.Evidence.SourceOrdinal,
@@ -791,6 +810,15 @@ var errorCodes = []errorCode{
 // writeError says what the caller can act on and nothing about how the system is built.
 func writeError(w http.ResponseWriter, status int, code errorCode, message string) {
 	writeJSON(w, status, errorBody{Error: errorDetail{Code: string(code), Message: message}})
+}
+
+// names never renders null, for the reason coDerived does not: an absent list and an empty one read
+// the same to a caller and mean different things.
+func names(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
 }
 
 // coDerived never renders null. An absent list says "we did not check"; this is checked on every

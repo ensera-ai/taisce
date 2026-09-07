@@ -836,6 +836,53 @@ relations later is a decision made against a corpus rather than from scratch. Wh
 is the intervals for sentences said while this was in force, because the messages behind them are
 subject to retention like anything else.
 
+### D56 — A second hop is asked for, bounded by a fanout cap, and returns the chain it followed
+
+A recall reaches one relation out from what the question named unless the caller asks for two, and a
+fact reached through a relation comes back with the entities and predicates that led to it.
+
+**Depth is the caller's, because only they know the question.** At one hop every fact is about
+something the question named. At two, some facts are about something else entirely — *who does Marta's
+manager work for* is answered by exactly that, and *where does Marta live* is made worse by it. Nothing
+in the system can tell which of those it was given, so a default that widened would make every bundle
+bigger, every read slower and every answer harder to explain in order to help the minority of
+questions that need a chain.
+
+**The chain is what makes a hopped answer defensible.** *Marta → manages → Hamza → works_at → Ensera*
+is a route a reader can check. The same fact with a distance score attached is something they have to
+trust, and a bundle whose facts are about things the caller never mentioned needs to be checkable
+rather than trusted. A one-hop fact carries no chain, because a path of one name and no relations is
+ceremony on every row of the ordinary bundle.
+
+**The first bottleneck is a hub entity, not corpus size.** An anchor with ten thousand facts reaches
+ten thousand entities, and expanding each of those is what takes a read path down. So each entity is
+expanded through at most sixty-four relations per direction, which bounds one hop at 128 rows and two
+at about sixteen thousand — bounded on any corpus, by depth rather than by whatever the busiest entity
+happens to be. What it costs is completeness at a hub, which is an arbitrary cut of the same kind the
+character budget makes.
+
+**One statement, not two.** The traversal replaces the direct read rather than sitting beside it: at
+depth one it produces exactly the rows the previous query did, and every bound — the project
+predicate, the source filter, the temporal predicate — is written once and applies at every level. Two
+statements would be two places for a bound to be forgotten, and the level where it would be forgotten
+is the deep one, which is also the one that reaches furthest from what the caller asked about.
+
+**A fact is returned once, at the shortest route that reached it.** Several paths to one fact is one
+fact; returning it per path would spend a caller's budget on repeats that read as corroboration —
+which is the failure co-derivation reporting exists to prevent, arriving by a different road.
+
+**Rejected:** two hops by default (costs every caller for the minority who need it, and changes what a
+bundle is); a distance or relevance score instead of the chain (a ranking stage before ranking is
+justified, and unverifiable by the reader); an `OR` across the two entity columns (defeats both partial
+indexes and falls back to a sequential scan per level); unbounded fanout (a hub entity is a hang, and
+the substrate carries no statement timeout — #101); returning one row per path
+(repeats that read as corroboration).
+
+**How hard to undo.** The depth parameter and the chain fields are additive on the wire. The fanout cap
+is a constant and changing it changes what a deep read returns, so it moves with a measurement rather
+than with an opinion. Reverting to the non-recursive read would be straightforward and would lose the
+property that every bound is written once.
+
 ---
 
 ## Substrate

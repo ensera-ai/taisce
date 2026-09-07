@@ -544,6 +544,17 @@ func (scriptedModel) Propose(_ context.Context, message domain.Message, _ domain
 	if message.Role != domain.RoleUser {
 		return nil, nil
 	}
+	// The chain fixture, which only fires on the message that contains it.
+	if strings.Contains(message.Content, "Hamza manages Marta") {
+		return []extract.Proposal{
+			{Subject: "Hamza", Predicate: "manages", Object: "Marta",
+				Polarity: domain.PolarityAsserted, Tense: domain.TensePresent,
+				Statement: "Hamza manages Marta.", Confidence: 0.9, Quote: "Hamza manages Marta"},
+			{Subject: "Hamza", Predicate: "works_at", Object: "Ensera",
+				Polarity: domain.PolarityAsserted, Tense: domain.TensePresent,
+				Statement: "Hamza works at Ensera.", Confidence: 0.9, Quote: "Hamza works at Ensera"},
+		}, nil
+	}
 	return []extract.Proposal{
 		{Subject: "the user", Predicate: "works_at", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: "Ensera",
 			Statement: "The user works at Ensera.", Confidence: 0.9, Quote: "I work at Ensera"},
@@ -1190,5 +1201,73 @@ func TestAQuestionCanBeAskedOfAMomentInThePast(t *testing.T) {
 	}, h.token)
 	if status != http.StatusBadRequest {
 		t.Fatalf("a malformed instant returned %d: %s", status, body)
+	}
+}
+
+// ── #6: a chain over the wire ─────────────────────────────────────────────────────────────────
+//
+// A fact about something the question never named is only worth returning if the route to it can be
+// read, so the chain is on the wire beside the fact rather than implied by a score.
+func TestAQuestionCanReachOneRelationFurtherAndSaysHowItGotThere(t *testing.T) {
+	h := newHarness(t, "api_hops")
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"data_subject_id": "subject-1",
+		"messages": []map[string]any{
+			{"role": "user", "content": "Hamza manages Marta. Hamza works at Ensera."},
+		},
+	}, http.StatusCreated, nil)
+	h.form(t)
+
+	type factView struct {
+		Predicate string   `json:"predicate"`
+		Hops      int      `json:"hops"`
+		Path      []string `json:"path"`
+		Via       []string `json:"via"`
+	}
+	var direct struct {
+		Facts []factView `json:"facts"`
+	}
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
+		"question": "What about Marta?",
+	}, http.StatusOK, &direct)
+	if len(direct.Facts) == 0 {
+		t.Fatal("the question named an entity in memory and got nothing")
+	}
+	for _, f := range direct.Facts {
+		if f.Predicate == "works_at" {
+			t.Fatal("a two-hop fact came back from a request that did not ask for one")
+		}
+		// Never null on the wire: an absent list and an empty one read the same to a caller and mean
+		// different things.
+		if f.Path == nil || f.Via == nil {
+			t.Fatalf("a fact came back with a null chain rather than an empty one: %+v", f)
+		}
+	}
+
+	var deep struct {
+		Facts []factView `json:"facts"`
+	}
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
+		"question": "What about Marta?",
+		"hops":     2,
+	}, http.StatusOK, &deep)
+
+	var employment *factView
+	for i, f := range deep.Facts {
+		if f.Predicate == "works_at" {
+			employment = &deep.Facts[i]
+		}
+	}
+	if employment == nil {
+		t.Fatalf("asking for a second hop reached nothing further: %+v", deep.Facts)
+	}
+	if employment.Hops != 2 {
+		t.Fatalf("a hopped fact reports %d hops", employment.Hops)
+	}
+	if strings.Join(employment.Via, " → ") != "manages → works_at" {
+		t.Fatalf("the relations are not in the order they were followed: %v", employment.Via)
+	}
+	if strings.Join(employment.Path, " → ") != "Marta → Hamza → Ensera" {
+		t.Fatalf("the chain does not read from the question outwards: %v", employment.Path)
 	}
 }

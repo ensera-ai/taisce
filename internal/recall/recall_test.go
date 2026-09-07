@@ -373,7 +373,7 @@ func (stubStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, 
 	return nil, nil
 }
 
-func (stubStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf) ([]domain.CitedFact, error) {
+func (stubStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf, int) ([]domain.CitedFact, error) {
 	return nil, nil
 }
 
@@ -395,7 +395,7 @@ func (s stubFactStore) Anchors(context.Context, []string, []string) ([]domain.An
 	return []domain.Anchor{{Entity: domain.Entity{ID: "e1", CanonicalName: "Marta"}, Matched: "marta"}}, nil
 }
 
-func (s stubFactStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf) ([]domain.CitedFact, error) {
+func (s stubFactStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf, int) ([]domain.CitedFact, error) {
 	return s.facts, nil
 }
 
@@ -644,7 +644,7 @@ func (emptyAnchorStore) Anchors(context.Context, []string, []string) ([]domain.A
 	return nil, nil
 }
 
-func (emptyAnchorStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf) ([]domain.CitedFact, error) {
+func (emptyAnchorStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf, int) ([]domain.CitedFact, error) {
 	return nil, nil
 }
 
@@ -835,6 +835,7 @@ func TestABundleSaysWhenACitationLostItsContext(t *testing.T) {
 type recordingStore struct {
 	facts []domain.CitedFact
 	asked domain.AsOf
+	hops  int
 }
 
 func (s *recordingStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
@@ -842,7 +843,8 @@ func (s *recordingStore) Anchors(context.Context, []string, []string) ([]domain.
 }
 
 func (s *recordingStore) FactsAbout(_ context.Context, _, _ []string, _ int, _ []string,
-	at domain.AsOf) ([]domain.CitedFact, error) {
+	at domain.AsOf, hops int) ([]domain.CitedFact, error) {
+	s.hops = hops
 	s.asked = at
 	return s.facts, nil
 }
@@ -869,7 +871,7 @@ func TestAHistoricalRecallPassesBothInstantsThrough(t *testing.T) {
 	known := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := recall.NewWithBudget(store, recall.DefaultBudget()).
 		RecallAsOf(context.Background(), []string{"p1"}, "what about Marta",
-			recall.PrincipalSources, domain.AsOf{Valid: valid, Known: known}); err != nil {
+			recall.PrincipalSources, domain.AsOf{Valid: valid, Known: known}, recall.DirectHop); err != nil {
 		t.Fatalf("recall: %v", err)
 	}
 	if !store.asked.Valid.Equal(valid) || !store.asked.Known.Equal(known) {
@@ -877,5 +879,47 @@ func TestAHistoricalRecallPassesBothInstantsThrough(t *testing.T) {
 	}
 	if store.asked.IsNow() {
 		t.Fatal("a read naming two instants was treated as the current read")
+	}
+}
+
+// ── #6: how far a question may reach ──────────────────────────────────────────────────────────
+
+// The ordinary recall asks for one hop. A second is paid for by every caller who did not need one,
+// and at two hops a bundle contains facts about things the question never named — useful for "who
+// does Marta's manager work for" and noise for "where does Marta live". Nothing here can tell which
+// question it was given, so the caller says.
+func TestAnOrdinaryRecallAsksForOneHop(t *testing.T) {
+	store := &recordingStore{}
+	if _, err := recall.NewWithBudget(store, recall.DefaultBudget()).
+		Recall(context.Background(), []string{"p1"}, "what about Marta"); err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if store.hops != recall.DirectHop {
+		t.Fatalf("the ordinary recall asked for %d hops", store.hops)
+	}
+}
+
+// A depth beyond what the traversal does is clamped rather than refused: a caller asking for more
+// memory gets the deepest answer the system gives, which is the useful outcome. Refusing would turn
+// a request for more into an error on a path that otherwise cannot fail.
+func TestADepthBeyondTheBoundIsClampedRatherThanRefused(t *testing.T) {
+	for asked, want := range map[int]int{
+		-5:                 recall.DirectHop,
+		0:                  recall.DirectHop,
+		1:                  1,
+		2:                  2,
+		9:                  recall.MaxHops,
+		1 << 20:            recall.MaxHops,
+		recall.MaxHops + 1: recall.MaxHops,
+	} {
+		store := &recordingStore{}
+		if _, err := recall.NewWithBudget(store, recall.DefaultBudget()).
+			RecallAsOf(context.Background(), []string{"p1"}, "what about Marta",
+				recall.PrincipalSources, domain.AsOf{}, asked); err != nil {
+			t.Fatalf("recall: %v", err)
+		}
+		if store.hops != want {
+			t.Errorf("asking for %d hops reached the store as %d, wanted %d", asked, store.hops, want)
+		}
 	}
 }

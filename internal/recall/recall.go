@@ -42,8 +42,11 @@ type Store interface {
 	// `at` is the pair of instants the read is taken at. Its zero value is the current read, which
 	// is what almost every call wants — so the historical read is available without the ordinary
 	// one having to say anything.
+	//
+	// `hops` is how far from the anchors the traversal may go. One is the ordinary read: facts about
+	// what the question named. More is a chain, and it comes back with the relations it followed.
 	FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int, sources []string,
-		at domain.AsOf) ([]domain.CitedFact, error)
+		at domain.AsOf, hops int) ([]domain.CitedFact, error)
 }
 
 // Budget is how much a caller can afford to be given back.
@@ -130,10 +133,35 @@ func NewWithBudget(store Store, b Budget) *Recaller {
 // statement from something a web page claimed.
 var PrincipalSources = []string{string(domain.RoleUser)}
 
-// Recall answers a question from what the principal said, as things stand now.
+// Recall answers a question from what the principal said, as things stand now, about the entities
+// the question names.
 func (r *Recaller) Recall(ctx context.Context, scopes []string, question string) (domain.Bundle, error) {
-	return r.RecallAsOf(ctx, scopes, question, PrincipalSources, domain.AsOf{})
+	return r.RecallAsOf(ctx, scopes, question, PrincipalSources, domain.AsOf{}, DirectHop)
 }
+
+// DirectHop is the ordinary read: facts about what the question named, and nothing reached through
+// them.
+//
+// # Why one is the default rather than two
+//
+// A second hop is paid for on every call by every caller, and most questions are answered by the
+// first. It also changes what a bundle IS: at one hop every fact is about something the question
+// named, and at two some facts are about something else entirely, reached through a relation the
+// caller did not ask about. That is genuinely useful for "who does Marta's manager work for" and
+// genuinely noise for "where does Marta live", and nothing here can tell which question it was given.
+//
+// So the caller says. A default that quietly widened would make every bundle bigger, every read
+// slower and every answer harder to explain, in exchange for helping the minority of questions that
+// need a chain.
+const DirectHop = 1
+
+// MaxHops is as far as a traversal goes.
+//
+// Two, because two is what has a reader: "my manager's employer" is a real question and a chain of
+// four is one nobody has asked for. The cost of a third hop is not linear — each level multiplies by
+// the fanout cap — so raising this is a decision that arrives with a measurement rather than with a
+// larger number.
+const MaxHops = 2
 
 // There is deliberately no RecallFrom taking sources and no instants.
 //
@@ -157,7 +185,16 @@ func (r *Recaller) Recall(ctx context.Context, scopes []string, question string)
 // weaker — and every fact in one carries the date its validity ended, which is what stops a fact that
 // held in March from reading as a fact that holds now.
 func (r *Recaller) RecallAsOf(ctx context.Context, scopes []string, question string,
-	sources []string, at domain.AsOf) (domain.Bundle, error) {
+	sources []string, at domain.AsOf, hops int) (domain.Bundle, error) {
+	if hops < DirectHop {
+		hops = DirectHop
+	}
+	if hops > MaxHops {
+		// Clamped rather than refused. A caller asking for more than this gets the deepest answer
+		// the system gives, which is the useful outcome; refusing would turn a request for more
+		// memory into an error a caller has to handle on a path that otherwise cannot fail.
+		hops = MaxHops
+	}
 	if len(scopes) == 0 {
 		return domain.Bundle{}, nil
 	}
@@ -187,7 +224,7 @@ func (r *Recaller) RecallAsOf(ctx context.Context, scopes []string, question str
 	// One more than the row bound, so a full result is distinguishable from a truncated one without
 	// a second count query. The row bound is a guard on the QUERY — it stops an enormous budget
 	// asking the database for an unbounded read — and is not the unit the caller reasons in.
-	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.budget.MaxRows+1, sources, at)
+	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.budget.MaxRows+1, sources, at, hops)
 	if err != nil {
 		return domain.Bundle{}, err
 	}
