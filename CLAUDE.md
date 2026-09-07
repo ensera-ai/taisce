@@ -260,6 +260,28 @@ been measured silently costing a relation. So a prompt file does not change with
 corpus running, and the corpus is what says the edit was an improvement rather than a trade nobody
 priced.
 
+## 15. Every file says what it is for, and why it is that way
+
+**A package says what it is allowed to decide, and what it must not.** A reader arriving at
+`internal/api` should learn from the file that it handles transport and that every correctness
+argument lives below it — not have to infer that from the absence of one. The boundary a package
+holds is the most valuable thing about it and the least visible in its code.
+
+**A decision carries the alternative it beat.** This is rule 5 at the scale of a line: the register
+holds the choices a later reader would otherwise re-derive, and a comment holds the ones too small
+for the register and still not obvious. *"SHA-256 rather than a password hash, because a 256-bit
+random token has nothing to guess"* is a comment; *"hash the token"* is the code said twice.
+
+**Comments explain why. The code already says what.** A comment restating its line is worse than no
+comment: it rots silently, because nothing fails when it stops being true, and it teaches every
+reader that comments here are noise to skip — which is how the ones carrying an argument get skipped
+too.
+
+**The reason this is a rule and not a preference.** This codebase's reasoning *is* its value. Anyone
+can read what a function does; almost nobody can reconstruct why the boundary is where it is, what
+was tried, and what breaks if it moves. A file that carries that is one a stranger can change safely,
+and a file that does not is one only its author can maintain.
+
 ---
 
 # What this is
