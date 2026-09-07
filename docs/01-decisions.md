@@ -120,6 +120,33 @@ a roadmap that lies about what is coming).
 **How hard to undo.** Easy in code, since removing unbuilt scope removes nothing that runs. Hard in
 expectation, for the reason in D35.
 
+### D40 — The adapters are Python, Java and .NET, in that order
+
+Held against the argument that adoption should send us to TypeScript first, and kept.
+
+**Go where there is a named incumbent or no competitor, not where the noise is loudest.** .NET has a
+first-party memory seam already occupied, which makes the claim testable: a head-to-head against a
+specific thing a developer can name beats *"we also support this"*. Java has framework seams with no
+first-party competitor at all. Python is where agents are built. Each of those is a reason a
+developer would switch, rather than a place to be present.
+
+**Rejected: TypeScript first.** It is the largest agent ecosystem and it has a client here with no
+adapter, and that argument is real — recorded rather than dismissed, because it is the one that gets
+made again. It loses on differentiation: every memory product ships a TypeScript SDK, so arriving
+there means competing on presence in the most crowded seam, while the two seams where we would be
+either the only option or the challenger to a named one go unserved. The counter-argument is that
+crowding is evidence of where the users are, and if the first two adapters do not move adoption, that
+is the evidence that reopens this.
+
+**Also rejected:** one adapter taken all the way before a second exists (the second use case is what
+reveals the right shape, and deferring it defers the lesson); MCP as the primary surface instead of
+adapters (it reaches coding assistants, which are a different user from the agent applications the
+adapters target — so it is additional, not a substitute, and it stays on the roadmap as its own
+work).
+
+**How hard to undo.** Easy. It is an ordering, not a structure, and the conformance suite is written
+before any adapter moves so a fourth language is held to the same contract as the first three.
+
 ---
 
 ## Substrate
