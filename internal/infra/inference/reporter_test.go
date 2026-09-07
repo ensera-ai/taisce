@@ -39,9 +39,15 @@ func serving(t *testing.T, handler http.HandlerFunc) inference.Config {
 	t.Cleanup(server.Close)
 	// Built through the environment, so the allowlist is satisfied the way a deployment satisfies it:
 	// the test cannot reach a host it did not list either.
+	//
+	// EVERY inference variable is set, including the ones this test does not use. A test that sets
+	// only what it needs inherits the rest from whoever ran it — and that is not hypothetical: these
+	// passed under `make test` and failed under `make test-inference`, because a profile had exported
+	// an embedding endpoint that this test's allowlist does not name. A test whose result depends on
+	// the shell it was started from is not a test.
+	hermetic(t)
 	t.Setenv(inference.EnvEndpoint, server.URL+"/v1")
 	t.Setenv(inference.EnvModel, "test-model")
-	t.Setenv(inference.EnvAPIKey, "")
 	t.Setenv(inference.EnvAllowlist, strings.TrimPrefix(server.URL, "http://"))
 	config, err := inference.ConfigFromEnv()
 	if err != nil {

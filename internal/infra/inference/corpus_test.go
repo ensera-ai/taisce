@@ -263,6 +263,54 @@ func corpus() []corpusCase {
 	}
 }
 
+// transportTries is how many times one attempt is re-sent when the CALL fails.
+//
+// # Retrying the transport is not retrying the judgement
+//
+// A wrong relation is a measurement and is never re-rolled: that is the whole design of this corpus,
+// where a forbidden relation fails on a single occurrence. A 429 is not a measurement. It says the
+// provider was busy, and a run that records it as "no measurement" has lost a case to a queue rather
+// than learned anything about the prompt.
+//
+// Measured 2026-09-08 against a hosted provider on a shared pool: the same model answered 200 and 429
+// minutes apart, so a fifty-seven-call sequential run loses cases at random. An instrument that
+// silently measures a provider's queue instead of the wording is worse than one that is slow.
+//
+// # Why the service itself does not do this
+//
+// The extractor deliberately has no retry: a rate limit and a transient failure are the caller's to
+// handle, because the caller knows whether it is a batch that can wait or a path somebody is on. In
+// production a 429 costs a formation tick and the turn is picked up again. The corpus has no next
+// tick, so the recovery has to be here.
+const transportTries = 4
+
+// reach makes one attempt, re-sending only when the call itself failed.
+func reach(ctx context.Context, t *testing.T, extractor *extract.Extractor, message domain.Message,
+	attempt int) (extract.Result, error) {
+
+	var err error
+	for try := 0; try < transportTries; try++ {
+		if try > 0 {
+			// Linear rather than exponential, and short. The window being waited out is a shared
+			// pool refilling, which is seconds — an exponential backoff would turn a nineteen-case
+			// run into an afternoon for no more information.
+			select {
+			case <-time.After(time.Duration(try) * 5 * time.Second):
+			case <-ctx.Done():
+				return extract.Result{}, ctx.Err()
+			}
+			t.Logf("attempt %d: re-sending after a failed call (%d of %d): %v",
+				attempt+1, try+1, transportTries, err)
+		}
+		var result extract.Result
+		result, err = extractor.Extract(ctx, message)
+		if err == nil {
+			return result, nil
+		}
+	}
+	return extract.Result{}, err
+}
+
 // attempts per case. Three is enough to tell "never" from "not this time" without turning a
 // deliberate command into something nobody runs. It is not a statistical claim and does not pretend
 // to be one.
@@ -295,7 +343,13 @@ func TestTheExtractionCorpus(t *testing.T) {
 	}
 	defer pool.Close()
 
-	const name = "inf_corpus"
+	// The schema this run provisions. Named per run, because two providers are compared by running
+	// this against both — and a hardcoded name makes the second run drop the first one's schema out
+	// from under it, which looks like a provider failing rather than like two runs colliding.
+	name := os.Getenv("TAISCE_CORPUS_SCHEMA")
+	if name == "" {
+		name = "inf_corpus"
+	}
 	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS `+name+` CASCADE`); err != nil {
 		t.Fatalf("drop: %v", err)
 	}
@@ -330,13 +384,13 @@ func TestTheExtractionCorpus(t *testing.T) {
 			// caught it, and the only one of the two that survives a model change.
 			refusals := map[string]int{}
 			for attempt := 0; attempt < attempts; attempt++ {
-				result, err := extractor.Extract(ctx, message)
+				result, err := reach(ctx, t, extractor, message, attempt)
 				if err != nil {
 					// Said plainly, because it is not a result. A model call that failed says
 					// nothing about extraction, and a run that reports it the same way it reports a
 					// wrong relation teaches everyone to read a red corpus as "the model was slow".
-					t.Fatalf("attempt %d: NO MEASUREMENT — the model call failed, so this case "+
-						"asserts nothing about the prompt: %v", attempt+1, err)
+					t.Fatalf("attempt %d: NO MEASUREMENT — the model call failed %d times, so this "+
+						"case asserts nothing about the prompt: %v", attempt+1, transportTries, err)
 				}
 				for _, r := range result.Rejected {
 					refusals[r.Reason+" "+r.Predicate]++

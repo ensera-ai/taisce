@@ -67,15 +67,32 @@ signoff:
 # configuration FAILS rather than skips. A target whose whole purpose is to reach a live model, and
 # which passes when it did not, is worse than no target.
 #
-#   TAISCE_INFERENCE_ENDPOINT   base URL of an OpenAI-compatible endpoint
+#   make test-inference                        against a model on this machine
+#   make test-inference INFERENCE_PROFILE=openrouter   against a hosted one
+#
+# A profile sets the endpoint, the model and the allowlist. The key is yours to export:
+#
 #   TAISCE_INFERENCE_API_KEY    bearer token, if the endpoint wants one
-#   TAISCE_INFERENCE_EXTRACTOR_MODEL  the model to ask
-#   TAISCE_INFERENCE_ALLOWLIST  hosts permitted to receive message content, comma separated.
-#                               Empty permits nothing: the default has to be closed, because an
-#                               allowlist that opens when unset is one forgotten variable away from
-#                               not being one.
+#
+# The allowlist is the mechanism, not a formality. Empty permits nothing, because an allowlist that
+# opens when unset is one forgotten variable away from not being one — and every host that receives
+# somebody's words is listed, including a second endpoint that only embeds.
+# Which model this runs against. `local`, `openrouter` or `gpu` — see deploy/inference/.
+#
+# A profile carries an endpoint, a model and an allowlist. It never carries a key: a credential in a
+# committed file is a credential in the repository, so keys come from the environment and a profile
+# that needs one says so in its own comments.
+#
+# The profile is loaded first and the surrounding environment wins, so a single variable can be
+# overridden for one run without editing anything.
+INFERENCE_PROFILE ?= local
+
 test-inference:
-	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v ./internal/infra/inference/
+	@test -f deploy/inference/$(INFERENCE_PROFILE).env || \
+		{ echo "no such profile: deploy/inference/$(INFERENCE_PROFILE).env"; exit 1; }
+	@echo "inference profile: $(INFERENCE_PROFILE)"
+	set -a; . ./deploy/inference/$(INFERENCE_PROFILE).env; set +a; \
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v -timeout 3h ./internal/infra/inference/
 
 # Rewrite the prompt golden from the prompt file.
 #

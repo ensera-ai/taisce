@@ -7,6 +7,26 @@ import (
 	"github.com/ensera-ai/taisce/internal/infra/inference"
 )
 
+// hermetic clears every inference variable, so a test's result depends on what the test sets and on
+// nothing else.
+//
+// Not hypothetical. These tests passed under `make test` and failed under `make test-inference`,
+// because a profile had exported an embedding endpoint that no test's allowlist named — so a config
+// the test believed it had built entirely was half inherited from the shell. A test that only sets
+// what it uses is a test whose result depends on who ran it.
+//
+// The live measurements behind the `inference` tag deliberately read the environment, which is why
+// this is a helper the hermetic tests call rather than a clear applied to the whole package.
+func hermetic(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		inference.EnvEndpoint, inference.EnvAPIKey, inference.EnvModel, inference.EnvAllowlist,
+		inference.EnvEmbeddingEndpoint, inference.EnvEmbeddingAPIKey, inference.EnvEmbeddingModel,
+	} {
+		t.Setenv(name, "")
+	}
+}
+
 // ── The egress guard ──────────────────────────────────────────────────────────────────────────
 //
 // Extraction sends a customer's message text to a model. The endpoint is a string in the
@@ -17,6 +37,7 @@ import (
 // So the permitted hosts are named separately from the endpoint and the two must agree, and the
 // disagreement is fatal at startup rather than logged after the fact.
 func TestNoMessageContentLeavesForAnUnlistedHost(t *testing.T) {
+	hermetic(t)
 	for _, tc := range []struct {
 		name      string
 		endpoint  string
@@ -117,6 +138,7 @@ func TestNoMessageContentLeavesForAnUnlistedHost(t *testing.T) {
 // A trailing slash on the endpoint must not produce a doubled one in the path. Cosmetic against most
 // providers and a 404 against some, which is a confusing way to discover a configuration typo.
 func TestATrailingSlashOnTheEndpointIsTrimmed(t *testing.T) {
+	hermetic(t)
 	t.Setenv(inference.EnvEndpoint, "https://inference.example/v1/")
 	t.Setenv(inference.EnvAllowlist, "inference.example")
 	t.Setenv(inference.EnvModel, "a-model")
@@ -137,6 +159,7 @@ func TestATrailingSlashOnTheEndpointIsTrimmed(t *testing.T) {
 // machine still needs TLS, because the failure being prevented is a customer's conversations crossing
 // a network in the clear.
 func TestPlaintextIsPermittedOnlyToThisMachine(t *testing.T) {
+	hermetic(t)
 	for _, endpoint := range []string{
 		"http://localhost:11434/v1",
 		"http://127.0.0.1:11434/v1",
@@ -172,6 +195,7 @@ func TestPlaintextIsPermittedOnlyToThisMachine(t *testing.T) {
 // allowlist looks like it should be one too, and the failure is a silent refusal to form memory
 // rather than an obvious error.
 func TestTheAllowlistIsHostAndPortRatherThanAURL(t *testing.T) {
+	hermetic(t)
 	t.Setenv(inference.EnvEndpoint, "http://localhost:11434/v1")
 	t.Setenv(inference.EnvModel, "extractor")
 
@@ -196,6 +220,7 @@ func TestTheAllowlistIsHostAndPortRatherThanAURL(t *testing.T) {
 // somebody's words still has to be listed.
 
 func TestEmbeddingCanGoSomewhereElseAndStillHasToBeListed(t *testing.T) {
+	hermetic(t)
 	t.Setenv(inference.EnvEndpoint, "https://openrouter.ai/api/v1")
 	t.Setenv(inference.EnvModel, "qwen/qwen3.8-flash")
 	t.Setenv(inference.EnvAPIKey, "sk-generation")
@@ -236,6 +261,7 @@ func TestEmbeddingCanGoSomewhereElseAndStillHasToBeListed(t *testing.T) {
 
 // One provider is the ordinary case and needs one set of variables.
 func TestOneProviderNeedsOneEndpoint(t *testing.T) {
+	hermetic(t)
 	t.Setenv(inference.EnvEndpoint, "http://localhost:11434/v1")
 	t.Setenv(inference.EnvModel, "qwen3.6:35b-a3b-mxfp8")
 	t.Setenv(inference.EnvAPIKey, "sk-local")
@@ -258,6 +284,7 @@ func TestOneProviderNeedsOneEndpoint(t *testing.T) {
 // egress of exactly the data this product exists to hold, and the list is what makes permitting it a
 // deliberate act.
 func TestASecondEndpointObeysEveryRuleTheFirstOneDoes(t *testing.T) {
+	hermetic(t)
 	t.Setenv(inference.EnvEndpoint, "https://openrouter.ai/api/v1")
 	t.Setenv(inference.EnvModel, "qwen/qwen3.8-flash")
 	t.Setenv(inference.EnvEmbeddingModel, "some-embedder")
