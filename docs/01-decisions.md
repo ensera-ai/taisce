@@ -1054,6 +1054,49 @@ to be maintained per deployment, per language, forever).
 what it needs — a vector column partitioned by scope, an index per partition, a projection
 registration — is additive and the measurement that justifies it already exists in the repository.
 
+### D60 — Themes are searched by proximity to a written summary, which was measured to separate
+
+A thematic question is answered by comparing it to what was written about each subject. Measured, on
+the same embedder that failed to separate entity surfaces:
+
+| question | right subject | nearest wrong subject |
+|---|---|---|
+| "what is holding up the database work" | 0.5683 | 0.3735 |
+| "what is going on with card payments" | 0.5887 | 0.3416 |
+| "what do I do at weekends" | 0.4678 | 0.2618 |
+
+Weakest right 0.4678, strongest wrong 0.3735, **gap +0.0943**. The right subject is nearest in every
+case, and the distributions do not overlap.
+
+**The contrast with D59 is the finding, not the number.** The same embedder, on entity surfaces built
+by concatenating stored quotes, could not separate two migrations at all — adding the quotes made it
+worse, because a surface built from what was said about a thing is partly a surface about the kind of
+thing it is. Reports about the same two migrations separate by 0.23. What changed is that a summary
+NAMES what makes a subject different — Postgres and a schema, against Stripe and a card vault — where
+concatenated quotes pile up the vocabulary two subjects of one kind have in common.
+
+**So summarising is doing work that could not be done by assembling.** That is worth stating plainly
+because it is the opposite of the intuition that grounding a surface in raw evidence makes it sharper,
+and because it is the argument for a report being a written artefact rather than a bag of its material.
+
+**The hardest case is the one that matters most.** "What do I do at weekends" shares no word with any
+material — no entity, no relation, no quote — and lands on the cycling club at 0.4678 against 0.2618
+for the nearest wrong subject. That is a question entity-anchored recall cannot start on, answered.
+
+**What this does not establish.** Three questions against three subjects is a gap, not a distribution,
+and the threshold implied by it is not a number to ship. What it justifies is building the index; what
+a threshold needs is the measurement on a corpus with a distribution.
+
+**Rejected:** building the index on the strength of the argument alone (the entity surface had the same
+argument and failed); re-ranking passage hits by community membership instead (that is not searching
+the themes, and cannot surface a theme no single passage states); embedding a community's raw material
+rather than its summary (measured to be the weaker representation, in D59's numbers).
+
+**How hard to undo.** The measurement is cheap to repeat and lives in the repository, so a different
+embedder is an afternoon rather than an argument. The index built on top is a migration and a rebuild
+pass, which is reversible; what is not reversible is a threshold shipped before there is evidence for
+it, which is why there is not one.
+
 ---
 
 ## Substrate
