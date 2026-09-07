@@ -23,7 +23,11 @@ import (
 	"github.com/ensera-ai/taisce/internal/migrate"
 )
 
-const dataPassword = "credential-test-data-password"
+// The two plane roles are database-global, and every package's tests share one database. Establishing
+// them with a different password rotates it for whoever else is mid-run, so the value is the same
+// everywhere — a fact worth stating because the symptom is an unrelated package failing on
+// authentication and looking like a bug in its own code.
+const dataPassword = "taisce-test-data"
 
 func registry(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -36,7 +40,7 @@ func registry(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if err := migrate.EstablishPlanes(context.Background(), pool, "credential-test-control", dataPassword); err != nil {
+	if err := migrate.EstablishPlanes(context.Background(), pool, "taisce-test-control", dataPassword); err != nil {
 		t.Fatalf("establish planes: %v", err)
 	}
 	return pool

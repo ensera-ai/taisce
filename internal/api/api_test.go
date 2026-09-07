@@ -288,7 +288,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 
 	// The registry has to exist before a credential can: the fence was built before the thing it
 	// fences, which is the whole argument of the control migration.
-	if err := migrate.EstablishPlanes(ctx, pool, "control-test-password", "data-test-password"); err != nil {
+	if err := migrate.EstablishPlanes(ctx, pool, "taisce-test-control", "taisce-test-data"); err != nil {
 		t.Fatalf("establish planes: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS `+tenant+` CASCADE`); err != nil {

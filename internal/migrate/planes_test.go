@@ -35,8 +35,8 @@ func asDataPlane(t *testing.T, password string) *pgxpool.Pool {
 func establish(t *testing.T, pool *pgxpool.Pool, tenant string) string {
 	t.Helper()
 	ctx := context.Background()
-	const password = "plane-test-password"
-	if err := EstablishPlanes(ctx, pool, "control-test-password", password); err != nil {
+	const password = "taisce-test-data"
+	if err := EstablishPlanes(ctx, pool, "taisce-test-control", password); err != nil {
 		t.Fatalf("establish planes: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS `+tenant+` CASCADE`); err != nil {
@@ -156,7 +156,7 @@ func TestEstablishingThePlanesTwiceIsANoOp(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
 	establish(t, pool, "pl_twice")
-	if err := EstablishPlanes(ctx, pool, "control-test-password", "plane-test-password"); err != nil {
+	if err := EstablishPlanes(ctx, pool, "taisce-test-control", "taisce-test-data"); err != nil {
 		t.Fatalf("second establish: %v", err)
 	}
 }
@@ -165,7 +165,7 @@ func TestEstablishingThePlanesTwiceIsANoOp(t *testing.T) {
 // grant above decorative.
 func TestAPlaneIdentityWithoutAPasswordIsRefused(t *testing.T) {
 	pool := testPool(t)
-	if err := EstablishPlanes(context.Background(), pool, "control-test-password", ""); err == nil {
+	if err := EstablishPlanes(context.Background(), pool, "taisce-test-control", ""); err == nil {
 		t.Fatal("an identity with no password was established")
 	}
 }

@@ -237,8 +237,8 @@ func TestBootstrapIsIdempotentAndMintsOneCredential(t *testing.T) {
 	env[envTenant] = "cmd_bootstrap"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
-	t.Setenv("TAISCE_CONTROL_PASSWORD", "bootstrap-test-control")
-	t.Setenv("TAISCE_DATA_PASSWORD", "bootstrap-test-data")
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "taisce-test-data")
 
 	ctx := context.Background()
 	dropSchema(t, "cmd_bootstrap")
@@ -285,8 +285,8 @@ func TestCreatingAProjectIsRepeatable(t *testing.T) {
 	env[envTenant] = "cmd_project"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
-	t.Setenv("TAISCE_CONTROL_PASSWORD", "project-test-control")
-	t.Setenv("TAISCE_DATA_PASSWORD", "project-test-data")
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "taisce-test-data")
 
 	ctx := context.Background()
 	dropSchema(t, "cmd_project")
@@ -313,8 +313,8 @@ func TestACredentialCanBeMintedAndRevokedFromTheCommandLine(t *testing.T) {
 	env[envTenant] = "cmd_cred"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
-	t.Setenv("TAISCE_CONTROL_PASSWORD", "cred-test-control")
-	t.Setenv("TAISCE_DATA_PASSWORD", "cred-test-data")
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "taisce-test-data")
 
 	ctx := context.Background()
 	dropSchema(t, "cmd_cred")

@@ -121,24 +121,13 @@ func parseProposals(content string) ([]extract.Proposal, error) {
 		}
 	}
 
-	var envelope struct {
-		Claims []struct {
-			Subject     string  `json:"subject"`
-			Predicate   string  `json:"predicate"`
-			Object      string  `json:"object"`
-			Statement   string  `json:"statement"`
-			Confidence  float32 `json:"confidence"`
-			Quote       string  `json:"quote"`
-			SubjectType string  `json:"subject_type"`
-			ObjectType  string  `json:"object_type"`
-		} `json:"claims"`
-	}
-	if err := json.Unmarshal([]byte(content), &envelope); err != nil {
-		return nil, fmt.Errorf("model did not return the requested JSON: %w (%.200s)", err, content)
+	envelope, err := decodeEnvelope(content)
+	if err != nil {
+		return nil, err
 	}
 
-	proposals := make([]extract.Proposal, 0, len(envelope.Claims))
-	for _, c := range envelope.Claims {
+	proposals := make([]extract.Proposal, 0, len(*envelope.Claims))
+	for _, c := range *envelope.Claims {
 		proposals = append(proposals, extract.Proposal{
 			Subject:     c.Subject,
 			Predicate:   c.Predicate,
@@ -199,6 +188,97 @@ func newFence(content string) string {
 			return fence
 		}
 	}
+}
+
+// claimEnvelope is the reply contract.
+//
+// Claims is a POINTER so that an object WITHOUT the key is distinguishable from one whose list is
+// empty. That difference is what lets the locator below tell our document from some other object
+// that happened to parse, and getting it wrong would turn a misread reply into "this message asserts
+// nothing" — silently, on the write path.
+type claimEnvelope struct {
+	Claims *[]struct {
+		Subject     string  `json:"subject"`
+		Predicate   string  `json:"predicate"`
+		Object      string  `json:"object"`
+		Statement   string  `json:"statement"`
+		Confidence  float32 `json:"confidence"`
+		Quote       string  `json:"quote"`
+		SubjectType string  `json:"subject_type"`
+		ObjectType  string  `json:"object_type"`
+	} `json:"claims"`
+}
+
+// decodeEnvelope finds the reply inside whatever the model actually sent.
+//
+// # Why this is not simply json.Unmarshal over the body
+//
+// Measured, against a local model in JSON mode, on the fixture `I moved to Dublin last month.`:
+//
+//	claims":{"claims": [{"subject": "I", "predicate": "lives_in", ...}]}
+//
+// A fragment of the prompt's own shape, emitted before a perfectly formed document. Unmarshalling
+// the whole body failed on the first byte, so a correct extraction was discarded, the attempt was
+// counted, and the turn would eventually have been parked. Models do this. A strict parse over the
+// whole body makes our tolerance for it zero and makes the failure indistinguishable from a model
+// that cannot extract at all.
+//
+// # Why being tolerant here loosens no guarantee
+//
+// This locates the document. It does not relax what happens to it: the JSON is still decoded
+// strictly, every relation is still checked against the closed vocabulary, and every quote is still
+// located in the message by byte span. A claim arriving behind a prefix faces exactly the checks a
+// claim arriving cleanly faces.
+//
+// # Why it insists the claims key is present
+//
+// Decoding into a struct ignores unknown fields, so a single claim emitted without its envelope —
+// `{"subject": "I", "predicate": "lives_in", ...}` — would decode as an envelope holding no claims
+// and be read as an empty result. Requiring the key means an object that is not the envelope is
+// skipped and the search continues, and a body with no envelope anywhere is an ERROR rather than a
+// quiet nothing.
+func decodeEnvelope(content string) (claimEnvelope, error) {
+	// Bounded, because each candidate costs a decode attempt and a reply full of braces should not
+	// become a reply full of decode attempts.
+	const maxCandidates = 32
+
+	for offset, tried := 0, 0; tried < maxCandidates; tried++ {
+		relative := strings.IndexByte(content[offset:], '{')
+		if relative < 0 {
+			break
+		}
+		start := offset + relative
+		offset = start + 1
+
+		// A Decoder rather than Unmarshal: it reads one value and stops, so trailing text after the
+		// document — commentary, a second block, a stray brace — does not fail the parse.
+		var envelope claimEnvelope
+		if err := json.NewDecoder(strings.NewReader(content[start:])).Decode(&envelope); err != nil {
+			continue
+		}
+		if envelope.Claims == nil {
+			// It parsed, and it is some other object. Keep looking rather than reporting no claims.
+			continue
+		}
+		return envelope, nil
+	}
+
+	return claimEnvelope{}, fmt.Errorf(
+		"model did not return the requested JSON: no {\"claims\": [...]} object in the reply (%s)",
+		truncateForError(content))
+}
+
+// truncateForError bounds what a model's reply contributes to an error message.
+//
+// The reply can contain the message that was sent to it, which is a customer's words — and this
+// error is stored on the observation, where erasure reaches it. Bounded so that a remote system
+// cannot decide how much of that column it uses.
+func truncateForError(content string) string {
+	const max = 300
+	if len(content) <= max {
+		return content
+	}
+	return content[:max] + "…"
 }
 
 type chatRequest struct {
