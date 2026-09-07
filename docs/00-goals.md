@@ -88,18 +88,60 @@ is correct because the database will not store the violation.
 concurrency test asserting conflicting facts from N workers simultaneously, with no application lock
 in the path, and the constraint rejecting the overlap.
 
-### G5 — Communities and their summaries follow Microsoft GraphRAG
+### G5 — A question with no anchor is answered from themes the graph already has
 
-Hierarchical Leiden with GraphRAG's parameters, GraphRAG's report structure, and its bottom-up
-roll-up where sub-community reports substitute for raw context when a parent overflows.
+*What have I been going back and forth on this month?* names no entity and resembles no single
+passage. Entity-anchored recall cannot start — there is nothing to anchor on — and passage search
+returns whichever paragraph happens to share vocabulary with the question. The answer is a property of
+the graph rather than of any row in it: a group of entities that are densely connected to each other
+and sparsely connected to everything else is a subject the person has, whether or not they ever named
+it.
 
-Leiden rather than Louvain because its refinement phase guarantees a community is internally
-connected — a bridge node moved out of a Louvain community can leave two pieces no edge joins, and
-that gets summarised as though it were one subject.
+So the graph is partitioned into those groups and each group is summarised, and a thematic question
+searches the summaries. That is the whole mechanism, and every part of it is here because of a
+property it has to keep.
 
-**Proved by.** Determinism across runs, input orderings and machines, pinned to fixed random vectors
-so a toolchain upgrade cannot silently reorganise a customer's graph. Connectedness asserted on
-cliques, rings and barbells. And question classes that no single passage can answer.
+**Partitioned by connectedness, not by similarity.** The edges are typed relations somebody actually
+asserted, so a group is a set of things that genuinely bear on each other rather than a set of things
+whose text is alike. Clustering embeddings would produce topics; clustering asserted relations
+produces subjects.
+
+**Internally connected, which the algorithm has to guarantee rather than usually achieve.** Local
+moving alone can leave a group in two pieces that no edge joins — a bridge node moves out, nothing
+puts it back, and the two halves are then summarised as though they were one subject. A refinement
+pass between moving and aggregating is what makes connectedness a property of the output rather than
+a hope, and that is why the algorithm is chosen for it.
+
+**Hierarchical, because a question has a scale.** *What is going on at work* and *what is going on
+with the migration* are both thematic and they are not the same question. One partition answers one of
+them. Levels exist where a group was too large to be one subject and was split again, parents point at
+children explicitly, and a walk deepens rather than inferring descent from overlap.
+
+**Deterministic across runs, orderings and machines.** The refinement that guarantees connectedness is
+randomised by construction, so a fixed seed is necessary and not sufficient: a generator whose stream
+is not fixed by its own definition can be reorganised by a toolchain upgrade, and a customer whose
+themes silently regrouped cannot tell that from a defect. The generator is pinned, the preprocessing
+is ordered, and the output is asserted stable.
+
+**Every component, not the largest.** A corpus of documents about one subject has a giant component
+and noise around it. A person's memory does not: work, family, a hobby and a trip share no entity at
+all, and are four components of similar weight. Keeping only the largest would silently drop most of
+somebody's life.
+
+**Summaries roll up by substitution rather than truncation.** A group too large to summarise in one
+pass is summarised from its children's summaries — every subject stays present at lower resolution.
+Truncating the context instead keeps some subjects whole and drops others entirely, and which ones are
+dropped is an artefact of ordering rather than of importance.
+
+**What is not settled:** the numbers. How large a group may be before it is split, and how the
+resolution is set, are parameters with no argument behind them here yet — and a value adopted because
+it is a common default is one nobody can defend when it is challenged. They arrive with a measurement
+against a real scope or they are guesses.
+
+**Proved by.** Determinism across runs, input orderings and machines, pinned so a toolchain upgrade
+cannot reorganise a scope. Connectedness asserted on cliques, rings and barbells. A roll-up test where
+an oversized parent substitutes children rather than truncating. And question classes that no single
+passage and no single entity can answer.
 
 ### G5b — Three things are embedded, because three surfaces ask different questions
 

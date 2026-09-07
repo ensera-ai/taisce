@@ -269,8 +269,16 @@ func corpus() []corpusCase {
 const attempts = 3
 
 func TestTheExtractionCorpus(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
+	// The budget follows the work rather than being a number chosen once.
+	//
+	// A fixed forty minutes was right for seventeen cases against a model answering in six seconds,
+	// and it silently truncated a nineteen-case run against the same model answering in ninety —
+	// which reported as five failing cases rather than as five cases nobody measured. Per-case, the
+	// bound scales when the corpus grows and still stops a wedged provider holding the suite open.
+	budget := time.Duration(len(corpus())*attempts) * 3 * time.Minute
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
+	t.Logf("budget: %s for %d cases × %d attempts", budget, len(corpus()), attempts)
 
 	config, err := inference.ConfigFromEnv()
 	if err != nil {
@@ -324,7 +332,11 @@ func TestTheExtractionCorpus(t *testing.T) {
 			for attempt := 0; attempt < attempts; attempt++ {
 				result, err := extractor.Extract(ctx, message)
 				if err != nil {
-					t.Fatalf("attempt %d: extract: %v", attempt+1, err)
+					// Said plainly, because it is not a result. A model call that failed says
+					// nothing about extraction, and a run that reports it the same way it reports a
+					// wrong relation teaches everyone to read a red corpus as "the model was slow".
+					t.Fatalf("attempt %d: NO MEASUREMENT — the model call failed, so this case "+
+						"asserts nothing about the prompt: %v", attempt+1, err)
 				}
 				for _, r := range result.Rejected {
 					refusals[r.Reason+" "+r.Predicate]++
