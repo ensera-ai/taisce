@@ -27,6 +27,12 @@ type projectionKind struct {
 	kind  string
 	table string
 	idCol string
+	// survivesSharing is whether a projection of this kind is kept when another data subject also
+	// registered it. True for a shared identity — an entity means the same thing to everybody who
+	// registered it. False for anything holding text drawn from several people, where keeping it
+	// because somebody else also contributed leaves the departing subject's words in a row the
+	// erasure counted as retained.
+	survivesSharing bool
 }
 
 // Erase removes a data subject from a project and returns the receipt.
@@ -130,7 +136,8 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 // memory is exactly the silent gap this table exists to close.
 func declaredKinds(ctx context.Context, tx pgx.Tx, schema Schema) ([]projectionKind, error) {
 	rows, err := tx.Query(ctx, schema.SQL(`
-		SELECT kind, projection_table, id_column FROM {schema}.projection_kind ORDER BY kind`))
+		SELECT kind, projection_table, id_column, survives_sharing
+		  FROM {schema}.projection_kind ORDER BY kind`))
 	if err != nil {
 		return nil, fmt.Errorf("read projection kinds: %w", err)
 	}
@@ -139,7 +146,7 @@ func declaredKinds(ctx context.Context, tx pgx.Tx, schema Schema) ([]projectionK
 	var out []projectionKind
 	for rows.Next() {
 		var k projectionKind
-		if err := rows.Scan(&k.kind, &k.table, &k.idCol); err != nil {
+		if err := rows.Scan(&k.kind, &k.table, &k.idCol, &k.survivesSharing); err != nil {
 			return nil, err
 		}
 		out = append(out, k)
@@ -173,16 +180,38 @@ func deleteProjectionSQL(schema Schema, k projectionKind) string {
 	return schema.SQL(fmt.Sprintf(`
 DELETE FROM {schema}.%s t
  WHERE t.scope = $1
-   AND t.%s::text IN (
-        SELECT d.projection_id
-          FROM {schema}.projection_dependency d
-         WHERE d.scope = $1 AND d.projection_kind = %s AND d.data_subject_id = $2
+   AND t.%s::text IN (%s)`, k.table, k.idCol, selectErasableSQL(k)))
+}
+
+// selectErasableSQL is the predicate that decides what an erasure removes, and it is used verbatim by
+// the count afterwards.
+//
+// # The clause a kind can switch off
+//
+// A projection another subject also registered is kept — `Ensera` is registered by everybody who
+// mentioned it, and removing it because one of them left would take a node out of everybody else's
+// graph. That is right for a shared IDENTITY, whose row means the same thing to each registrant.
+//
+// It is wrong for shared TEXT. A report written from several people's words contains each of them, so
+// keeping it because somebody else also contributed leaves the departing subject's material in a row
+// the erasure walked past and counted as correctly retained. The kind declares which it is
+// (`survives_sharing`), so the question is answered where the table name is rather than in the eraser,
+// and a kind added later cannot avoid answering it.
+func selectErasableSQL(k projectionKind) string {
+	shared := `
            AND NOT EXISTS (
                 SELECT 1 FROM {schema}.projection_dependency other
                  WHERE other.projection_kind = d.projection_kind
                    AND other.projection_id   = d.projection_id
-                   AND other.data_subject_id IS DISTINCT FROM $2))`,
-		k.table, k.idCol, quoteLiteral(k.kind)))
+                   AND other.data_subject_id IS DISTINCT FROM $2)`
+	if !k.survivesSharing {
+		shared = ""
+	}
+	return fmt.Sprintf(`
+        SELECT d.projection_id
+          FROM {schema}.projection_dependency d
+         WHERE d.scope = $1 AND d.projection_kind = %s AND d.data_subject_id = $2%s`,
+		quoteLiteral(k.kind), shared)
 }
 
 // countResidualSQL counts, against the same predicate, what is still there.
@@ -195,16 +224,7 @@ func countResidualSQL(schema Schema, k projectionKind) string {
 SELECT count(*)
   FROM {schema}.%s t
  WHERE t.scope = $1
-   AND t.%s::text IN (
-        SELECT d.projection_id
-          FROM {schema}.projection_dependency d
-         WHERE d.scope = $1 AND d.projection_kind = %s AND d.data_subject_id = $2
-           AND NOT EXISTS (
-                SELECT 1 FROM {schema}.projection_dependency other
-                 WHERE other.projection_kind = d.projection_kind
-                   AND other.projection_id   = d.projection_id
-                   AND other.data_subject_id IS DISTINCT FROM $2))`,
-		k.table, k.idCol, quoteLiteral(k.kind)))
+   AND t.%s::text IN (%s)`, k.table, k.idCol, selectErasableSQL(k)))
 }
 
 // quoteLiteral renders a kind as a SQL string literal.

@@ -703,3 +703,136 @@ func TestTheAuditStoreRefusesAnUncountableEntry(t *testing.T) {
 		t.Fatalf("the ledger read back %+v", entries)
 	}
 }
+
+// ── D57: sharing saves an identity and must not save text ─────────────────────────────────────
+
+// The rule that keeps a shared entity is right for an identity and wrong for anything holding several
+// people's words. Before this, one rule covered every kind — and the kind it would have been wrong for
+// is the one D57 is about.
+//
+// Built with a projection kind declared for the test rather than with a real report, because the
+// report table does not exist yet and the mechanism does: what has to hold is that a kind saying
+// sharing does not save it is erased even when somebody else registered it, in the same sweep, counted
+// in the same receipt.
+func TestAKindThatAggregatesTextIsNotSavedByBeingShared(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_shared_text")
+	formed(t, pool, schema,
+		subjectTurn("subject-1", "Marta works at Ensera."),
+		subjectTurn("subject-2", "Tomas works at Ensera."))
+
+	// A kind that holds text drawn from both subjects, declared the way a report would be.
+	if _, err := pool.Exec(ctx, schema.SQL(`
+		CREATE TABLE {schema}.digest (
+		    digest_id uuid PRIMARY KEY,
+		    scope     text NOT NULL,
+		    body      text NOT NULL)`)); err != nil {
+		t.Fatalf("create the table: %v", err)
+	}
+	if _, err := pool.Exec(ctx, schema.SQL(`
+		INSERT INTO {schema}.projection_kind
+		    (kind, projection_table, id_column, description, survives_sharing)
+		VALUES ('digest', 'digest', 'digest_id', 'Prose written from what several people said.', false)`)); err != nil {
+		t.Fatalf("declare the kind: %v", err)
+	}
+
+	var digest string
+	if err := pool.QueryRow(ctx, schema.SQL(`
+		INSERT INTO {schema}.digest (digest_id, scope, body)
+		VALUES (gen_random_uuid(), 'p1', 'Marta and Tomas both work at Ensera.')
+		RETURNING digest_id::text`)).Scan(&digest); err != nil {
+		t.Fatalf("write the digest: %v", err)
+	}
+	// Registered to both subjects' observations, which is what a report over a community would be.
+	rows, err := pool.Query(ctx, schema.SQL(
+		`SELECT observation_id::text, data_subject_id FROM {schema}.observation WHERE scope = 'p1'`))
+	if err != nil {
+		t.Fatalf("read observations: %v", err)
+	}
+	type registration struct{ observation, subject string }
+	var registrations []registration
+	for rows.Next() {
+		var r registration
+		if err := rows.Scan(&r.observation, &r.subject); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		registrations = append(registrations, r)
+	}
+	rows.Close()
+	if len(registrations) != 2 {
+		t.Fatalf("expected two observations, got %d", len(registrations))
+	}
+	for _, r := range registrations {
+		if _, err := pool.Exec(ctx, schema.SQL(`
+			INSERT INTO {schema}.projection_dependency
+			    (source_observation_id, scope, projection_kind, projection_id, data_subject_id)
+			VALUES ($1, 'p1', 'digest', $2, $3)`), r.observation, digest, r.subject); err != nil {
+			t.Fatalf("register: %v", err)
+		}
+	}
+
+	receipt, err := pg.NewEraser(pool).Erase(ctx, schema, "p1", "subject-1", "subject request")
+	if err != nil {
+		t.Fatalf("erase: %v", err)
+	}
+	if !receipt.Clean() {
+		t.Fatalf("the erasure left a residual: %+v", receipt.Residual)
+	}
+
+	var digests, entities int
+	if err := pool.QueryRow(ctx, schema.SQL(`
+		SELECT (SELECT count(*) FROM {schema}.digest),
+		       (SELECT count(*) FROM {schema}.entity WHERE normalized_name = 'ensera')`)).
+		Scan(&digests, &entities); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if digests != 0 {
+		t.Fatal("prose containing the departing subject's words was kept because somebody else " +
+			"also contributed to it, and the receipt reported a clean erasure")
+	}
+	// And the identity is still shared, so this did not simply delete more of everything.
+	if entities != 1 {
+		t.Fatal("a shared entity was removed too, which would take a node out of the other " +
+			"subject's graph")
+	}
+	if receipt.Deleted["digest"] != 1 {
+		t.Fatalf("the receipt says %d digests were deleted", receipt.Deleted["digest"])
+	}
+}
+
+// The default is the safe one. A kind added by somebody who did not read the migration deletes too
+// much rather than leaking — over-deletion is visible to the person who lost data, and a leak is
+// visible to nobody.
+func TestAKindThatDoesNotSayIsTreatedAsHoldingText(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_default_share")
+
+	if _, err := pool.Exec(ctx, schema.SQL(`
+		INSERT INTO {schema}.projection_kind (kind, projection_table, id_column, description)
+		VALUES ('unstated', 'chunk', 'chunk_id', 'A kind whose author did not answer the question.')`)); err != nil {
+		t.Fatalf("declare: %v", err)
+	}
+	var survives bool
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT survives_sharing FROM {schema}.projection_kind WHERE kind = 'unstated'`)).
+		Scan(&survives); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if survives {
+		t.Fatal("a kind that said nothing about sharing acquired the setting that leaks")
+	}
+
+	// And the four that were declared before the question existed keep what they did.
+	for _, kind := range []string{"chunk", "fact", "entity", "rejected_claim"} {
+		if err := pool.QueryRow(ctx, schema.SQL(
+			`SELECT survives_sharing FROM {schema}.projection_kind WHERE kind = $1`), kind).
+			Scan(&survives); err != nil {
+			t.Fatalf("read %s: %v", kind, err)
+		}
+		if !survives {
+			t.Fatalf("%q changed behaviour, and this migration is not the place to do that", kind)
+		}
+	}
+}
