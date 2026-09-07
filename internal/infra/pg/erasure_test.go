@@ -12,6 +12,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/extract"
 	"github.com/ensera-ai/taisce/internal/formation"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
+	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/ensera-ai/taisce/internal/recall"
 )
 
@@ -456,5 +457,249 @@ func TestAnExportIsInternallyConsistent(t *testing.T) {
 	}
 	if export.Rows()["fact"] != len(export.Sections["fact"]) {
 		t.Fatal("the row count does not match the rows")
+	}
+}
+
+// ── #55: retention ────────────────────────────────────────────────────────────────────────────
+
+// An expired turn takes its projections with it, and the sweep reports what went.
+//
+// The observation is what expires, not the fact: the log is authoritative and everything else derives
+// from it, so a fact outliving the message that produced it would have a citation resolving against
+// nothing — which is exactly the thing this product does not offer.
+func TestAnExpiredTurnTakesItsProjectionsWithIt(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_retention")
+	if err := migrate.ProvisionScope(ctx, pool, schema.String(), "p1"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	// An interval so short that the turn is expired the moment it is written.
+	if _, err := pool.Exec(ctx, schema.SQL(
+		`UPDATE {schema}.project SET retention = interval '1 microsecond' WHERE scope = 'p1'`)); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
+		Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany, Object: "Ensera",
+		Statement: "The user works at Ensera.", Quote: "I work at Ensera", ByteStart: 0, ByteEnd: 16,
+	}); err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+
+	// The expiry was stamped at write time, from the project's policy.
+	var stamped bool
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT retention_until IS NOT NULL FROM {schema}.observation WHERE observation_id = $1`),
+		stored.ID).Scan(&stamped); err != nil {
+		t.Fatalf("read stamp: %v", err)
+	}
+	if !stamped {
+		t.Fatal("a turn written into a project with a retention policy has no expiry")
+	}
+
+	sweep, err := pg.NewRetentionStore(pool, schema).Sweep(ctx, "p1", 100)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if sweep.Observations != 1 {
+		t.Fatalf("the sweep expired %d turns, wanted 1", sweep.Observations)
+	}
+	if sweep.Deleted["fact"] == 0 {
+		t.Fatal("the turn expired and its facts did not, so a citation now resolves against nothing")
+	}
+
+	// And nothing derived from it survives.
+	for _, table := range []string{"observation", "turn_message", "fact", "fact_evidence",
+		"projection_dependency"} {
+		var n int
+		if err := pool.QueryRow(ctx, schema.SQL(
+			`SELECT count(*) FROM {schema}.`+table)).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if n != 0 {
+			t.Fatalf("%d rows survived in %s", n, table)
+		}
+	}
+}
+
+// A project with no retention policy keeps everything, and a sweep over it finds nothing.
+//
+// NULL is a policy — keep — rather than an absence of one, and the failure being prevented is a sweep
+// that treats "unset" as "expire immediately".
+func TestAProjectWithNoPolicyKeepsEverything(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_noretention")
+	if err := migrate.ProvisionScope(ctx, pool, schema.String(), "p1"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	obs := pg.NewObservationStore(pool)
+	if _, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	sweep, err := pg.NewRetentionStore(pool, schema).Sweep(ctx, "p1", 100)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if !sweep.Empty() {
+		t.Fatalf("a project with no policy expired %d turns", sweep.Observations)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.observation`)).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("%d observations survived a sweep that should have done nothing", n)
+	}
+}
+
+// Shortening a policy does not reach back. The turn keeps the expiry it was written under.
+//
+// The same reasoning as memory surfaces only growing: a configuration change that retroactively
+// destroys memory is a change discovered by whoever made it. Removing what is already held is an
+// erasure with a receipt.
+func TestShorteningAPolicyDoesNotExpireWhatIsAlreadyHeld(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_shorten")
+	if err := migrate.ProvisionScope(ctx, pool, schema.String(), "p1"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, schema.SQL(
+		`UPDATE {schema}.project SET retention = interval '10 years' WHERE scope = 'p1'`)); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+
+	obs := pg.NewObservationStore(pool)
+	if _, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// The operator shortens the policy to something that would have expired it long ago.
+	if _, err := pool.Exec(ctx, schema.SQL(
+		`UPDATE {schema}.project SET retention = interval '1 microsecond' WHERE scope = 'p1'`)); err != nil {
+		t.Fatalf("shorten: %v", err)
+	}
+
+	sweep, err := pg.NewRetentionStore(pool, schema).Sweep(ctx, "p1", 100)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if !sweep.Empty() {
+		t.Fatal("shortening a policy retroactively deleted memory that was within policy when written")
+	}
+}
+
+// A sweep takes at most what it was asked for, so a large expiry does not become one enormous
+// transaction that holds locks across every project on the instance.
+func TestASweepIsBounded(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_bounded")
+	if err := migrate.ProvisionScope(ctx, pool, schema.String(), "p1"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, schema.SQL(
+		`UPDATE {schema}.project SET retention = interval '1 microsecond' WHERE scope = 'p1'`)); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+
+	obs := pg.NewObservationStore(pool)
+	for i := 0; i < 5; i++ {
+		if _, err := obs.Append(ctx, schema, turnOf(
+			domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+		)); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	retention := pg.NewRetentionStore(pool, schema)
+	first, err := retention.Sweep(ctx, "p1", 2)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if first.Observations != 2 {
+		t.Fatalf("a sweep limited to 2 took %d", first.Observations)
+	}
+
+	// The rest go on subsequent passes rather than being forgotten.
+	total := first.Observations
+	for i := 0; i < 5 && total < 5; i++ {
+		next, err := retention.Sweep(ctx, "p1", 2)
+		if err != nil {
+			t.Fatalf("sweep: %v", err)
+		}
+		if next.Empty() {
+			break
+		}
+		total += next.Observations
+	}
+	if total != 5 {
+		t.Fatalf("%d of 5 expired turns were removed across repeated sweeps", total)
+	}
+
+	// A sweep with no limit given picks a default rather than taking everything or nothing.
+	if _, err := retention.Sweep(ctx, "p1", 0); err != nil {
+		t.Fatalf("a sweep with no limit failed: %v", err)
+	}
+	// And a project that does not exist is not an error — it has nothing to expire.
+	empty, err := retention.Sweep(ctx, "never-existed", 10)
+	if err != nil {
+		t.Fatalf("sweeping an unknown project errored: %v", err)
+	}
+	if !empty.Empty() {
+		t.Fatal("an unknown project expired something")
+	}
+}
+
+// The ledger refuses an entry it cannot count, and the refusal reaches the caller rather than being
+// swallowed by the store.
+func TestTheAuditStoreRefusesAnUncountableEntry(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_auditrefuse")
+	audit := pg.NewAuditStore(pool, schema)
+
+	if err := audit.Append(ctx, domain.AuditEntry{
+		Operation: "exfiltrate", Principal: "p",
+		PrincipalKind: domain.PrincipalSystem, Outcome: domain.OutcomeAllowed,
+	}); err == nil {
+		t.Fatal("the store accepted an operation the ledger does not record")
+	}
+	if err := audit.Append(ctx, domain.AuditEntry{
+		Operation: domain.AuditRecall, Principal: "",
+		PrincipalKind: domain.PrincipalSystem, Outcome: domain.OutcomeAllowed,
+	}); err == nil {
+		t.Fatal("the store accepted an unattributed operation")
+	}
+
+	// A valid one goes in, and comes back.
+	if err := audit.Append(ctx, domain.AuditEntry{
+		Operation: domain.AuditRecall, Principal: "cred-1", Project: "p1",
+		PrincipalKind: domain.PrincipalCredential, Outcome: domain.OutcomeAllowed, Magnitude: 3,
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	entries, err := audit.Recent(ctx, 0)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Magnitude != 3 {
+		t.Fatalf("the ledger read back %+v", entries)
 	}
 }

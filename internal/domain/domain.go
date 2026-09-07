@@ -582,3 +582,20 @@ func (e Export) Rows() map[string]int {
 	}
 	return out
 }
+
+// RetentionSweep is what a retention run removed.
+//
+// A receipt rather than a log line, for the same reason an erasure produces one: a sweep that deletes
+// quietly is indistinguishable from data loss, and "memory disappeared" has to be answerable rather
+// than alarming.
+type RetentionSweep struct {
+	Scope string
+	// Observations is how many turns expired. Deleted is what went per projection kind, which is the
+	// same shape an erasure receipt reports so the two can be read the same way.
+	Observations int
+	Deleted      map[string]int
+	SweptAt      time.Time
+}
+
+// Empty reports whether the sweep found nothing to do, which is the ordinary case.
+func (s RetentionSweep) Empty() bool { return s.Observations == 0 }

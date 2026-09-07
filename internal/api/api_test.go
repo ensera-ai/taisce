@@ -925,3 +925,58 @@ func TestAnExportIsRecordedInTheLedger(t *testing.T) {
 	}
 	t.Fatal("an export left no ledger row")
 }
+
+// A ledger failure does not fail the request that produced it.
+//
+// Deliberate, and a real weakness: a gap in the record is what the record exists to make impossible.
+// It is the better of two, because a ledger write that could refuse a customer's data for reasons
+// unrelated to their data is a ledger an operator switches off — and a switched-off ledger records
+// nothing at all.
+func TestARequestSucceedsEvenIfTheLedgerCannot(t *testing.T) {
+	h := newHarness(t, "api_ledger_broken")
+	ctx := context.Background()
+
+	// Break the ledger underneath the running server.
+	if _, err := h.pool.Exec(ctx, h.schema.SQL(`ALTER TABLE {schema}.audit_entry RENAME TO audit_entry_moved`)); err != nil {
+		t.Fatalf("break the ledger: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = h.pool.Exec(context.Background(), h.schema.SQL(
+			`ALTER TABLE {schema}.audit_entry_moved RENAME TO audit_entry`))
+	})
+
+	// The operation still succeeds. A customer's write is not refused because our bookkeeping is
+	// unwell.
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"data_subject_id": "subject-1",
+		"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
+	}, http.StatusCreated, nil)
+}
+
+// A refused authentication with a short or absent token is still recorded, and records nothing that
+// could be a secret.
+func TestARefusedAuthenticationRecordsNoSecret(t *testing.T) {
+	h := newHarness(t, "api_shorttoken")
+	ctx := context.Background()
+
+	for _, token := range []string{"", "short", "tsk_aaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
+		h.raw(t, http.MethodGet, "/v1/freshness", nil, token)
+	}
+	entries, err := pg.NewAuditStore(h.pool, h.schema).Recent(ctx, 50)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	recorded := 0
+	for _, e := range entries {
+		if e.Operation != domain.AuditAuthenticate {
+			continue
+		}
+		recorded++
+		if len(e.Principal) > 12 {
+			t.Fatalf("the ledger recorded %d characters of a presented token", len(e.Principal))
+		}
+	}
+	if recorded < 2 {
+		t.Fatalf("%d refused authentications recorded", recorded)
+	}
+}

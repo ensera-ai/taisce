@@ -98,6 +98,20 @@ func (s *ObservationStore) Append(ctx context.Context, schema Schema, turn domai
 			}
 		}
 
+		// The expiry, from the project's own policy, stamped in the same transaction as the write.
+		//
+		// Stamped rather than computed at sweep time so that the policy which applied when a turn
+		// arrived is the policy that governs it, and so an operator can see when a row will go
+		// rather than deriving it. Shortening a policy therefore applies to what arrives next;
+		// removing what is already held is an erasure with a receipt, not a configuration change
+		// that destroys things quietly.
+		//
+		// A project with no policy leaves this NULL, which means keep — a decision rather than an
+		// absence of one, and the sweep reads it as such.
+		if _, err := tx.Exec(ctx, schema.SQL(stampRetentionSQL), id, turn.Scope); err != nil {
+			return fmt.Errorf("stamp retention: %w", err)
+		}
+
 		out = domain.Observation{
 			ID:            id.String(),
 			LogOffset:     offset,
@@ -110,6 +124,15 @@ func (s *ObservationStore) Append(ctx context.Context, schema Schema, turn domai
 	})
 	return out, err
 }
+
+// The project may not exist — a write to an unprovisioned scope still lands, deliberately, because
+// losing memory to a missed provisioning step is the worse failure. No project row means no policy
+// means keep, which is the same answer as a project with no policy.
+const stampRetentionSQL = `
+UPDATE {schema}.observation o
+   SET retention_until = now() + p.retention
+  FROM {schema}.project p
+ WHERE o.observation_id = $1 AND p.scope = $2 AND p.retention IS NOT NULL`
 
 func nullIfEmpty(s string) any {
 	if s == "" {
@@ -493,4 +516,27 @@ func (s *ObservationStore) ScopesWithBacklog(ctx context.Context, schema Schema)
 		scopes = append(scopes, scope)
 	}
 	return scopes, rows.Err()
+}
+
+// ScopesWithRetention names the projects that have an expiry policy.
+//
+// Asked rather than assumed, because sweeping a project with no policy is a scan that can only find
+// nothing — and in an instance where most projects keep indefinitely, that is most of the work.
+func (s *ObservationStore) ScopesWithRetention(ctx context.Context, schema Schema) ([]string, error) {
+	rows, err := s.pool.Query(ctx, schema.SQL(
+		`SELECT scope FROM {schema}.project WHERE retention IS NOT NULL ORDER BY scope`))
+	if err != nil {
+		return nil, fmt.Errorf("list scopes with retention: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var scope string
+		if err := rows.Scan(&scope); err != nil {
+			return nil, err
+		}
+		out = append(out, scope)
+	}
+	return out, rows.Err()
 }

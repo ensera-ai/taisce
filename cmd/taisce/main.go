@@ -289,7 +289,7 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 	policy := formation.DefaultPolicy()
 	driver := formation.NewDriver(
 		formation.NewWorkerWithPolicy(memory, observations, former, policy),
-		observations, schema, policy, log)
+		observations, pg.NewRetentionStore(memory, schema), schema, policy, log)
 
 	go func() {
 		defer close(stopped)

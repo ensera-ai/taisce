@@ -349,3 +349,36 @@ func TestASchemaNameThatWouldCollideIsRefused(t *testing.T) {
 		t.Fatalf("a name at the limit must be accepted: %v", err)
 	}
 }
+
+// Provisioning a tenant twice is a no-op, and a schema name that cannot be an identifier is refused
+// before it reaches a statement.
+//
+// The second is not tidiness: a schema name is interpolated because DDL cannot take a bind value, so
+// validation is the thing standing between a name and a statement.
+func TestProvisioningATenantIsRepeatableAndRefusesABadName(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+
+	// Again, which is what a chart does on every start.
+	if err := ProvisionTenant(ctx, pool, tenant); err != nil {
+		t.Fatalf("provisioning twice failed: %v", err)
+	}
+
+	for _, bad := range []string{"has spaces", "Uppercase", "1leading", "drop; --", ""} {
+		if err := ProvisionTenant(ctx, pool, bad); err == nil {
+			t.Fatalf("provisioned a tenant named %q", bad)
+		}
+	}
+
+	// And public is still there, which is the assertion the loop above is for.
+	var alive bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'public')`).
+		Scan(&alive); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !alive {
+		t.Fatal("a tenant name reached a statement")
+	}
+}

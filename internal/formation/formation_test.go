@@ -650,7 +650,7 @@ func TestTheDriverFindsScopesItWasNeverToldAbout(t *testing.T) {
 
 	driver := formation.NewDriver(
 		workerWith(t, pool, schema, scriptedModel{}, impatient()),
-		observations, schema, impatient(), quietLogger())
+		observations, pg.NewRetentionStore(pool, schema), schema, impatient(), quietLogger())
 
 	pass, err := driver.Once(ctx)
 	if err != nil {
@@ -702,7 +702,7 @@ func TestAScopeThatFailsDoesNotStopTheOthersForming(t *testing.T) {
 
 	driver := formation.NewDriver(
 		workerWith(t, pool, schema, selective{}, impatient()),
-		observations, schema, impatient(), quietLogger())
+		observations, pg.NewRetentionStore(pool, schema), schema, impatient(), quietLogger())
 
 	pass, err := driver.Once(ctx)
 	if err != nil {
@@ -750,7 +750,7 @@ func TestTheDriverFormsAScopeWithoutAnybodyAskingIt(t *testing.T) {
 	policy.Interval = 20 * time.Millisecond
 	driver := formation.NewDriver(
 		workerWith(t, pool, schema, scriptedModel{}, policy),
-		observations, schema, policy, quietLogger())
+		observations, pg.NewRetentionStore(pool, schema), schema, policy, quietLogger())
 
 	running, stop := context.WithCancel(ctx)
 	returned := make(chan error, 1)
@@ -811,7 +811,7 @@ func TestASecondDriverDoesNotFormTheSameTurnTwice(t *testing.T) {
 	policy := impatient()
 	newDriver := func() *formation.Driver {
 		return formation.NewDriver(workerWith(t, pool, schema, scriptedModel{}, policy),
-			observations, schema, policy, quietLogger())
+			observations, pg.NewRetentionStore(pool, schema), schema, policy, quietLogger())
 	}
 
 	// Run two passes concurrently. Whichever loses the lock reports the scope busy and forms
@@ -891,5 +891,74 @@ func TestRecordingAFailureAgainstAFormedOrAbsentTurnIsANoOp(t *testing.T) {
 	// And an observation that does not exist at all.
 	if err := observations.Unpark(ctx, schema, "00000000-0000-0000-0000-000000000000"); err != nil {
 		t.Fatalf("unparking an absent turn errored: %v", err)
+	}
+}
+
+// The driver sweeps retention as well as forming, on its own schedule.
+//
+// Separate from a formation pass rather than folded into it, because the two answer to different
+// clocks: formation runs when there is a backlog, retention runs whether or not anything was written.
+// Folded together, a quiet project would never expire anything.
+func TestTheDriverSweepsRetention(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_retention")
+	if err := migrate.ProvisionScope(ctx, pool, schema.String(), "p1"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, schema.SQL(
+		`UPDATE {schema}.project SET retention = interval '1 microsecond' WHERE scope = 'p1'`)); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+
+	observations := pg.NewObservationStore(pool)
+	if _, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	driver := formation.NewDriver(
+		workerWith(t, pool, schema, scriptedModel{}, impatient()),
+		observations, pg.NewRetentionStore(pool, schema), schema, impatient(), quietLogger())
+
+	if err := driver.SweepRetention(ctx); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.observation`)).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("%d expired observations survived the driver's sweep", n)
+	}
+}
+
+// A project with no retention policy is not swept at all.
+//
+// Asked rather than assumed: sweeping a project with no policy is a scan that can only find nothing,
+// and in an instance where most projects keep indefinitely that is most of the work.
+func TestOnlyProjectsWithAPolicyAreSwept(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_noretention")
+	observations := pg.NewObservationStore(pool)
+
+	for _, scope := range []string{"kept", "expiring"} {
+		if err := migrate.ProvisionScope(ctx, pool, schema.String(), scope); err != nil {
+			t.Fatalf("provision %s: %v", scope, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, schema.SQL(
+		`UPDATE {schema}.project SET retention = interval '1 microsecond' WHERE scope = 'expiring'`)); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+
+	scopes, err := observations.ScopesWithRetention(ctx, schema)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(scopes) != 1 || scopes[0] != "expiring" {
+		t.Fatalf("scopes with a policy: %v", scopes)
 	}
 }

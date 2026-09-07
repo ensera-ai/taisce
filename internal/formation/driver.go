@@ -30,18 +30,20 @@ import (
 type Driver struct {
 	worker       *Worker
 	observations *pg.ObservationStore
+	retention    *pg.RetentionStore
 	schema       pg.Schema
 	policy       Policy
 	log          *slog.Logger
 }
 
 // NewDriver builds the driver over a worker that already knows how to drain one scope.
-func NewDriver(worker *Worker, observations *pg.ObservationStore, schema pg.Schema,
-	policy Policy, log *slog.Logger) *Driver {
+func NewDriver(worker *Worker, observations *pg.ObservationStore, retention *pg.RetentionStore,
+	schema pg.Schema, policy Policy, log *slog.Logger) *Driver {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Driver{worker: worker, observations: observations, schema: schema, policy: policy, log: log}
+	return &Driver{worker: worker, observations: observations, retention: retention,
+		schema: schema, policy: policy, log: log}
 }
 
 // Pass is one sweep over every scope that has work waiting.
@@ -91,6 +93,38 @@ func (d *Driver) Once(ctx context.Context) (Pass, error) {
 	return pass, nil
 }
 
+// SweepRetention removes what has expired, across every project that has any.
+//
+// Separate from a formation pass rather than folded into it, because the two answer to different
+// clocks: formation runs when there is a backlog, and retention runs whether or not anything was
+// written. Folding them together would mean a quiet project never expiring anything.
+//
+// It reports what it removed rather than only whether it ran. A sweep that deletes quietly is
+// indistinguishable from data loss, and the count is what makes "memory disappeared" answerable.
+func (d *Driver) SweepRetention(ctx context.Context) error {
+	scopes, err := d.observations.ScopesWithRetention(ctx, d.schema)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		sweep, err := d.retention.Sweep(ctx, scope, 500)
+		if err != nil {
+			// One project's failure does not stop another's, for the same reason a failing scope
+			// does not stop formation: it would make one bad project hold everybody's policy.
+			d.log.Error("retention sweep failed", "scope", scope, "error", err)
+			continue
+		}
+		if !sweep.Empty() {
+			d.log.Info("retention swept", "scope", scope,
+				"observations", sweep.Observations, "deleted", sweep.Deleted)
+		}
+	}
+	return nil
+}
+
 // Run drives passes until the context ends.
 //
 // It waits between passes rather than polling continuously, and the wait is the same whether the
@@ -106,6 +140,10 @@ func (d *Driver) Run(ctx context.Context) error {
 	ticker := time.NewTicker(d.policy.Interval)
 	defer ticker.Stop()
 
+	// Swept on the first pass rather than after an interval, so an instance restarted after a long
+	// stop expires what it should have while it was down.
+	var lastSweep time.Time
+
 	for {
 		pass, err := d.Once(ctx)
 		if err != nil && ctx.Err() == nil {
@@ -119,6 +157,16 @@ func (d *Driver) Run(ctx context.Context) error {
 			d.log.Info("formation pass",
 				"scopes", pass.Scopes, "formed", pass.Formed,
 				"busy", pass.Busy, "errored", pass.Errored)
+		}
+
+		// Retention runs on the same tick as formation but on its own schedule: only when the
+		// interval since the last sweep has passed, because expiry is a daily-scale concern and
+		// running it every few seconds would be a full scan of the expiry index for nothing.
+		if time.Since(lastSweep) >= d.policy.RetentionInterval {
+			if err := d.SweepRetention(ctx); err != nil && ctx.Err() == nil {
+				d.log.Error("retention pass failed", "error", err)
+			}
+			lastSweep = time.Now()
 		}
 
 		select {

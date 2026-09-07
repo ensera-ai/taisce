@@ -129,6 +129,9 @@ type Policy struct {
 	TurnBudget time.Duration
 	// Interval is how long the driver waits after a pass that found nothing.
 	Interval time.Duration
+	// RetentionInterval is how often expiry is swept. Separate from Interval because expiry is a
+	// daily-scale concern and running it every few seconds would scan an index for nothing.
+	RetentionInterval time.Duration
 }
 
 // DefaultPolicy is deliberately patient.
@@ -141,10 +144,11 @@ type Policy struct {
 // measured.
 func DefaultPolicy() Policy {
 	return Policy{
-		MaxAttempts: 6,
-		RetryAfter:  10 * time.Second,
-		TurnBudget:  5 * time.Minute,
-		Interval:    5 * time.Second,
+		MaxAttempts:       6,
+		RetryAfter:        10 * time.Second,
+		TurnBudget:        5 * time.Minute,
+		Interval:          5 * time.Second,
+		RetentionInterval: time.Hour,
 	}
 }
 
