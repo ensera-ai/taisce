@@ -5,6 +5,7 @@ package formation
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"time"
@@ -34,6 +35,7 @@ type Driver struct {
 	worker       *Worker
 	observations *pg.ObservationStore
 	retention    *pg.RetentionStore
+	audit        *pg.AuditStore
 	schema       pg.Schema
 	policy       Policy
 	log          *slog.Logger
@@ -41,12 +43,12 @@ type Driver struct {
 
 // NewDriver builds the driver over a worker that already knows how to drain one scope.
 func NewDriver(worker *Worker, observations *pg.ObservationStore, retention *pg.RetentionStore,
-	schema pg.Schema, policy Policy, log *slog.Logger) *Driver {
+	audit *pg.AuditStore, schema pg.Schema, policy Policy, log *slog.Logger) *Driver {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Driver{worker: worker, observations: observations, retention: retention,
-		schema: schema, policy: policy, log: log}
+		audit: audit, schema: schema, policy: policy, log: log}
 }
 
 // Pass is one sweep over every scope that has work waiting.
@@ -146,6 +148,7 @@ func (d *Driver) Run(ctx context.Context) error {
 	// Swept on the first pass rather than after an interval, so an instance restarted after a long
 	// stop expires what it should have while it was down.
 	var lastSweep time.Time
+	var lastSeal time.Time
 
 	for {
 		pass, err := d.Once(ctx)
@@ -165,6 +168,25 @@ func (d *Driver) Run(ctx context.Context) error {
 		// Retention runs on the same tick as formation but on its own schedule: only when the
 		// interval since the last sweep has passed, because expiry is a daily-scale concern and
 		// running it every few seconds would be a full scan of the expiry index for nothing.
+		// The ledger is sealed on the same tick, and the head digest is logged.
+		//
+		// Logging it is the cheap half of what makes a rebuilt ledger detectable: whatever collects
+		// process logs then holds a value the database cannot retroactively agree with. It is not a
+		// signed checkpoint and does not pretend to be — it is a digest in a place the database
+		// cannot reach, which is the property that matters.
+		if time.Since(lastSeal) >= d.policy.SealInterval {
+			if seal, err := d.audit.Seal(ctx); err != nil {
+				if ctx.Err() == nil {
+					d.log.Error("sealing the audit ledger failed", "error", err)
+				}
+			} else if seal.Entries > 0 {
+				d.log.Info("audit ledger sealed",
+					"entries", seal.Entries, "from", seal.From, "to", seal.To,
+					"head", hex.EncodeToString(seal.Digest))
+			}
+			lastSeal = time.Now()
+		}
+
 		if time.Since(lastSweep) >= d.policy.RetentionInterval {
 			if err := d.SweepRetention(ctx); err != nil && ctx.Err() == nil {
 				d.log.Error("retention pass failed", "error", err)

@@ -540,6 +540,47 @@ not know, because the first is believed.
 **How hard to undo.** Easy until a public tag exists. After that, changing the scheme means a version
 line that jumps, which is the one thing a version number must not do.
 
+### D50 — The ledger seals itself; there is no client-side proof protocol
+
+The audit ledger is sealed in batches: each seal covers a contiguous range of entries, carries a
+digest over them, and chains to the seal before it. An operator verifies it against their own instance
+with `taisce audit verify`. The head digest is emitted to the process log on every seal.
+
+**What was dropped, and why the reason changed rather than the engineering.** The original design was a
+hash tree with a signed checkpoint and proofs a CLIENT computes, so that a customer could catch a
+vendor rewriting a receipt. Self-hosted there is no vendor: the operator holds the disk, the database
+and the backups. That threat did not get smaller, it stopped existing — and the machinery built for
+it would be protecting a boundary that is not there.
+
+**What remains is real and is rule 12's own question.** *Can an operator with database access do
+something invisible?* Before this, yes: the append-only triggers refuse UPDATE and DELETE to every
+identity the application holds, and somebody who can drop a trigger is not one of those. Now an
+altered entry breaks its seal and every seal after it.
+
+**Seals rather than a hash on every row, and the reason is the read path.** Chaining each entry to the
+one before it means every audit write reads the previous digest — and every recall writes an audit
+row, so every recall in the instance would queue behind every other. Rule 9: a cost on the read path is
+judged against what every caller pays, not against the worst case it prevents. Batching moves the cost
+to a background pass and the serialisation point with it.
+
+**The two limits, stated where the mechanism is.** Entries written since the last seal are covered by
+nothing — that window is the seal interval, and the verifier reports how many are in it every time
+rather than only when it looks large. And nothing inside a database can stop somebody who can rebuild
+the whole database: a full rewrite with a fresh chain is internally consistent. What defeats that is a
+digest held where the database cannot reach, which is why the head is logged — whatever collects
+process logs then holds a value a rebuilt chain cannot agree with. That is weaker than a signed
+checkpoint and it is the honest version of what self-hosting can offer.
+
+**Rejected:** the client-computed proof protocol and the client-held anchor (built for a vendor
+boundary that no longer exists, and a client verifying an operator's own instance is a client checking
+the operator against themselves); a per-entry hash chain (a serialisation point on the read path);
+signing the head with a key the instance holds (a signature from a key the tamperer also holds proves
+nothing, and pretending otherwise is worse than not signing).
+
+**How hard to undo.** Easy to strengthen: publishing the head somewhere external is additive, and the
+seal chain is what any stronger scheme would build on. The entries it covers are being recorded from
+now, which is the part that could not have been added later.
+
 ---
 
 ## Substrate

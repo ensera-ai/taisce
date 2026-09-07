@@ -650,7 +650,7 @@ func TestTheDriverFindsScopesItWasNeverToldAbout(t *testing.T) {
 
 	driver := formation.NewDriver(
 		workerWith(t, pool, schema, scriptedModel{}, impatient()),
-		observations, pg.NewRetentionStore(pool, schema), schema, impatient(), quietLogger())
+		observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, impatient(), quietLogger())
 
 	pass, err := driver.Once(ctx)
 	if err != nil {
@@ -702,7 +702,7 @@ func TestAScopeThatFailsDoesNotStopTheOthersForming(t *testing.T) {
 
 	driver := formation.NewDriver(
 		workerWith(t, pool, schema, selective{}, impatient()),
-		observations, pg.NewRetentionStore(pool, schema), schema, impatient(), quietLogger())
+		observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, impatient(), quietLogger())
 
 	pass, err := driver.Once(ctx)
 	if err != nil {
@@ -750,7 +750,7 @@ func TestTheDriverFormsAScopeWithoutAnybodyAskingIt(t *testing.T) {
 	policy.Interval = 20 * time.Millisecond
 	driver := formation.NewDriver(
 		workerWith(t, pool, schema, scriptedModel{}, policy),
-		observations, pg.NewRetentionStore(pool, schema), schema, policy, quietLogger())
+		observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, policy, quietLogger())
 
 	running, stop := context.WithCancel(ctx)
 	returned := make(chan error, 1)
@@ -811,7 +811,7 @@ func TestASecondDriverDoesNotFormTheSameTurnTwice(t *testing.T) {
 	policy := impatient()
 	newDriver := func() *formation.Driver {
 		return formation.NewDriver(workerWith(t, pool, schema, scriptedModel{}, policy),
-			observations, pg.NewRetentionStore(pool, schema), schema, policy, quietLogger())
+			observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, policy, quietLogger())
 	}
 
 	// Run two passes concurrently. Whichever loses the lock reports the scope busy and forms
@@ -920,7 +920,7 @@ func TestTheDriverSweepsRetention(t *testing.T) {
 
 	driver := formation.NewDriver(
 		workerWith(t, pool, schema, scriptedModel{}, impatient()),
-		observations, pg.NewRetentionStore(pool, schema), schema, impatient(), quietLogger())
+		observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, impatient(), quietLogger())
 
 	if err := driver.SweepRetention(ctx); err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -960,5 +960,75 @@ func TestOnlyProjectsWithAPolicyAreSwept(t *testing.T) {
 	}
 	if len(scopes) != 1 || scopes[0] != "expiring" {
 		t.Fatalf("scopes with a policy: %v", scopes)
+	}
+}
+
+// A driver pass keeps going when one scope fails, and reports that it did.
+//
+// The same reasoning as parking a turn, one level up: one project's failure holding up every other
+// project's memory is the mistake the whole design refuses.
+func TestAPassReportsWhatItCouldNotDo(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_passreport")
+	observations := pg.NewObservationStore(pool)
+
+	for _, scope := range []string{"p1", "p2"} {
+		if err := migrate.ProvisionScope(ctx, pool, schema.String(), scope); err != nil {
+			t.Fatalf("provision %s: %v", scope, err)
+		}
+		turn := turnOf(domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "refuse me"})
+		turn.Scope = scope
+		if _, err := observations.Append(ctx, schema, turn); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	driver := formation.NewDriver(
+		workerWith(t, pool, schema, selective{}, impatient()),
+		observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema),
+		schema, impatient(), quietLogger())
+
+	pass, err := driver.Once(ctx)
+	if err != nil {
+		t.Fatalf("pass: %v", err)
+	}
+	if pass.Scopes != 2 {
+		t.Fatalf("the pass saw %d scopes", pass.Scopes)
+	}
+	if pass.Formed != 0 {
+		t.Fatalf("%d turns formed from a model that refuses everything", pass.Formed)
+	}
+	// Both scopes had a turn the model refuses. Neither is an error the pass reports — a refused
+	// turn is counted against the turn and retried, which is parking's job rather than the pass's.
+	if pass.Errored != 0 {
+		t.Fatalf("a refused turn was reported as a pass error: %+v", pass)
+	}
+}
+
+// A cancelled pass stops rather than working through the remaining scopes.
+func TestACancelledPassStops(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_cancelpass")
+	observations := pg.NewObservationStore(pool)
+	if _, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I work at Ensera."},
+	)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	driver := formation.NewDriver(
+		workerWith(t, pool, schema, scriptedModel{}, impatient()),
+		observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema),
+		schema, impatient(), quietLogger())
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := driver.Once(cancelled); err == nil {
+		t.Fatal("a cancelled pass reported success")
+	}
+	if err := driver.SweepRetention(cancelled); err == nil {
+		t.Fatal("a cancelled retention sweep reported success")
 	}
 }

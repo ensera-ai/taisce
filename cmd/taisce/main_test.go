@@ -19,6 +19,9 @@ import (
 	"os/exec"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"strings"
 	"testing"
 	"time"
@@ -735,5 +738,77 @@ func TestTheBinaryReportsItsVersion(t *testing.T) {
 	}
 	if version == "" {
 		t.Fatal("the version is empty, which reads as a bug rather than as an unstamped build")
+	}
+}
+
+// The operator's own check on their own ledger, from the command line.
+//
+// Theirs rather than ours: the earlier design was a signed checkpoint a client verified, which existed
+// so a customer could catch a vendor. Self-hosted there is no vendor, and what remains is an operator
+// demonstrating to their own auditor that they have not rewritten their own records.
+func TestAuditSealAndVerifyFromTheCommandLine(t *testing.T) {
+	env := complete(t)
+	env[envTenant] = "cmd_audit"
+	env[envAdminDSN] = env[envMemoryDSN]
+	withEnv(t, env)
+	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
+	t.Setenv("TAISCE_DATA_PASSWORD", "taisce-test-data")
+
+	ctx := context.Background()
+	dropSchema(t, "cmd_audit")
+	if err := dispatch(ctx, quiet(), []string{"bootstrap", "-project", "p1"}); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	// An empty ledger verifies and has nothing to seal — both are ordinary states, not failures.
+	if err := dispatch(ctx, quiet(), []string{"audit", "seal"}); err != nil {
+		t.Fatalf("sealing an empty ledger: %v", err)
+	}
+	if err := dispatch(ctx, quiet(), []string{"audit", "verify"}); err != nil {
+		t.Fatalf("verifying an empty ledger: %v", err)
+	}
+
+	// With entries in it.
+	pool, err := pgxpool.New(ctx, os.Getenv("TAISCE_TEST_DSN"))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+	schema, _ := pg.NewSchema("cmd_audit")
+	audit := pg.NewAuditStore(pool, schema)
+	for i := 0; i < 3; i++ {
+		if err := audit.Append(ctx, domain.AuditEntry{
+			Operation: domain.AuditRecall, Principal: "cred-1", Project: "p1",
+			PrincipalKind: domain.PrincipalCredential, Outcome: domain.OutcomeAllowed,
+		}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	if err := dispatch(ctx, quiet(), []string{"audit", "seal"}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if err := dispatch(ctx, quiet(), []string{"audit", "verify"}); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	// Tampered, the way somebody with full access would: drop the trigger, edit the row. The command
+	// must exit non-zero, because this is the one whose result something should act on.
+	if _, err := pool.Exec(ctx, `DROP TRIGGER audit_no_update ON cmd_audit.audit_entry`); err != nil {
+		t.Fatalf("drop trigger: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE cmd_audit.audit_entry SET magnitude = 999 WHERE entry_id = (
+		     SELECT min(entry_id) FROM cmd_audit.audit_entry)`); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	if err := dispatch(ctx, quiet(), []string{"audit", "verify"}); err == nil {
+		t.Fatal("verify reported success on a tampered ledger")
+	}
+
+	if err := dispatch(ctx, quiet(), []string{"audit"}); err == nil {
+		t.Fatal("a bare audit command reported success")
+	}
+	if err := dispatch(ctx, quiet(), []string{"audit", "nonsense"}); err == nil {
+		t.Fatal("an unknown audit command reported success")
 	}
 }

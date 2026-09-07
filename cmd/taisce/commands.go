@@ -38,6 +38,8 @@ const usage = `taisce — memory for agents
   taisce project resume <name>     return a suspended project to service
   taisce credential issue <name>   mint a credential; the token is printed once and never stored
   taisce credential revoke <id>    stop a credential resolving
+  taisce audit verify              recompute the ledger's chain and report what it covers
+  taisce audit seal                seal everything written since the last seal
   taisce version                   what this binary is
 
 Configuration is read from the environment. TAISCE_MEMORY_DSN and TAISCE_REGISTRY_DSN are the two
@@ -62,6 +64,8 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 		return project(ctx, args[1:])
 	case "credential":
 		return credentialCommand(ctx, args[1:])
+	case "audit":
+		return auditCommand(ctx, args[1:])
 	case "version", "--version":
 		fmt.Println(version)
 		return nil
@@ -377,4 +381,61 @@ func adminPool(ctx context.Context) (*pgxpool.Pool, pg.Schema, error) {
 		return nil, "", fmt.Errorf("database unreachable: %w", err)
 	}
 	return pool, schema, nil
+}
+
+// auditCommand is the operator's own check on their own ledger.
+//
+// Theirs rather than ours, and that is the whole point of the narrowed design: the earlier plan was a
+// signed checkpoint a CLIENT verified, which existed so a customer could catch a vendor. Self-hosted
+// there is no vendor — the operator holds the disk — and what remains is an operator demonstrating to
+// their own auditor that they have not rewritten their own records.
+func auditCommand(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: taisce audit verify | taisce audit seal")
+	}
+	admin, schema, err := adminPool(ctx)
+	if err != nil {
+		return err
+	}
+	defer admin.Close()
+	audit := pg.NewAuditStore(admin, schema)
+
+	switch args[0] {
+	case "seal":
+		seal, err := audit.Seal(ctx)
+		if err != nil {
+			return err
+		}
+		if seal.Entries == 0 {
+			fmt.Println("nothing to seal")
+			return nil
+		}
+		fmt.Printf("sealed %d entries (%d-%d)\nhead: %x\n",
+			seal.Entries, seal.From, seal.To, seal.Digest)
+		fmt.Print("\nRecord that head somewhere this database cannot reach. A rebuilt ledger " +
+			"cannot produce a head that agrees with one written down earlier, and that is the only " +
+			"thing standing between this and somebody who can rewrite everything.\n")
+		return nil
+
+	case "verify":
+		v, err := audit.Verify(ctx)
+		if err != nil {
+			return err
+		}
+		if !v.Valid {
+			fmt.Printf("FAILED: %s\n", v.Failure)
+			// Non-zero, because this is the one command whose result something should act on.
+			return fmt.Errorf("the audit ledger does not verify")
+		}
+		fmt.Printf("verified: %d seals covering %d entries\nhead: %x\n", v.Seals, v.Entries, v.Head)
+		if v.Unsealed > 0 {
+			// Said every time rather than only when it looks large. A verification that reports
+			// only what it covers is a reassurance.
+			fmt.Printf("\n%d entries written since the last seal are covered by nothing.\n", v.Unsealed)
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("unknown audit command %q", args[0])
+	}
 }

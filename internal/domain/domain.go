@@ -626,3 +626,29 @@ type RetentionSweep struct {
 
 // Empty reports whether the sweep found nothing to do, which is the ordinary case.
 func (s RetentionSweep) Empty() bool { return s.Observations == 0 }
+
+// AuditSeal is a chained digest over a range of ledger entries.
+type AuditSeal struct {
+	From, To int64
+	Entries  int
+	Digest   []byte
+}
+
+// AuditVerification is what an operator's own check found.
+//
+// It reports what is NOT covered as well as what is, because a verification that says only "valid"
+// while a window of recent entries is unsealed is a reassurance rather than a check.
+type AuditVerification struct {
+	Valid   bool
+	Seals   int
+	Entries int
+	// Unsealed is how many entries were written since the last seal. They are not covered by
+	// anything, and the number is the size of the window somebody could have written into.
+	Unsealed int
+	// Head is the digest at the end of the chain. Worth recording somewhere the database cannot
+	// reach: a rebuilt ledger cannot produce a head that agrees with one written down earlier.
+	Head []byte
+	// Failure says which seal disagreed and how — an altered entry and a re-linked chain are
+	// different accusations, and a verifier that says only "invalid" tells nobody what happened.
+	Failure string
+}

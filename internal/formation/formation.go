@@ -135,6 +135,10 @@ type Policy struct {
 	// RetentionInterval is how often expiry is swept. Separate from Interval because expiry is a
 	// daily-scale concern and running it every few seconds would scan an index for nothing.
 	RetentionInterval time.Duration
+	// SealInterval is how often the audit ledger is sealed. It is the exposure window: an entry
+	// written after the last seal is covered by nothing, so this number is the size of the gap
+	// somebody could write into unnoticed.
+	SealInterval time.Duration
 }
 
 // DefaultPolicy is deliberately patient.
@@ -152,6 +156,7 @@ func DefaultPolicy() Policy {
 		TurnBudget:        5 * time.Minute,
 		Interval:          5 * time.Second,
 		RetentionInterval: time.Hour,
+		SealInterval:      5 * time.Minute,
 	}
 }
 

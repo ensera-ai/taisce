@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/infra/pg"
 )
 
 // asDataPlane connects with the memory service's own identity, which is the whole point: a boundary
@@ -383,5 +386,229 @@ func TestTheLedgerRefusesAnOperationItDoesNotKnow(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO `+tenant+`.audit_entry
 	    (operation, principal, principal_kind, outcome) VALUES ('recall','','credential','allowed')`); err == nil {
 		t.Fatal("an operation was recorded with no principal behind it")
+	}
+}
+
+// ── #53/#82: a rewritten ledger is detectable ─────────────────────────────────────────────────
+
+// Altering a sealed entry breaks its seal, and the verifier says which one and how.
+//
+// This is what the append-only triggers cannot cover: somebody who can drop them. Rule 12 asks
+// directly whether an operator with database access can do something invisible, and self-hosting
+// makes that the realistic case rather than the exotic one.
+func TestAlteringASealedEntryIsDetected(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
+	audit := pg.NewAuditStore(pool, schema)
+
+	for i := 0; i < 3; i++ {
+		if err := audit.Append(ctx, domain.AuditEntry{
+			Operation: domain.AuditRecall, Principal: "cred-1", Project: "p1",
+			PrincipalKind: domain.PrincipalCredential, Outcome: domain.OutcomeAllowed, Magnitude: i,
+		}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	seal, err := audit.Seal(ctx)
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if seal.Entries != 3 {
+		t.Fatalf("sealed %d entries", seal.Entries)
+	}
+
+	v, err := audit.Verify(ctx)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if !v.Valid {
+		t.Fatalf("a freshly sealed ledger does not verify: %s", v.Failure)
+	}
+
+	// Now tamper, the way somebody with full access would: drop the trigger, change a row.
+	if _, err := pool.Exec(ctx, `DROP TRIGGER audit_no_update ON `+tenant+`.audit_entry`); err != nil {
+		t.Fatalf("drop trigger: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE `+tenant+`.audit_entry SET outcome = 'refused' WHERE entry_id = (
+		     SELECT min(entry_id) FROM `+tenant+`.audit_entry)`); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+
+	v, err = audit.Verify(ctx)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if v.Valid {
+		t.Fatal("an altered entry verified; the seal proves nothing")
+	}
+	if !strings.Contains(v.Failure, "altered or removed") {
+		t.Fatalf("the failure does not say what happened: %s", v.Failure)
+	}
+}
+
+// Removing a seal to hide a range breaks the chain, and the verifier distinguishes that from an
+// altered entry — they are different accusations.
+func TestRemovingASealBreaksTheChain(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
+	audit := pg.NewAuditStore(pool, schema)
+
+	for round := 0; round < 3; round++ {
+		if err := audit.Append(ctx, domain.AuditEntry{
+			Operation: domain.AuditObserve, Principal: "cred-1", Project: "p1",
+			PrincipalKind: domain.PrincipalCredential, Outcome: domain.OutcomeAllowed,
+		}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		if _, err := audit.Seal(ctx); err != nil {
+			t.Fatalf("seal: %v", err)
+		}
+	}
+	if v, err := audit.Verify(ctx); err != nil || !v.Valid {
+		t.Fatalf("three seals do not verify: %v %+v", err, v)
+	}
+
+	if _, err := pool.Exec(ctx, `DROP TRIGGER audit_seal_no_delete ON `+tenant+`.audit_seal`); err != nil {
+		t.Fatalf("drop trigger: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM `+tenant+`.audit_seal WHERE seal_id = (
+		     SELECT min(seal_id) FROM `+tenant+`.audit_seal)`); err != nil {
+		t.Fatalf("remove seal: %v", err)
+	}
+
+	v, err := audit.Verify(ctx)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if v.Valid {
+		t.Fatal("removing a seal left the chain verifying")
+	}
+	if !strings.Contains(v.Failure, "re-linked") {
+		t.Fatalf("the failure does not distinguish a re-linked chain: %s", v.Failure)
+	}
+}
+
+// A verification says what it does NOT cover. Entries written since the last seal are covered by
+// nothing, and reporting only the covered ones would be a reassurance rather than a check.
+func TestAVerificationReportsWhatItDoesNotCover(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
+	audit := pg.NewAuditStore(pool, schema)
+
+	if err := audit.Append(ctx, domain.AuditEntry{
+		Operation: domain.AuditRecall, Principal: "c", PrincipalKind: domain.PrincipalCredential,
+		Outcome: domain.OutcomeAllowed,
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if _, err := audit.Seal(ctx); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	// Two more, unsealed.
+	for i := 0; i < 2; i++ {
+		if err := audit.Append(ctx, domain.AuditEntry{
+			Operation: domain.AuditRecall, Principal: "c", PrincipalKind: domain.PrincipalCredential,
+			Outcome: domain.OutcomeAllowed,
+		}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	v, err := audit.Verify(ctx)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if !v.Valid {
+		t.Fatalf("valid ledger reported invalid: %s", v.Failure)
+	}
+	if v.Unsealed != 2 {
+		t.Fatalf("reported %d unsealed entries, wanted 2 — the window is the thing to be honest about",
+			v.Unsealed)
+	}
+	if len(v.Head) == 0 {
+		t.Fatal("no head digest, so there is nothing to record outside the database")
+	}
+}
+
+// Sealing twice with nothing in between does nothing rather than writing an empty seal.
+func TestSealingWithNothingToSealDoesNothing(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
+	audit := pg.NewAuditStore(pool, schema)
+
+	if seal, err := audit.Seal(ctx); err != nil || seal.Entries != 0 {
+		t.Fatalf("sealing an empty ledger produced %+v (%v)", seal, err)
+	}
+	if err := audit.Append(ctx, domain.AuditEntry{
+		Operation: domain.AuditRecall, Principal: "c", PrincipalKind: domain.PrincipalCredential,
+		Outcome: domain.OutcomeAllowed,
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if seal, err := audit.Seal(ctx); err != nil || seal.Entries != 1 {
+		t.Fatalf("first seal: %+v (%v)", seal, err)
+	}
+	if seal, err := audit.Seal(ctx); err != nil || seal.Entries != 0 {
+		t.Fatalf("sealing again wrote %+v", seal)
+	}
+}
+
+// Sealing is serialised, so two sealers cannot both claim the same entries.
+//
+// A seal always starts where the last one ended, so two running concurrently could otherwise write
+// overlapping ranges — and a chain with overlapping links is one that verifies against nothing.
+func TestTwoSealersCannotOverlap(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	tenant := freshTenant(t, pool)
+	schema, _ := NewSchema(tenant)
+	audit := pg.NewAuditStore(pool, schema)
+
+	for i := 0; i < 20; i++ {
+		if err := audit.Append(ctx, domain.AuditEntry{
+			Operation: domain.AuditRecall, Principal: "c", Project: "p1",
+			PrincipalKind: domain.PrincipalCredential, Outcome: domain.OutcomeAllowed,
+		}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	const sealers = 4
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < sealers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _ = audit.Seal(ctx)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	// However the four raced, the chain must verify and cover every entry exactly once.
+	v, err := audit.Verify(ctx)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if !v.Valid {
+		t.Fatalf("concurrent sealing produced a chain that does not verify: %s", v.Failure)
+	}
+	if v.Entries != 20 {
+		t.Fatalf("the seals cover %d entries, wanted the 20 that exist", v.Entries)
+	}
+	if v.Unsealed != 0 {
+		t.Fatalf("%d entries were left unsealed", v.Unsealed)
 	}
 }
