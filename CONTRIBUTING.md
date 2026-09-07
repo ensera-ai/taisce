@@ -59,19 +59,38 @@ copying and were removed on review because nothing here read them.
 **Nothing is brought in at all unless it is explicitly asked for** — not code, not decisions, not
 measurements. Somewhere something was tried is not a source of answers here.
 
-## What is public and what is not
+## Where the line between an adapter and the service is
 
-This repository is the **service**, and it is private. The adapters and clients are open source and
-live elsewhere (#35 settles where).
+All of it is open, under Apache-2.0: the service, the portal, the adapters, the clients. There is no
+private half and no paid tier, so nothing here is held back in order to be sold.
 
-The line is not organisational, it is architectural: **the adapter translates, the service decides.**
-Anything in an open adapter is readable and forkable, so retrieval, ranking, supersession,
-communities, compaction and erasure stay server-side — which is the same rule as *"no logic in an
-adapter"*, arrived at from the commercial direction instead of the consistency one.
+That removes one argument for the boundary and leaves the one that was always the better argument.
+**The adapter translates, the service decides.** Retrieval, supersession, communities, compaction and
+erasure stay behind the API — not because an open adapter would be readable, but because logic in an
+adapter is logic implemented once per language and correct in some of them.
 
-Two things follow for anyone writing an issue here. A change to an operation's shape is a change to a
-**public contract** the moment an SDK ships against it. And nothing internal — endpoints, peppers,
-topology, a test DSN — belongs in text that will be mirrored into an open repository.
+There are five adapters planned across four ecosystems. A rule that lives in the service is stated
+once, tested once against a real deployment, and fixed once. The same rule copied into Python, Java,
+.NET and TypeScript is four places for it to drift, four sets of tests that assert the copy rather than
+the behaviour, and a defect that is present in three languages and absent in the fourth for a reason
+nobody can reconstruct. That is what the conformance suite exists to catch, and the cheapest way to
+pass it is to have nothing in an adapter that could fail it.
+
+**So an adapter carries no judgement.** It maps a framework's types onto an operation and maps the
+answer back. If something in an adapter has to decide what is true, what is current, what is relevant
+or what may be shown, it is in the wrong place.
+
+Two things follow for anyone writing an issue here.
+
+**A change to an operation's shape is a change to a public contract**, the moment an SDK ships against
+it. That is more true now that the service is public, not less: the shape is readable by anybody, and
+somebody will have built on it before the change is proposed. `docs/02-contract.md` is generated from
+the surface that serves it, so a change shows up as a diff rather than as a surprise.
+
+**Nothing internal belongs in text that is published**, and now everything here is published — issues,
+commit messages, code comments, this file. An endpoint, a pepper, a topology, a test DSN or a customer's
+words in an error message is disclosed at the moment it is written rather than at the moment somebody
+mirrors it.
 
 ## Milestones
 
