@@ -373,7 +373,7 @@ func (stubStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, 
 	return nil, nil
 }
 
-func (stubStore) FactsAbout(context.Context, []string, []string, int, []string) ([]domain.CitedFact, error) {
+func (stubStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf) ([]domain.CitedFact, error) {
 	return nil, nil
 }
 
@@ -395,7 +395,7 @@ func (s stubFactStore) Anchors(context.Context, []string, []string) ([]domain.An
 	return []domain.Anchor{{Entity: domain.Entity{ID: "e1", CanonicalName: "Marta"}, Matched: "marta"}}, nil
 }
 
-func (s stubFactStore) FactsAbout(context.Context, []string, []string, int, []string) ([]domain.CitedFact, error) {
+func (s stubFactStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf) ([]domain.CitedFact, error) {
 	return s.facts, nil
 }
 
@@ -644,7 +644,7 @@ func (emptyAnchorStore) Anchors(context.Context, []string, []string) ([]domain.A
 	return nil, nil
 }
 
-func (emptyAnchorStore) FactsAbout(context.Context, []string, []string, int, []string) ([]domain.CitedFact, error) {
+func (emptyAnchorStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf) ([]domain.CitedFact, error) {
 	return nil, nil
 }
 
@@ -827,5 +827,55 @@ func TestABundleSaysWhenACitationLostItsContext(t *testing.T) {
 	}
 	if len(partial.Degraded) != 1 || partial.Degraded[0] != domain.DegradedCitationContext {
 		t.Fatalf("a bare citation was not reported: %v", partial.Degraded)
+	}
+}
+
+// ── #8: the instants a caller names reach the store unchanged ─────────────────────────────────
+
+type recordingStore struct {
+	facts []domain.CitedFact
+	asked domain.AsOf
+}
+
+func (s *recordingStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
+	return []domain.Anchor{{Entity: domain.Entity{ID: "e1", CanonicalName: "Marta"}, Matched: "marta"}}, nil
+}
+
+func (s *recordingStore) FactsAbout(_ context.Context, _, _ []string, _ int, _ []string,
+	at domain.AsOf) ([]domain.CitedFact, error) {
+	s.asked = at
+	return s.facts, nil
+}
+
+// The ordinary recall asks about now, and "now" is the zero value rather than a timestamp this
+// process computed — the store turns that into the open interval, which is the only version that does
+// not depend on two clocks agreeing.
+func TestAnOrdinaryRecallNamesNoInstant(t *testing.T) {
+	store := &recordingStore{}
+	if _, err := recall.NewWithBudget(store, recall.DefaultBudget()).
+		Recall(context.Background(), []string{"p1"}, "what about Marta"); err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if !store.asked.IsNow() {
+		t.Fatalf("the current read named an instant: %+v", store.asked)
+	}
+}
+
+// And a historical recall is the same read with two instants on it: same anchoring, same scopes, same
+// sources, same budget. A past question is not a different product.
+func TestAHistoricalRecallPassesBothInstantsThrough(t *testing.T) {
+	store := &recordingStore{}
+	valid := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	known := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := recall.NewWithBudget(store, recall.DefaultBudget()).
+		RecallAsOf(context.Background(), []string{"p1"}, "what about Marta",
+			recall.PrincipalSources, domain.AsOf{Valid: valid, Known: known}); err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if !store.asked.Valid.Equal(valid) || !store.asked.Known.Equal(known) {
+		t.Fatalf("the instants did not reach the store: %+v", store.asked)
+	}
+	if store.asked.IsNow() {
+		t.Fatal("a read naming two instants was treated as the current read")
 	}
 }

@@ -584,6 +584,42 @@ type Anchor struct {
 // that stopped explaining itself rather than like an erasure that did its job.
 const DegradedCitationContext = "citation_context"
 
+// AsOf is the pair of instants a bitemporal read is taken at.
+//
+// # Why two times and not one
+//
+// A fact has two independent histories: when it was true of the world, and when this system believed
+// it. They come apart on every correction — we learn on Friday that somebody moved in March — and a
+// memory that keeps only one of them cannot answer why it said what it said last week. So a read
+// names both: what was true at Valid, as this system understood things at Known.
+//
+// # Why the zero value is now
+//
+// The overwhelmingly common read is the current one, and a caller that has said nothing about time
+// is asking about now. A zero AsOf is that read, and it is the one the ordinary recall issues.
+type AsOf struct {
+	// Valid is the instant the world is asked about. Zero means now.
+	Valid time.Time
+	// Known is the instant this system's belief is asked about — facts recorded after it are not
+	// returned, whatever we now know. Zero means now.
+	Known time.Time
+}
+
+// HasValid and HasKnown say which halves the caller named. An unnamed half is NOT a timestamp of
+// now: it is the open interval, which is a different thing and the only correct one.
+//
+// Substituting this process's clock for "now" was tried and is wrong. The database stamps `known`
+// with its own clock, and the two are not the same clock — measured 82ms apart between a server
+// process and a database container on one machine. A fact recorded a moment ago then falls outside
+// `known @> ourNow`, so a caller writes something and a read that named only a validity time cannot
+// see it. The open interval asks the question the caller meant — what we believe now — and involves
+// no clock at all.
+func (a AsOf) HasValid() bool { return !a.Valid.IsZero() }
+func (a AsOf) HasKnown() bool { return !a.Known.IsZero() }
+
+// IsNow reports whether this is the ordinary current read.
+func (a AsOf) IsNow() bool { return !a.HasValid() && !a.HasKnown() }
+
 // CitedFact is a fact with the receipt for it. There is no uncited variant, and that is deliberate:
 // a fact whose evidence cannot be produced is not something this product returns.
 type CitedFact struct {
@@ -594,7 +630,12 @@ type CitedFact struct {
 	Object     string
 	Statement  string
 	Confidence float32
+	// ValidFrom and ValidUntil are when this was true of the world. ValidUntil is nil for a fact
+	// nothing has superseded, and a time for one that has been — which is what makes a historical
+	// read legible: a caller asking about March gets the fact that held in March along with the
+	// date it stopped holding, rather than a fact that looks current.
 	ValidFrom  time.Time
+	ValidUntil *time.Time
 	Evidence   Evidence
 	// AnchoredOn is the entity that brought this fact into the bundle. A fact can name two anchors;
 	// this is the one it was reached through, which is what makes the path a caller can inspect.

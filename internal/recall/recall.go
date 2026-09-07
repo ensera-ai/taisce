@@ -38,7 +38,12 @@ type Store interface {
 	//
 	// `sources` is the set of message roles whose facts may be returned, and it is an argument
 	// rather than a default so that no call can omit it and get everything.
-	FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int, sources []string) ([]domain.CitedFact, error)
+	//
+	// `at` is the pair of instants the read is taken at. Its zero value is the current read, which
+	// is what almost every call wants — so the historical read is available without the ordinary
+	// one having to say anything.
+	FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int, sources []string,
+		at domain.AsOf) ([]domain.CitedFact, error)
 }
 
 // Budget is how much a caller can afford to be given back.
@@ -125,18 +130,34 @@ func NewWithBudget(store Store, b Budget) *Recaller {
 // statement from something a web page claimed.
 var PrincipalSources = []string{string(domain.RoleUser)}
 
-// Recall answers a question from what the principal said.
+// Recall answers a question from what the principal said, as things stand now.
 func (r *Recaller) Recall(ctx context.Context, scopes []string, question string) (domain.Bundle, error) {
-	return r.RecallFrom(ctx, scopes, question, PrincipalSources)
+	return r.RecallAsOf(ctx, scopes, question, PrincipalSources, domain.AsOf{})
 }
 
-// RecallFrom answers a question from the sources the caller admits.
+// There is deliberately no RecallFrom taking sources and no instants.
 //
-// The wider call, for a caller that genuinely wants what a document or a tool result asserted. What
-// it gets back carries the role on every fact, so the distinction survives into whatever reads the
-// bundle — a merged list with no labels would be the same failure with an extra step.
-func (r *Recaller) RecallFrom(ctx context.Context, scopes []string, question string,
-	sources []string) (domain.Bundle, error) {
+// One existed and became a delegate the moment the instants arrived: two surfaces where the second
+// is the first with a zero value appended. A caller wanting the wider source set writes
+// `RecallAsOf(ctx, scopes, question, sources, domain.AsOf{})`, where the zero value says in the call
+// what the missing method said in its name.
+
+// RecallAsOf answers a question as it would have been answered at a moment.
+//
+// # Two instants, because a memory has two histories
+//
+// What was true of the world, and what this system had been told. They come apart on every
+// correction, and only both together answer "why did you tell me that last week" — which is the
+// question an audit asks and the one a scalar timestamp cannot answer.
+//
+// # A past read is not a different product
+//
+// It anchors the same way, bounds the same scopes, admits the same sources and is cut by the same
+// budget. The only difference is which rows are current, so nothing about a historical bundle is
+// weaker — and every fact in one carries the date its validity ended, which is what stops a fact that
+// held in March from reading as a fact that holds now.
+func (r *Recaller) RecallAsOf(ctx context.Context, scopes []string, question string,
+	sources []string, at domain.AsOf) (domain.Bundle, error) {
 	if len(scopes) == 0 {
 		return domain.Bundle{}, nil
 	}
@@ -166,7 +187,7 @@ func (r *Recaller) RecallFrom(ctx context.Context, scopes []string, question str
 	// One more than the row bound, so a full result is distinguishable from a truncated one without
 	// a second count query. The row bound is a guard on the QUERY — it stops an enormous budget
 	// asking the database for an unbounded read — and is not the unit the caller reasons in.
-	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.budget.MaxRows+1, sources)
+	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.budget.MaxRows+1, sources, at)
 	if err != nil {
 		return domain.Bundle{}, err
 	}

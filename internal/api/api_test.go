@@ -27,6 +27,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -1113,5 +1114,77 @@ func TestARefusedAuthenticationRecordsNoSecret(t *testing.T) {
 	}
 	if recorded < 2 {
 		t.Fatalf("%d refused authentications recorded", recorded)
+	}
+}
+
+// ── #8: a question can be asked of a moment ───────────────────────────────────────────────────
+//
+// The wire carries both instants and the interval each fact held, because a fact returned by a read
+// of last March that does not say it stopped holding is indistinguishable from one that holds now.
+func TestAQuestionCanBeAskedOfAMomentInThePast(t *testing.T) {
+	h := newHarness(t, "api_asof")
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"data_subject_id": "subject-1",
+		"messages": []map[string]any{
+			{"role": "user", "content": "I work at Ensera and I live in Dublin."},
+		},
+	}, http.StatusCreated, nil)
+	h.form(t)
+
+	var bundle struct {
+		Facts []struct {
+			Object     string     `json:"object"`
+			ValidFrom  time.Time  `json:"valid_from"`
+			ValidUntil *time.Time `json:"valid_until"`
+		} `json:"facts"`
+	}
+
+	// The current read: the facts are there, and nothing has superseded them.
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
+		"question": "Where does the user work?",
+	}, http.StatusOK, &bundle)
+	if len(bundle.Facts) == 0 {
+		t.Fatal("the current read came back empty")
+	}
+	for _, f := range bundle.Facts {
+		if f.ValidFrom.IsZero() {
+			t.Fatalf("a fact came back without saying when it became true: %+v", f)
+		}
+		if f.ValidUntil != nil {
+			t.Fatalf("a fact nothing has superseded carries an end: %v", f.ValidUntil)
+		}
+	}
+
+	// The same question asked of a moment before the conversation happened. The memory holds the
+	// fact; it did not hold of the world then, and saying so is the whole point of keeping the
+	// interval rather than a timestamp.
+	var past struct {
+		Facts []struct {
+			Object string `json:"object"`
+		} `json:"facts"`
+		Reach struct {
+			Anchored          int  `json:"anchored"`
+			NamedNothingKnown bool `json:"named_nothing_known"`
+		} `json:"reach"`
+	}
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
+		"question": "Where does the user work?",
+		"as_of":    "2020-01-01T00:00:00Z",
+	}, http.StatusOK, &past)
+	if len(past.Facts) != 0 {
+		t.Fatalf("a read of 2020 returned facts that became true in 2026: %+v", past.Facts)
+	}
+	// And it says which empty answer this is: the entity is known, it simply held nothing then.
+	if past.Reach.Anchored == 0 || past.Reach.NamedNothingKnown {
+		t.Fatalf("an empty historical bundle reads as though the subject were unknown: %+v", past.Reach)
+	}
+
+	// A time that is not a time is refused with the body, not parsed into an accidental instant.
+	status, body := h.raw(t, http.MethodPost, "/v1/recalls", map[string]any{
+		"question": "Where does the user work?",
+		"as_of":    "last tuesday",
+	}, h.token)
+	if status != http.StatusBadRequest {
+		t.Fatalf("a malformed instant returned %d: %s", status, body)
 	}
 }

@@ -734,6 +734,57 @@ per-request size is additive. Removing the field is a change to a published cont
 prompt template that renders context is broken by its absence — which is the ordinary asymmetry of
 anything that goes on the wire.
 
+
+### D54 — A read names two instants, and the half it does not name is the open interval
+
+A recall can be taken at a moment in the world (`as_of`) and at a moment in this system's belief
+(`as_known_at`). Both are optional and independent.
+
+**The unnamed half is `upper_inf`, not a timestamp of now.** This was built the other way first and it
+is wrong. `known` is stamped by the database's clock, and a "now" computed in the server process is a
+different clock — measured 82ms apart between a server process and a database container on one
+machine, and worse across hosts. A fact recorded a moment ago then falls outside `known @> ourNow`, so
+a caller writes something and a read that named only a validity time cannot see it. The failure is
+silent and it gets worse under exactly the conditions that make clocks drift. The open interval asks
+what the caller meant — what we believe now — and involves no clock at all.
+
+**The same argument runs the other way on the current read.** `upper_inf(valid)` rather than
+`valid @> now()`: a turn whose `occurred_at` is a few minutes ahead of this server's clock is ordinary
+when the client sends the time, and it produces a fact whose validity starts in the future.
+Containment hides it until the clock catches up; a memory that cannot recall what was just written to
+it is not a memory. What the current read is asking is "is this still the answer", and `upper_inf` is
+that question exactly. It is also the predicate `fact_reconcile_idx` is partial on, so the hot read
+stays on the index holding only current facts.
+
+**Four statements rather than one.** A single query with `($6 IS NULL AND upper_inf(valid)) OR valid
+@> $6` is unindexable in both arms, because the planner cannot know which branch it is planning for.
+The temporal predicate is the only difference between the four, and they are generated from one
+template so that no other predicate — the project bound, the source filter, the evidence join — can
+be written once and forgotten in the others.
+
+**Every fact carries the interval it held.** `valid_from` and `valid_until`, the second null for a
+fact nothing has superseded. Without it a fact returned by a read of last March is indistinguishable
+from one that holds now, which is the one way a historical answer can be worse than no answer.
+
+**What this does not cover, and it matters.** Supersession closes `valid` on the row in place. So the
+belief axis can hide facts recorded after an instant, and it cannot reconstruct a validity interval
+that has since been closed: asking "what would you have said in March about July" returns nothing
+rather than the answer we would have given, because the row that would have answered has had its
+interval rewritten. A full belief history means never mutating a row — closing `known` and inserting a
+corrected copy — which doubles rows on every supersession and changes what the exclusion constraint,
+the erasure sweep and the evidence join are working over. That is a design, not a detail, and it is
+held in its own issue rather than assumed here. The limit is stated where the mechanism is, because a
+guarantee described as wider than it is will be relied on at its stated width.
+
+**Rejected:** a timestamp of now for an unnamed instant (two clocks, silent, measured); one statement
+with an OR (unindexable in both arms); a single `as_of` covering both axes (collapses the two
+histories into one and makes "why did you tell me that" unanswerable); returning facts without their
+interval (a historical answer that reads as a current one).
+
+**How hard to undo.** The wire fields are additive and easy to widen. The in-place closure of `valid`
+is the part that is expensive to change later: every superseded row ever written carries a rewritten
+interval, and no migration can recover what those rows said before.
+
 ---
 
 ## Substrate

@@ -101,7 +101,7 @@ SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity
 // and gets everything, in the same way there is no read that omits the authorised project set and
 // gets every project (D24).
 func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int,
-	sources []string) ([]domain.CitedFact, error) {
+	sources []string, at domain.AsOf) ([]domain.CitedFact, error) {
 
 	if len(sources) == 0 {
 		// An empty set returns nothing rather than everything. A caller that computed its source
@@ -109,8 +109,20 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 		// the failure the whole mechanism exists to prevent.
 		return nil, nil
 	}
-	rows, err := s.pool.Query(ctx, s.schema.SQL(selectFactsAboutSQL), scopes, entityIDs, limit, sources,
-		domain.ContextWindow)
+	// A statement per shape of the question, rather than one statement with an OR on the temporal
+	// predicate. `($6 IS NULL AND upper_inf(valid)) OR valid @> $6` is unindexable in both of its
+	// arms: the planner cannot know which branch it is planning for, so it plans for neither.
+	stmt := selectFactsAboutSQL
+	args := []any{scopes, entityIDs, limit, sources, domain.ContextWindow}
+	switch {
+	case at.HasValid() && at.HasKnown():
+		stmt, args = selectFactsBitemporalSQL, append(args, at.Valid.UTC(), at.Known.UTC())
+	case at.HasValid():
+		stmt, args = selectFactsValidAtSQL, append(args, at.Valid.UTC())
+	case at.HasKnown():
+		stmt, args = selectFactsKnownAtSQL, append(args, at.Known.UTC())
+	}
+	rows, err := s.pool.Query(ctx, s.schema.SQL(stmt), args...)
 	if err != nil {
 		return nil, fmt.Errorf("read facts: %w", err)
 	}
@@ -123,7 +135,7 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 		var window []byte
 		var windowStart, messageBytes *int
 		if err := rows.Scan(&f.ID, &f.Scope, &subject, &f.Predicate, &object, &f.Statement,
-			&f.Confidence, &f.ValidFrom, &f.AnchoredOn, &f.SourceRole,
+			&f.Confidence, &f.ValidFrom, &f.ValidUntil, &f.AnchoredOn, &f.SourceRole,
 			&f.Evidence.SourceObservationID, &f.Evidence.SourceOrdinal, &f.Evidence.Quote,
 			&f.Evidence.ByteStart, &f.Evidence.ByteEnd, &f.Evidence.ExtractorVersion,
 			&window, &windowStart, &messageBytes); err != nil {
@@ -178,28 +190,28 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 //
 // Both joins are LEFT: an erased message leaves a fact whose quote and span are still what they
 // were, and dropping the row would make an erasure elsewhere in the turn look like memory loss.
-const selectFactsAboutSQL = `
+const factsAboutTemplate = `
 WITH reachable AS (
     SELECT f.fact_id, f.scope, f.subject_entity_id, f.predicate, f.object_entity_id, f.statement,
-           f.confidence, lower(f.valid) AS valid_from, f.subject_entity_id AS anchored_on,
-           f.source_role
+           f.confidence, lower(f.valid) AS valid_from, upper(f.valid) AS valid_until,
+           f.subject_entity_id AS anchored_on, f.source_role
       FROM {schema}.fact f
      WHERE f.scope = ANY($1)
        AND f.subject_entity_id = ANY($2::uuid[])
        AND f.source_role = ANY($4)
-       AND upper_inf(f.valid) AND upper_inf(f.known)
+       AND %[1]s
     UNION ALL
     SELECT f.fact_id, f.scope, f.subject_entity_id, f.predicate, f.object_entity_id, f.statement,
-           f.confidence, lower(f.valid) AS valid_from, f.object_entity_id AS anchored_on,
-           f.source_role
+           f.confidence, lower(f.valid) AS valid_from, upper(f.valid) AS valid_until,
+           f.object_entity_id AS anchored_on, f.source_role
       FROM {schema}.fact f
      WHERE f.scope = ANY($1)
        AND f.object_entity_id = ANY($2::uuid[])
        AND f.source_role = ANY($4)
-       AND upper_inf(f.valid) AND upper_inf(f.known)
+       AND %[1]s
 )
 SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name, r.statement,
-       r.confidence, r.valid_from, r.anchored_on::text, r.source_role,
+       r.confidence, r.valid_from, r.valid_until, r.anchored_on::text, r.source_role,
        e.source_observation_id::text, e.source_ordinal, e.quote, e.byte_start, e.byte_end,
        e.extractor_version,
        substring(convert_to(m.content, 'UTF8')
@@ -219,3 +231,41 @@ SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name
         AND m.ordinal = e.source_ordinal
  ORDER BY r.predicate, r.fact_id
  LIMIT $3`
+
+// The four reads the template makes, and every difference between them is in one predicate.
+//
+// # Two halves, named independently
+//
+// A caller can ask about a moment in the world, a moment in this system's belief, or both. The half
+// they did not name is the OPEN interval rather than a timestamp of now, and that distinction is not
+// cosmetic: `known` is stamped by the database's clock and a "now" computed anywhere else is a
+// different clock — measured 82ms apart between a server process and a database container on one
+// machine. Substituting our clock hides a fact the database recorded a moment ago, so a caller writes
+// something and a read that named only a validity time cannot see it.
+//
+// # The current read asks whether anything has superseded the fact, not whether now is inside it
+//
+// `upper_inf(valid)` rather than `valid @> now()`, for the same reason from the other side. A turn
+// whose `occurred_at` is a few minutes ahead of this server's clock — ordinary when the client sends
+// the time — produces a fact whose validity starts in the future, and containment would hide it until
+// the clock caught up. The question the current read is really asking is "is this still the answer".
+//
+// It is also the predicate `fact_reconcile_idx` is partial on, so the hot read stays on the small
+// index holding only current facts rather than one growing with every superseded version.
+//
+// # The as-of reads are containment, which is the bitemporal question
+//
+// `valid @> $6` is what was true of the world then; `known @> $6` or `$7` is what this system had
+// been told by then. Together they answer "what would you have told me at that moment", which is the
+// question an audit asks and the one no scalar timestamp can answer. `fact_bitemporal_idx` is the
+// GiST index over exactly this pair.
+var (
+	selectFactsAboutSQL = fmt.Sprintf(factsAboutTemplate,
+		"upper_inf(f.valid) AND upper_inf(f.known)")
+	selectFactsValidAtSQL = fmt.Sprintf(factsAboutTemplate,
+		"f.valid @> $6::timestamptz AND upper_inf(f.known)")
+	selectFactsKnownAtSQL = fmt.Sprintf(factsAboutTemplate,
+		"upper_inf(f.valid) AND f.known @> $6::timestamptz")
+	selectFactsBitemporalSQL = fmt.Sprintf(factsAboutTemplate,
+		"f.valid @> $6::timestamptz AND f.known @> $7::timestamptz")
+)

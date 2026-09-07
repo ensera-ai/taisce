@@ -64,13 +64,15 @@ POST `/v1/recalls` → 200
 | Field | Type |
 |---|---|
 | `question` | string |
+| `as_of` | timestamp (RFC 3339), optional |
+| `as_known_at` | timestamp (RFC 3339), optional |
 
 ### Response
 
 | Field | Type |
 |---|---|
 | `anchors` | array of {entity_id: string, name: string, type: string, matched: string} |
-| `facts` | array of {fact_id: string, subject: string, predicate: string, object: string, statement: string, confidence: number, anchored_on: string, source_role: string, co_derived_with: array of string, evidence: {observation_id: string, source_ordinal: integer, quote: string, byte_start: integer, byte_end: integer, context: string, context_start: integer, context_complete: boolean}} |
+| `facts` | array of {fact_id: string, subject: string, predicate: string, object: string, statement: string, confidence: number, valid_from: timestamp (RFC 3339), valid_until: timestamp (RFC 3339), optional, anchored_on: string, source_role: string, co_derived_with: array of string, evidence: {observation_id: string, source_ordinal: integer, quote: string, byte_start: integer, byte_end: integer, context: string, context_start: integer, context_complete: boolean}} |
 | `truncated` | boolean |
 | `characters` | integer |
 | `degraded` | array of string |

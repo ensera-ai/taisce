@@ -412,6 +412,31 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credent
 
 type recallRequest struct {
 	Question string `json:"question"`
+	// AsOf and AsKnownAt are the two instants a bitemporal read is taken at: what was true of the
+	// world then, as this system understood things then. Both are optional and independent — the
+	// half a caller does not name is the open interval, which is what we believe now, and is not a
+	// timestamp anybody computed.
+	//
+	// Typed as times rather than strings, so a value that is not RFC 3339 is refused by the decoder
+	// with the rest of a malformed body. A string parsed later would be a second refusal path with
+	// its own error code, for a mistake the first one already catches.
+	AsOf      *time.Time `json:"as_of"`
+	AsKnownAt *time.Time `json:"as_known_at"`
+}
+
+// at is the pair of instants this request asks about.
+//
+// A request naming one and not the other asks about that time as things are understood now, which is
+// the ordinary historical question: what was true in March, as best we know today.
+func (r recallRequest) at() domain.AsOf {
+	var out domain.AsOf
+	if r.AsOf != nil {
+		out.Valid = *r.AsOf
+	}
+	if r.AsKnownAt != nil {
+		out.Known = *r.AsKnownAt
+	}
+	return out
 }
 
 type recallResponse struct {
@@ -466,6 +491,12 @@ type factPayload struct {
 	Object     string  `json:"object"`
 	Statement  string  `json:"statement"`
 	Confidence float32 `json:"confidence"`
+	// ValidFrom and ValidUntil are when this was true of the world, which is not when it was
+	// recorded. ValidUntil is null for a fact nothing has superseded and a time for one that has
+	// been — so a fact returned by a read of last March says that it stopped holding, rather than
+	// arriving indistinguishable from a fact that holds now.
+	ValidFrom  time.Time  `json:"valid_from"`
+	ValidUntil *time.Time `json:"valid_until"`
 	// AnchoredOn is the entity this fact was reached through. A fact can name two anchors, and which
 	// one brought it in is the difference between a result and a traversal a caller can check.
 	AnchoredOn string `json:"anchored_on"`
@@ -521,7 +552,8 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 
 	// The credential's project, and only ever that. The authorised set is still an argument on
 	// every read rather than a default (D24) — it has one member now, which is the whole of D47.
-	bundle, err := s.recaller.Recall(r.Context(), []string{grant.Project}, req.Question)
+	bundle, err := s.recaller.RecallAsOf(r.Context(), []string{grant.Project}, req.Question,
+		recall.PrincipalSources, req.at())
 	if err != nil {
 		s.log.Error("recall", "error", err)
 		writeError(w, http.StatusInternalServerError, codeInternal, "the question could not be answered")
@@ -562,6 +594,7 @@ func renderBundle(b domain.Bundle) recallResponse {
 		out.Facts = append(out.Facts, factPayload{
 			FactID: f.ID, Subject: f.Subject, Predicate: f.Predicate, Object: f.Object,
 			Statement: f.Statement, Confidence: f.Confidence, AnchoredOn: f.AnchoredOn,
+			ValidFrom: f.ValidFrom, ValidUntil: f.ValidUntil,
 			SourceRole: f.SourceRole, CoDerivedWith: coDerived(f.CoDerivedWith),
 			Evidence: evidencePayload{
 				ObservationID:   f.Evidence.SourceObservationID,
