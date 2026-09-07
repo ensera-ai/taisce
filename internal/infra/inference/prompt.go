@@ -138,3 +138,48 @@ func renderVocabulary(vocabulary domain.Ontology) string {
 	}
 	return strings.Join(rows, "\n")
 }
+
+// reportPromptFileShape is the report prompt's wording, and only the wording.
+//
+// Every field is required, for the reason the extraction prompt's are: a section that may be absent is
+// a prompt that can be silently shortened by an edit, and the section most worth removing — the one
+// telling the model the material is data — is the one whose absence produces no error and no visible
+// change until somebody plants an instruction in a quote.
+type reportPromptFileShape struct {
+	ModelContract struct {
+		Temperature    float32 `yaml:"temperature"`
+		ResponseFormat string  `yaml:"response_format"`
+	} `yaml:"model_contract"`
+
+	Task         string `yaml:"task"`
+	Grounding    string `yaml:"grounding"`
+	Shape        string `yaml:"shape"`
+	ReplyShape   string `yaml:"reply_shape"`
+	DataBoundary string `yaml:"data_boundary"`
+}
+
+// loadReportPrompt parses the report prompt and refuses one that could not compose a whole prompt.
+func loadReportPrompt(raw []byte) (reportPromptFileShape, error) {
+	var p reportPromptFileShape
+	if err := yaml.Unmarshal(raw, &p); err != nil {
+		return reportPromptFileShape{}, fmt.Errorf("parse: %w", err)
+	}
+	for _, section := range []struct {
+		name string
+		text string
+	}{
+		{"task", p.Task},
+		{"grounding", p.Grounding},
+		{"shape", p.Shape},
+		{"reply_shape", p.ReplyShape},
+		{"data_boundary", p.DataBoundary},
+	} {
+		if strings.TrimSpace(section.text) == "" {
+			return reportPromptFileShape{}, fmt.Errorf("section %q is missing or empty", section.name)
+		}
+	}
+	if p.ModelContract.ResponseFormat == "" {
+		return reportPromptFileShape{}, fmt.Errorf("model_contract.response_format is missing")
+	}
+	return p, nil
+}
