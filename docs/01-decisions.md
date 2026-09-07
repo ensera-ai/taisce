@@ -234,6 +234,45 @@ reasoning above is unchanged — one image, role at runtime — and what changed
 quickstart whose topology is nothing like a deployment is a topology that has to be unlearned, and
 the cost of teaching the right one is a second container of an image that is already built.
 
+### D43 — Two boundaries: the deployment is the tenant, the project is the isolation
+
+**The tenant is the instance.** One deployment holds one organisation's memory (D35). There is no
+tenant boundary to cross because there is no second tenant to cross into — not mitigated, unreachable.
+
+**The project is the unit of isolation, and it is a real object rather than a string.** A project is a
+namespace that data belongs to, that API tokens are attached to, that declares which kinds of memory
+it keeps, and that carries its own retention policy. Today it is none of those: it is a table
+partition, a watermark row, and a `scope` column on everything else. There is no project table at all,
+which means there is nowhere for a setting to live and nothing for a token to be attached to.
+
+**A token belongs to one project.** Not to a set of them. An agent that needs two projects holds two
+tokens.
+
+That is a deliberate narrowing of what was built, and it costs something specific: a recall can no
+longer return one bundle spanning several projects, which G11 originally designed for. It is worth the
+loss. A token that reaches one namespace makes "what can this credential see" a fact rather than a
+list, makes every audit row unambiguous about which project an operation touched, and makes a leaked
+token a bounded incident. And the direction is the safe one: widening a token to more projects later
+breaks nothing, while narrowing one after clients depend on the width breaks all of them.
+
+**Per-project settings, and what they are not.** A project declares which memory surfaces are active —
+history, context provider, and whichever others exist — and its retention policy. This is the
+operator configuring their own instance, and it must not become the entitlement machinery D39
+removed: there is no plan, nothing is withheld, and a setting exists because an operator turns it off,
+not because somebody has not paid for it. The distinction is worth guarding, because the two look
+identical in a schema and only one of them has a reader.
+
+**Rejected:** a project as a schema of its own (a multi-project query becomes a cross-schema union
+that cannot be planned as one statement, and erasure would walk N namespaces instead of one); a token
+holding a set of projects (what was built — it enables the cross-project bundle and makes the blast
+radius of a leak a list rather than a name); settings on the credential rather than the project (two
+tokens into one project could then disagree about what that project keeps, which is a project setting
+by definition).
+
+**How hard to undo.** The narrowing is easy to reverse and hard to re-apply, which is why it is taken
+now. The project table is a migration; the settings on it are only as reversible as the behaviour they
+switch.
+
 ---
 
 ## Substrate
@@ -654,6 +693,12 @@ schema name in the statement, which no predicate can be wrong about.
 **Rejected:** a scope held on the reader and defaulted (a default is a decision taken once for every
 future caller); empty meaning all (fails open, and fails open exactly when something upstream
 forgot); a project as a schema (would make the intended cross-project read a cross-schema query).
+
+**Amended by D43.** A token belongs to one project, so the authorised set has one member and the
+cross-project bundle this entry contemplated is not available to a single credential. Everything else
+here is unchanged and matters more: the set is still an argument on every read rather than a default,
+and an empty one still returns nothing — that property is what makes a revoked or unattached token
+harmless rather than dangerous.
 
 ### D25 — The first recall ranks nothing, and a bundle that was cut says so
 

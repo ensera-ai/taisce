@@ -220,11 +220,19 @@ migration a single ordered application, and a backup a thing with an obvious bou
 cannot be a bind parameter, so it is interpolated from a validated type that exists only after
 construction, and forgetting to validate is a compile error rather than an injection.
 
-**A project is a scope, and it is a real boundary.** One tenant is not one user or one application.
-Several agents, several teams and several products share an instance, cross-project reads are
-*intended* for a principal granted more than one, and an operator's portal session is not entitled to
-everything by virtue of being an operator. So scope is a column, every read carries the authorised
-set, and an empty set returns nothing.
+**A project is the isolation, and a token belongs to one of them.** One tenant is not one user or one
+application: several agents, several teams and several products share an instance, and a project is
+what keeps them apart. A project is a namespace data belongs to, that tokens attach to, that declares
+which kinds of memory it keeps, and that carries its own retention policy.
+
+One project per token, not a set. An agent needing two holds two. That costs the cross-project bundle
+this goal once described, and buys a credential whose reach is a fact rather than a list — which makes
+every audit row unambiguous and a leaked token a bounded incident. Scope is still an argument on every
+read rather than a default, and an empty set still returns nothing: that is what makes a revoked token
+harmless.
+
+**An operator's portal session is not entitled to project data by virtue of being an operator.** The
+instance is what an operator administers; the memory inside a project is what a token reaches.
 
 **Proved by.** A multi-project read returning two of three projects by authorisation, and an empty
 authorised set returning an empty bundle rather than everything.
