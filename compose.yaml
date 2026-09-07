@@ -20,6 +20,52 @@
 
 name: taisce
 
+# ── What the api and the workers share ───────────────────────────────────────────────────────
+#
+# An anchor rather than two copies. The two services differ only in role, and a connection string
+# that drifted between them would be a defect nobody sees until one half is talking to the wrong
+# database.
+x-service: &service
+  build: .
+  depends_on:
+    bootstrap:
+      condition: service_completed_successfully
+  environment: &service-env
+    # Serves memory. Cannot read the registry, cannot change the schema.
+    TAISCE_MEMORY_DSN: postgres://taisce_data:${TAISCE_DATA_PASSWORD:-change-me-data}@postgres:5432/taisce?sslmode=disable
+    # Resolves credentials. Cannot read memory.
+    TAISCE_REGISTRY_DSN: postgres://taisce_control:${TAISCE_CONTROL_PASSWORD:-change-me-control}@postgres:5432/taisce?sslmode=disable
+    TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
+
+    # ── The model ──────────────────────────────────────────────────────────────────────────────
+    #
+    # Extraction is the one thing that cannot be shipped: no key can be baked into an open
+    # repository, and a hosted provider means the first five minutes contain a signup.
+    #
+    # So the default points at Ollama on the host. On macOS with Colima, and on Docker Desktop,
+    # `host.docker.internal` is the host from inside a container — and Ollama must be told to
+    # listen beyond loopback or nothing reaches it:
+    #
+    #     OLLAMA_HOST=0.0.0.0 ollama serve
+    #     ollama pull qwen3.6:35b-a3b-mxfp8
+    #
+    # Without a model the instance still starts. It stores turns, serves recall of whatever is
+    # already formed, and erases — and it says loudly at startup that memory will not form, because
+    # a system that silently stores and never extracts looks like a memory that does not work.
+    TAISCE_INFERENCE_ENDPOINT: ${TAISCE_INFERENCE_ENDPOINT:-http://host.docker.internal:11434/v1}
+    TAISCE_INFERENCE_EXTRACTOR_MODEL: ${TAISCE_INFERENCE_EXTRACTOR_MODEL:-qwen3.6:35b-a3b-mxfp8}
+    TAISCE_INFERENCE_API_KEY: ${TAISCE_INFERENCE_API_KEY:-}
+    # Closed when unset, deliberately. This is the list of hosts permitted to receive message
+    # content, and it is the difference between an endpoint typo that fails and one that silently
+    # sends a customer's conversations somewhere nobody chose. Changing the endpoint above means
+    # changing this too — that is the mechanism working, not an inconvenience.
+    TAISCE_INFERENCE_ALLOWLIST: ${TAISCE_INFERENCE_ALLOWLIST:-host.docker.internal:11434}
+  extra_hosts:
+    # Colima and Docker Desktop resolve this already; declaring it makes the file work on plain
+    # Linux Docker too, where it otherwise does not exist.
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+
 services:
   # The substrate. Built here rather than pulled because the schema depends on extensions that are
   # not in the stock image, and a test that skips when they are absent proves nothing about a system
@@ -64,64 +110,45 @@ services:
       TAISCE_DATA_PASSWORD: ${TAISCE_DATA_PASSWORD:-change-me-data}
     restart: "no"
 
-  taisce:
-    build: .
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
+  # The API. One of these.
+  #
+  # It serves reads and accepts writes and extracts nothing, so it is bound by the database rather
+  # than by a model — its cost per request is a query, and it does not need to grow with the work.
+  api:
+    <<: *service
+    environment:
+      <<: *service-env
+      TAISCE_ROLE: api
+      TAISCE_ADDR: ":8080"
     ports:
       - "${TAISCE_PORT:-8080}:8080"
+
+  # The workers. These do the work, and these are what scale.
+  #
+  #     docker compose up --scale worker=3
+  #
+  # Extraction is a model call per message, so this is where the time goes. Several are safe by
+  # construction rather than by configuration: formation takes a per-scope advisory lock, so a second
+  # worker finds a busy scope and moves to the next one instead of forming the same turn twice.
+  #
+  # No port, deliberately. A worker an orchestrator could route traffic to is one whose health check
+  # passes about reads it does not serve.
+  worker:
+    <<: *service
     environment:
-      # Serves memory. Cannot read the registry, cannot change the schema.
-      TAISCE_MEMORY_DSN: postgres://taisce_data:${TAISCE_DATA_PASSWORD:-change-me-data}@postgres:5432/taisce?sslmode=disable
-      # Resolves credentials. Cannot read memory.
-      TAISCE_REGISTRY_DSN: postgres://taisce_control:${TAISCE_CONTROL_PASSWORD:-change-me-control}@postgres:5432/taisce?sslmode=disable
-      TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
-      TAISCE_ADDR: ":8080"
+      <<: *service-env
+      TAISCE_ROLE: worker
 
-      # ── The model ──────────────────────────────────────────────────────────────────────────────
-      #
-      # Extraction is the one thing that cannot be shipped: no key can be baked into an open
-      # repository, and a hosted provider means the first five minutes contain a signup.
-      #
-      # So the default points at Ollama on the host. On macOS with Colima, and on Docker Desktop,
-      # `host.docker.internal` is the host from inside a container — and Ollama must be told to
-      # listen beyond loopback or nothing reaches it:
-      #
-      #     OLLAMA_HOST=0.0.0.0 ollama serve
-      #     ollama pull qwen3.6:35b-a3b-mxfp8
-      #
-      # Without a model the instance still starts. It stores turns, serves recall of whatever is
-      # already formed, and erases — and it says loudly at startup that memory will not form, because
-      # a system that silently stores and never extracts looks like a memory that does not work.
-      TAISCE_INFERENCE_ENDPOINT: ${TAISCE_INFERENCE_ENDPOINT:-http://host.docker.internal:11434/v1}
-      TAISCE_INFERENCE_EXTRACTOR_MODEL: ${TAISCE_INFERENCE_EXTRACTOR_MODEL:-qwen3.6:35b-a3b-mxfp8}
-      TAISCE_INFERENCE_API_KEY: ${TAISCE_INFERENCE_API_KEY:-}
-      # Closed when unset, deliberately. This is the list of hosts permitted to receive message
-      # content, and it is the difference between an endpoint typo that fails and one that silently
-      # sends a customer's conversations somewhere nobody chose. Changing the endpoint above means
-      # changing this too — that is the mechanism working, not an inconvenience.
-      TAISCE_INFERENCE_ALLOWLIST: ${TAISCE_INFERENCE_ALLOWLIST:-host.docker.internal:11434}
-    extra_hosts:
-      # Colima and Docker Desktop resolve this already; declaring it makes the file work on plain
-      # Linux Docker too, where it otherwise does not exist.
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
-
-  # ── Splitting reads from formation ───────────────────────────────────────────────────────────
+  # ── Why these are two services and not one ───────────────────────────────────────────────────
   #
-  # The service above runs both halves, which is what one machine wants. They can be run apart from
-  # the SAME IMAGE by setting TAISCE_ROLE, and that is a deployment decision rather than a code one:
+  # The same image and the same binary; only TAISCE_ROLE differs. Splitting them here is not about
+  # this machine — one container would start marginally faster — it is so the compose file teaches
+  # the shape a real deployment has. A quickstart whose topology is nothing like production is a
+  # quickstart that has to be unlearned.
   #
-  #   taisce:                       TAISCE_ROLE: api      serves reads, forms nothing
-  #   taisce-worker:                TAISCE_ROLE: worker   forms the backlog, binds no port
-  #
-  # Worth doing when formation and reads need scaling differently, or when extraction has to be
-  # paused during a provider incident without stopping reads — turns still arrive and are stored,
+  # It also buys something on one machine: scaling the workers when a backlog is deep, and stopping
+  # them during a provider incident while reads keep answering. Turns still arrive and are stored,
   # because the backlog is in the database rather than in a process.
-  #
-  # Not the default, because nothing here has been measured needing it and a split adopted from a
-  # diagram is a second thing to operate with no argument behind it.
 
   # ── Optional: a model gateway ────────────────────────────────────────────────────────────────
   #

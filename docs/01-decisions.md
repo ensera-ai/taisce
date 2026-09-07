@@ -228,6 +228,12 @@ to by accident, with a health check passing about reads it does not serve.
 
 **How hard to undo.** Easy. It is an environment variable and a switch.
 
+**Amended the same day, when the deployment shape was stated.** The compose file runs `api` and
+`worker` as two services rather than one combined process, and the workers are what scale. The
+reasoning above is unchanged — one image, role at runtime — and what changed is the DEFAULT: a
+quickstart whose topology is nothing like a deployment is a topology that has to be unlearned, and
+the cost of teaching the right one is a second container of an image that is already built.
+
 ---
 
 ## Substrate
