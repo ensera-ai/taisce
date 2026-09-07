@@ -18,6 +18,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -115,6 +116,94 @@ func (s *Server) recordRefusedAuth(r *http.Request, presented string) {
 	}
 }
 
+// ── The surface ───────────────────────────────────────────────────────────────────────────────
+
+// Operation is one thing the surface can be asked to do: a name, and where it is reached.
+//
+// The name is the ledger's name for the same operation (D51). One identifier runs from the row in
+// the audit table, through the wire, to the method an adapter exposes — so "which operation was
+// that" has one answer everywhere it is asked, rather than a mapping somebody maintains between an
+// operation's public name and its recorded one.
+type Operation struct {
+	Name   string
+	Method string
+	Path   string
+}
+
+// The surface, declared once (D51). A path per operation, because HTTP's own vocabulary is what
+// every proxy, log and metric between a caller and us already reads — and dispatching on a body
+// field would take that away from the operator to save an adapter four lines.
+//
+// Declared as data rather than as five registration calls because the set has to be enumerable:
+// a test asserts every one of these is refused without a credential and leaves a ledger row, and
+// #36 publishes the contract from here. A route registered anywhere else is invisible to both, which
+// is how a surface acquires an operation nobody checks — and had, before this list existed: an
+// export was reachable, and neither test named "every operation" covered it.
+type route struct {
+	Operation
+	handler func(*Server) grantedHandler
+}
+
+var operations = []route{
+	{Operation{domain.AuditObserve, http.MethodPost, "/observations"},
+		func(s *Server) grantedHandler { return s.observe }},
+	{Operation{domain.AuditFreshness, http.MethodGet, "/freshness"},
+		func(s *Server) grantedHandler { return s.freshness }},
+	{Operation{domain.AuditRecall, http.MethodPost, "/recalls"},
+		func(s *Server) grantedHandler { return s.recallHandler }},
+	{Operation{domain.AuditErase, http.MethodPost, "/erasures"},
+		func(s *Server) grantedHandler { return s.erase }},
+	{Operation{domain.AuditExport, http.MethodPost, "/exports"},
+		func(s *Server) grantedHandler { return s.export }},
+}
+
+// The declaration is checked before anything can serve it, and a bad one stops the binary.
+//
+// Refusing at startup rather than at the request that hits the bad route: a surface is small, fixed
+// and known at build time, so the failure is a programming error and the only question is whether an
+// operator finds out from a crash or from a customer.
+func init() {
+	if err := checkOperations(operations); err != nil {
+		panic("api: the declared surface is unservable: " + err.Error())
+	}
+}
+
+// checkOperations refuses a surface the ledger could not account for.
+//
+// Two ways it can be wrong, and both are silent otherwise. A name the ledger does not know means
+// every call to that operation writes an ERROR to the log and no row — the operation works and is
+// unaccounted for, which is the one thing this system claims it is not. And two routes under one
+// name means the ledger cannot tell them apart afterwards, so the record says an operation happened
+// without saying which.
+func checkOperations(rs []route) error {
+	seen := map[string]string{}
+	for _, o := range rs {
+		if !domain.RecordableOperation(o.Name) {
+			return fmt.Errorf("operation %q (%s %s) is not one the ledger can name",
+				o.Name, o.Method, o.Path)
+		}
+		if where, dup := seen[o.Name]; dup {
+			return fmt.Errorf("operation %q is declared twice: %s and %s %s",
+				o.Name, where, o.Method, o.Path)
+		}
+		seen[o.Name] = o.Method + " " + o.Path
+	}
+	return nil
+}
+
+// Operations is the surface, for anything that has to enumerate it rather than remember it.
+//
+// Paths are absolute and carry the version, because that is what a caller sends and what a contract
+// document has to state. The slice is built fresh so a caller cannot rewrite the surface by holding
+// onto it.
+func Operations() []Operation {
+	out := make([]Operation, 0, len(operations))
+	for _, o := range operations {
+		out = append(out, Operation{Name: o.Name, Method: o.Method, Path: "/" + Version + o.Path})
+	}
+	return out
+}
+
 // Handler builds the routes.
 //
 // Recall and erase are POSTs despite reading rather than writing, and that is deliberate. A question
@@ -127,16 +216,16 @@ func (s *Server) Handler() http.Handler {
 
 	// Unauthenticated, and it says nothing. A liveness probe that reports version, database state or
 	// configuration is a reconnaissance endpoint that happens to answer probes.
+	//
+	// Not in the operation table: it performs nothing, is reachable without a credential, and leaves
+	// no ledger row. Putting it there would make every property the table asserts have an exception.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	p := "/" + Version
-	mux.Handle("POST "+p+"/observations", s.authenticated(s.observe))
-	mux.Handle("GET "+p+"/freshness", s.authenticated(s.freshness))
-	mux.Handle("POST "+p+"/recalls", s.authenticated(s.recallHandler))
-	mux.Handle("POST "+p+"/erasures", s.authenticated(s.erase))
-	mux.Handle("POST "+p+"/exports", s.authenticated(s.export))
+	for _, o := range operations {
+		mux.Handle(o.Method+" /"+Version+o.Path, s.authenticated(o.handler(s)))
+	}
 
 	return mux
 }

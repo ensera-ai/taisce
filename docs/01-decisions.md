@@ -581,6 +581,73 @@ nothing, and pretending otherwise is worse than not signing).
 seal chain is what any stronger scheme would build on. The entries it covers are being recorded from
 now, which is the part that could not have been added later.
 
+### D51 — A path per operation on the wire; one binding lives in the client, not in the protocol
+
+Five operations, five paths, five methods: `POST /v1/observations`, `GET /v1/freshness`,
+`POST /v1/recalls`, `POST /v1/erasures`, `POST /v1/exports`. The alternative was one route that every
+operation goes through, dispatched on a field in the body.
+
+**What the one-route proposal was actually buying, and it is smaller than it looks.** The argument was
+that an adapter binds once instead of five times. But a path is the cheapest part of a binding. An
+adapter still constructs five request shapes and parses five response shapes in every language,
+because the operations genuinely differ — an erasure receipt is not a recall bundle. What one route
+removes is one string per operation, and what it costs is paid by everybody else forever.
+
+**HTTP's vocabulary is the operator's, and it is not ours to spend.** `GET /v1/freshness` is legible as
+a safe, retryable read to every proxy, load balancer, access log, metrics exporter and WAF between a
+caller and this service — none of which we wrote, all of which the operator already runs. `POST /`
+carrying `{"operation":"freshness"}` is opaque to all of them: every operation looks identical from
+outside, and an operator asking which one is slow has to parse bodies to find out. Rule 8's own test
+applies and fails: a boundary the operator can express in their own substrate — rate-limit recalls,
+refuse exports at the edge, put erasures behind a network — becomes, under one route, a rule every
+proxy config would have to read a body to apply. That is a convention, not a boundary.
+
+**And freshness is the operation this costs most.** It is the highest-frequency call in the product —
+an agent polling whether its write has formed (D19) — and it is the one whose safety and cacheability
+a single POST throws away. Rule 9: work on the read path is judged by what every caller pays.
+
+**The adapter gets its single binding anyway, one layer up.** A client exposes one internal method
+taking an operation name and mapping it to a method and a path; the adapter above it adds operations
+by name. That is one binding in the adapter and five on the wire, which is the whole benefit claimed
+for dispatch-on-body, obtained without spending anything the operator owns. The mapping is a table in
+one file per language rather than a translation layer, and #26's conformance suite is what holds the
+languages to the same one.
+
+**The MCP argument cuts the other way.** An MCP tool is a name and an argument object, so the mapping
+to a path is a table — and that table lives once, in our own MCP server (#31), which is Go. It was
+never going to be written five times.
+
+**One name for an operation, everywhere it is named.** The wire's operation names *are* the ledger's
+(`observe`, `recall`, `erase`, `freshness`, `export`), and the surface refuses to start if a route
+carries a name the ledger cannot record or two routes share one. That was the real content of "one
+route per operation": not one path, but one identifier running from the audit row through the wire to
+the adapter method, so "which operation was that" has a single answer.
+
+**Enumerable, which was the other thing one route was claimed to give.** The surface is declared as
+data in `internal/api`, and `Operations()` hands it out. A test asserts every declared operation is
+refused without a credential and leaves an attributed ledger row; #36 publishes the contract from the
+same list. This is not a property of dispatch-on-body — it is a property of the set having one
+declaration point, which a mux has as easily as a dispatch table. The defect it found immediately is
+the argument for it: both tests named *"every operation"* enumerated four of five, and the missing one
+was the export — the operation that returns everything held about a person.
+
+**What it costs, and it is not nothing.** Adding an operation means an adapter change in every
+language rather than a new name in an existing call. Five ecosystems ship a version to gain a
+capability. That is a real recurring cost, accepted because the operator-side loss is permanent and
+paid on every request while the adapter cost is paid once per capability.
+
+**Rejected:** one route dispatched on a body field (opaque to every intermediary the operator runs,
+vaguer status codes, and it buys an adapter four lines); a route per operation with a *different* name
+in the contract than in the ledger (a mapping somebody maintains, and the first thing to disagree);
+GET for recall, erase and export (a question and a data subject reference are personal data, and a URL
+lands in access logs, proxy logs and browser history — this is D-level enough to say twice, and the
+handlers say it too).
+
+**How hard to undo.** Free today and never again, which is why it is settled now: no adapter has
+shipped and no client depends on the shape. After the first SDK, changing it is a contract version and
+an upgrade in five ecosystems. The enumerable declaration is easy to undo in either direction; the
+wire shape is not.
+
 ---
 
 ## Substrate

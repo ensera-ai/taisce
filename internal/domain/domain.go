@@ -509,6 +509,24 @@ const (
 	AuditAuthenticate = "authenticate"
 )
 
+// RecordableOperation says whether the ledger can name an operation.
+//
+// Exported because the wire surface asks it of every route it declares, at startup, before it will
+// serve any of them. An operation the ledger cannot name is one that would either be served without
+// a row or refused at the moment somebody used it, and both are worse than refusing to start.
+//
+// This is the one definition. Validate calls it too, so a name added to the ledger's vocabulary
+// becomes servable and a name removed stops being servable, without a second list agreeing to it.
+func RecordableOperation(name string) bool {
+	switch name {
+	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
+		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,
+		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate:
+		return true
+	}
+	return false
+}
+
 // Who performed an operation.
 const (
 	PrincipalCredential = "credential"
@@ -555,11 +573,7 @@ type AuditEntry struct {
 // Checked before the insert as well as by the schema, so that the caller gets the reason rather than
 // a constraint violation four frames down naming a column.
 func (e AuditEntry) Validate() error {
-	switch e.Operation {
-	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
-		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,
-		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate:
-	default:
+	if !RecordableOperation(e.Operation) {
 		return fmt.Errorf("audit entry names operation %q, which is not one the ledger records", e.Operation)
 	}
 	switch e.PrincipalKind {

@@ -172,22 +172,22 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 
 // Every operation is behind a credential. A memory service that answers an unauthenticated request
 // is a memory dump on a port.
+// Every operation, taken from the surface rather than from a list in this file.
+//
+// It was a list, and the list was wrong: an export was reachable and this test did not mention it,
+// so the one operation that hands back everything held about a person was the one nothing checked
+// was behind a credential. A test that enumerates the thing it tests cannot go quiet that way —
+// adding a route adds a case here, and there is nothing to remember.
 func TestEveryOperationRefusesAnUnauthenticatedCaller(t *testing.T) {
 	h := newHarness(t, "api_anon")
 
-	for _, c := range []struct {
-		method, path string
-		body         map[string]any
-	}{
-		{http.MethodPost, "/v1/observations", map[string]any{"data_subject_id": "s"}},
-		{http.MethodGet, "/v1/freshness", nil},
-		{http.MethodPost, "/v1/recalls", map[string]any{"question": "anything"}},
-		{http.MethodPost, "/v1/erasures", map[string]any{"data_subject_id": "s"}},
-	} {
-		t.Run(c.method+" "+c.path, func(t *testing.T) {
-			status, _ := h.raw(t, c.method, c.path, c.body, "")
+	for _, o := range api.Operations() {
+		t.Run(o.Name, func(t *testing.T) {
+			// No body. The credential is resolved before anything reads one, which is itself the
+			// property worth holding: a caller who cannot authenticate never reaches a parser.
+			status, _ := h.raw(t, o.Method, o.Path, nil, "")
 			if status != http.StatusUnauthorized {
-				t.Fatalf("answered %d without a credential", status)
+				t.Fatalf("%s %s answered %d without a credential", o.Method, o.Path, status)
 			}
 		})
 	}
@@ -687,22 +687,72 @@ func TestACredentialNamingAProjectThatIsGoneIsRefused(t *testing.T) {
 // Asserted over the whole journey rather than per handler, because the property is that nothing
 // happens unaccounted for — and a per-handler test would pass while a new handler added tomorrow
 // recorded nothing.
+// Every operation, performed, and every one of them accounted for.
+//
+// The bodies are keyed by operation name and checked against the surface before anything runs, so an
+// operation added to the surface fails here until somebody exercises it. That is the difference
+// between a test named "every operation" and one that happens to cover the four somebody thought of:
+// the export was missing from both, and this is what stops it happening again.
 func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	h := newHarness(t, "api_ledger")
 	ctx := context.Background()
 	audit := pg.NewAuditStore(h.pool, h.schema)
 
-	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
-		"data_subject_id": "subject-1",
-		"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
-	}, http.StatusCreated, nil)
-	h.do(t, http.MethodGet, "/v1/freshness", nil, http.StatusOK, nil)
+	// What a successful call to each operation looks like, and what it answers with.
+	exercise := map[string]struct {
+		body map[string]any
+		want int
+	}{
+		domain.AuditObserve: {map[string]any{
+			"data_subject_id": "subject-1",
+			"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
+		}, http.StatusCreated},
+		domain.AuditFreshness: {nil, http.StatusOK},
+		domain.AuditRecall:    {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
+		domain.AuditExport:    {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
+		domain.AuditErase: {map[string]any{
+			"data_subject_id": "subject-1", "reason": "the ledger test",
+		}, http.StatusOK},
+	}
+
+	surface := api.Operations()
+	for _, o := range surface {
+		if _, ok := exercise[o.Name]; !ok {
+			t.Fatalf("the surface serves %q and nothing here performs it, "+
+				"so whether it is recorded is unknown", o.Name)
+		}
+	}
+	if len(exercise) != len(surface) {
+		t.Fatalf("%d operations are exercised and the surface has %d", len(exercise), len(surface))
+	}
+
+	// Order is imposed here rather than taken from the declaration, because two operations care
+	// about it and the declaration is not the place that knows. A recall before formation would
+	// leave a row having read nothing, and an erasure before an export would leave the export with
+	// nothing to find — both would pass, and both would be exercising less than they claim.
+	ran := map[string]bool{}
+	run := func(name string) {
+		c := exercise[name]
+		for _, o := range surface {
+			if o.Name == name {
+				h.do(t, o.Method, o.Path, c.body, c.want, nil)
+				ran[name] = true
+				return
+			}
+		}
+		t.Fatalf("%s is exercised here and the surface does not serve it", name)
+	}
+	run(domain.AuditObserve)
+	run(domain.AuditFreshness)
 	h.form(t)
-	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{"question": "What about Ensera?"},
-		http.StatusOK, nil)
-	h.do(t, http.MethodPost, "/v1/erasures", map[string]any{
-		"data_subject_id": "subject-1", "reason": "the ledger test",
-	}, http.StatusOK, nil)
+	run(domain.AuditRecall)
+	run(domain.AuditExport)
+	run(domain.AuditErase)
+	for _, o := range surface {
+		if !ran[o.Name] {
+			t.Fatalf("%s has a body here and was never sent, so nothing exercised it", o.Name)
+		}
+	}
 
 	entries, err := audit.Recent(ctx, 100)
 	if err != nil {
@@ -712,8 +762,8 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	for _, e := range entries {
 		seen[e.Operation] = e
 	}
-	for _, op := range []string{domain.AuditObserve, domain.AuditFreshness,
-		domain.AuditRecall, domain.AuditErase} {
+	for _, o := range surface {
+		op := o.Name
 		e, ok := seen[op]
 		if !ok {
 			t.Fatalf("%s left no ledger row", op)
