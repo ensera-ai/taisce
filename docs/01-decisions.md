@@ -862,3 +862,13 @@ uses it, is a cost with no mechanism behind it.
 **Rejected:** importing a decision register wholesale (imports the frame that produced a different
 architecture); "carry the decisions that still hold" (presumes they hold, and the presumption is the
 error).
+
+**The exception was invoked on 2026-09-07**, for the predecessor system this work continues — read on
+request, to establish scope and to learn what it got wrong. The boundary held while reading it is the
+one rule 3 already sets: **capabilities and findings cross, files do not.** What came back is issues
+with their own arguments — #80, #81, and confirming evidence on #62 and #74 — each re-derived against
+this codebase rather than justified by where it was seen.
+
+Copying files is blocked separately and for a different reason: that repository carries no licence and
+almost all of its history is authored under a company address, so publishing derived code under
+Apache-2.0 is a question of who owns it rather than a question of engineering. #79 holds it.
