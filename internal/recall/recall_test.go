@@ -156,7 +156,7 @@ func world(t *testing.T, name string, turns ...domain.Turn) (*pgxpool.Pool, pg.S
 			t.Fatalf("%s is stored to %d and formed to %+v", scope, fresh.Stored, fresh)
 		}
 	}
-	return pool, schema, recall.New(pg.NewRecallStore(pool, schema), 50)
+	return pool, schema, recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50})
 }
 
 func turn(scope string, contents ...string) domain.Turn {
@@ -331,7 +331,7 @@ func TestATruncatedBundleSaysSo(t *testing.T) {
 	pool, schema, _ := world(t, "rc_limit",
 		turn("p1", "Marta works at Ensera and Ensera is part of the Dublin Office."))
 
-	recaller := recall.New(pg.NewRecallStore(pool, schema), 1)
+	recaller := recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 1})
 	bundle, err := recaller.Recall(ctx, []string{"p1"}, "Tell me about Ensera.")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -350,16 +350,18 @@ func TestATruncatedBundleSaysSo(t *testing.T) {
 // configuration mistake — answering every question with an empty bundle would look exactly like a
 // memory that holds nothing, which is the most expensive way to report a typo.
 func TestANonsenseBundleCapFallsBackRatherThanReturningNothing(t *testing.T) {
-	for _, limit := range []int{0, -1, -100} {
-		r := recall.New(stubStore{}, limit)
+	for _, b := range []recall.Budget{
+		{}, {Characters: 0, MaxRows: 0}, {Characters: -1, MaxRows: -100},
+	} {
+		r := recall.NewWithBudget(stubStore{}, b)
 		bundle, err := r.Recall(context.Background(), []string{"p1"}, "anything at all")
 		if err != nil {
-			t.Fatalf("cap %d: %v", limit, err)
+			t.Fatalf("budget %+v: %v", b, err)
 		}
 		// The stub returns nothing, so what is asserted is that the call is well-formed rather than
-		// short-circuited by a cap of zero.
+		// short-circuited by a budget of zero.
 		if bundle.Truncated {
-			t.Fatalf("cap %d reported a truncated bundle from an empty store", limit)
+			t.Fatalf("budget %+v reported a truncated bundle from an empty store", b)
 		}
 	}
 }
@@ -407,7 +409,7 @@ func TestFactsFromOneMessageAboutOneSubjectAreMarkedNotIndependent(t *testing.T)
 		{ID: "f3", Subject: "Marta", Predicate: "works_at", Object: "Ensera",
 			Evidence: domain.Evidence{SourceObservationID: "obs-2", SourceOrdinal: 0}},
 	}
-	bundle, err := recall.New(coDerivedStore(facts), 50).
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -437,7 +439,7 @@ func TestFactsFromDifferentMessagesOfOneTurnAreIndependent(t *testing.T) {
 		{ID: "f2", Subject: "Marta", Predicate: "prefers", Object: "docs",
 			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 1}},
 	}
-	bundle, err := recall.New(coDerivedStore(facts), 50).
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -459,7 +461,7 @@ func TestFactsAboutDifferentSubjectsAreIndependent(t *testing.T) {
 		{ID: "f2", Subject: "Cork team", Predicate: "part_of", Object: "Ensera",
 			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
 	}
-	bundle, err := recall.New(coDerivedStore(facts), 50).
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -479,7 +481,7 @@ func TestCoDerivationComparesSubjectsTheWayEntitiesResolve(t *testing.T) {
 		{ID: "f2", Subject: "  MARTA ", Predicate: "requires", Object: "writing",
 			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
 	}
-	bundle, err := recall.New(coDerivedStore(facts), 50).
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -500,7 +502,7 @@ func TestCoDerivationNamesOnlyWhatTheCallerCanSee(t *testing.T) {
 			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0},
 		})
 	}
-	bundle, err := recall.New(coDerivedStore(facts), 3).
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 3}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -530,7 +532,7 @@ func TestAFactWithNoSubjectIsNotCoDerivedWithEverything(t *testing.T) {
 		{ID: "f2", Subject: "", Predicate: "requires", Object: "writing",
 			Evidence: domain.Evidence{SourceObservationID: "obs-1", SourceOrdinal: 0}},
 	}
-	bundle, err := recall.New(coDerivedStore(facts), 50).
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -552,7 +554,7 @@ func TestAFactWithNoSubjectIsNotCoDerivedWithEverything(t *testing.T) {
 // A question that names nothing this memory holds says so, rather than returning an empty bundle that
 // looks like having nothing to say.
 func TestAQuestionNamingNothingKnownSaysSoRatherThanLookingSilent(t *testing.T) {
-	bundle, err := recall.New(emptyAnchorStore{}, 50).
+	bundle, err := recall.NewWithBudget(emptyAnchorStore{}, recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(context.Background(), []string{"p1"}, "what is our Kubernetes cluster configuration")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -574,7 +576,7 @@ func TestAQuestionNamingNothingKnownSaysSoRatherThanLookingSilent(t *testing.T) 
 // A question that names something known and finds no facts is the OTHER empty answer, and must not
 // claim the thing is unknown.
 func TestAKnownSubjectWithNoFactsIsNotTheSameAsAnUnknownOne(t *testing.T) {
-	bundle, err := recall.New(coDerivedStore(nil), 50).
+	bundle, err := recall.NewWithBudget(coDerivedStore(nil), recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -598,7 +600,7 @@ func TestTheBundleSaysWhereItsFactsCameFrom(t *testing.T) {
 		{ID: "f3", Subject: "Cork team", Predicate: "part_of", AnchoredOn: "e2",
 			Evidence: domain.Evidence{SourceObservationID: "o3"}},
 	}
-	bundle, err := recall.New(coDerivedStore(facts), 50).
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -618,7 +620,7 @@ func TestTheCountsDescribeWhatTheCallerGot(t *testing.T) {
 			Evidence: domain.Evidence{SourceObservationID: fmt.Sprintf("o%d", i)},
 		})
 	}
-	bundle, err := recall.New(coDerivedStore(facts), 2).
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 2}).
 		Recall(context.Background(), []string{"p1"}, "what about Marta")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -644,4 +646,105 @@ func (emptyAnchorStore) Anchors(context.Context, []string, []string) ([]domain.A
 
 func (emptyAnchorStore) FactsAbout(context.Context, []string, []string, int, []string) ([]domain.CitedFact, error) {
 	return nil, nil
+}
+
+// ── #61: the bundle is cut in a unit a caller can convert ─────────────────────────────────────
+
+// The cut is by characters, not rows, because a row is not a size: one fact carries a two-word quote
+// and another carries a paragraph, so a caller converting rows to anything has to assume the worst
+// every time to avoid overrunning once.
+func TestTheBundleIsCutByWhatTheCallerCanAfford(t *testing.T) {
+	long := strings.Repeat("a paragraph of recorded conversation. ", 20)
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "Marta", Predicate: "works_at", Object: "Ensera", Statement: "short",
+			AnchoredOn: "e1", Evidence: domain.Evidence{SourceObservationID: "o1", Quote: "short"}},
+		{ID: "f2", Subject: "Marta", Predicate: "prefers", Object: "docs", Statement: long,
+			AnchoredOn: "e1", Evidence: domain.Evidence{SourceObservationID: "o2", Quote: long}},
+		{ID: "f3", Subject: "Marta", Predicate: "lives_in", Object: "Dublin", Statement: "short",
+			AnchoredOn: "e1", Evidence: domain.Evidence{SourceObservationID: "o3", Quote: "short"}},
+	}
+	// Enough for the first and nowhere near enough for the second.
+	r := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100, MaxRows: 50})
+	bundle, err := r.Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(bundle.Facts) != 1 || bundle.Facts[0].ID != "f1" {
+		t.Fatalf("got %d facts, wanted the one that fits", len(bundle.Facts))
+	}
+	if !bundle.Truncated {
+		t.Fatal("the bundle was cut and does not say so")
+	}
+	if bundle.Characters == 0 || bundle.Characters > 100 {
+		t.Fatalf("reported %d characters against a budget of 100", bundle.Characters)
+	}
+}
+
+// At least one fact always comes back. A budget too small for the first fact returns it anyway and
+// says it was cut — an empty bundle would be indistinguishable from a memory with nothing in it,
+// which is the one thing a cut must not look like.
+func TestABudgetTooSmallForOneFactStillReturnsOne(t *testing.T) {
+	long := strings.Repeat("x", 5000)
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "Marta", Statement: long, AnchoredOn: "e1",
+			Evidence: domain.Evidence{SourceObservationID: "o1", Quote: long}},
+		{ID: "f2", Subject: "Marta", Statement: long, AnchoredOn: "e1",
+			Evidence: domain.Evidence{SourceObservationID: "o2", Quote: long}},
+	}
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 10, MaxRows: 50}).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(bundle.Facts) != 1 {
+		t.Fatalf("got %d facts; a budget too small must still answer with one", len(bundle.Facts))
+	}
+	if !bundle.Truncated {
+		t.Fatal("the bundle was cut and does not say so")
+	}
+}
+
+// A generous budget returns everything and does not claim truncation.
+func TestAGenerousBudgetReturnsEverythingAndSaysSo(t *testing.T) {
+	facts := []domain.CitedFact{
+		{ID: "f1", Subject: "Marta", Statement: "a", AnchoredOn: "e1",
+			Evidence: domain.Evidence{SourceObservationID: "o1", Quote: "a"}},
+		{ID: "f2", Subject: "Marta", Statement: "b", AnchoredOn: "e1",
+			Evidence: domain.Evidence{SourceObservationID: "o2", Quote: "b"}},
+	}
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts), recall.Budget{Characters: 100000, MaxRows: 50}).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(bundle.Facts) != 2 {
+		t.Fatalf("got %d of 2 facts", len(bundle.Facts))
+	}
+	if bundle.Truncated {
+		t.Fatal("a bundle that returned everything claims it was cut")
+	}
+}
+
+// The row bound guards the query rather than the answer: an enormous budget must not become an
+// unbounded read.
+func TestTheRowBoundGuardsTheQuery(t *testing.T) {
+	var facts []domain.CitedFact
+	for i := 0; i < 10; i++ {
+		facts = append(facts, domain.CitedFact{
+			ID: fmt.Sprintf("f%d", i), Subject: "Marta", Statement: "s", AnchoredOn: "e1",
+			Evidence: domain.Evidence{SourceObservationID: fmt.Sprintf("o%d", i), Quote: "q"},
+		})
+	}
+	bundle, err := recall.NewWithBudget(coDerivedStore(facts),
+		recall.Budget{Characters: 1000000, MaxRows: 3}).
+		Recall(context.Background(), []string{"p1"}, "what about Marta")
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(bundle.Facts) != 3 {
+		t.Fatalf("the row bound was %d and %d facts came back", 3, len(bundle.Facts))
+	}
+	if !bundle.Truncated {
+		t.Fatal("the row bound cut the result and the bundle does not say so")
+	}
 }

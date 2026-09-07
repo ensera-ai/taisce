@@ -421,6 +421,14 @@ type recallResponse struct {
 	// these, so a cut bundle is missing arbitrary members rather than the least relevant ones. A
 	// caller told only the facts would read the cut as a judgement.
 	Truncated bool `json:"truncated"`
+	// Characters is what these facts cost, in the unit the cut was made in. A caller converts to
+	// their own tokeniser's units; we do not, because a token count computed with the wrong
+	// tokeniser is wrong in a way the caller cannot correct and would be believed.
+	Characters int `json:"characters"`
+	// Degraded names parts of the retrieval that did not run. Empty today and present anyway,
+	// because a bundle that silently comes back smaller is indistinguishable from a memory with less
+	// in it — and a field cannot be added to a published contract without a version.
+	Degraded []string `json:"degraded"`
 	// Reach is how this bundle was arrived at. Always present, because an empty bundle without it
 	// cannot say whether the question named something unknown or something known-and-silent.
 	Reach reachPayload `json:"reach"`
@@ -515,10 +523,16 @@ func renderBundle(b domain.Bundle) recallResponse {
 	if perAnchor == nil {
 		perAnchor = map[string]int{}
 	}
+	degraded := b.Degraded
+	if degraded == nil {
+		degraded = []string{}
+	}
 	out := recallResponse{
-		Truncated: b.Truncated,
-		Anchors:   []anchorPayload{},
-		Facts:     []factPayload{},
+		Truncated:  b.Truncated,
+		Characters: b.Characters,
+		Degraded:   degraded,
+		Anchors:    []anchorPayload{},
+		Facts:      []factPayload{},
 		Reach: reachPayload{
 			Terms: b.Reach.Terms, Anchored: b.Reach.Anchored,
 			NamedNothingKnown: b.Reach.NamedNothingKnown(), FactsPerAnchor: perAnchor,

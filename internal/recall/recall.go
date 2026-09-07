@@ -41,20 +41,59 @@ type Store interface {
 	FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int, sources []string) ([]domain.CitedFact, error)
 }
 
-// Recaller answers questions against one tenant's memory.
-type Recaller struct {
-	store Store
-	// limit caps the bundle. It is a cap and not a selection: nothing has ranked the facts, so
-	// cutting at the limit drops arbitrary members rather than the least useful ones.
-	limit int
+// Budget is how much a caller can afford to be given back.
+//
+// # Why characters and not tokens
+//
+// A caller's constraint is tokens; ours cannot be. A token count is a property of the tokeniser the
+// caller's model uses, which is not the one we would use, and the difference is a few percent that
+// varies by model and by text. Reporting a token count we computed with the wrong tokeniser is a
+// number that is wrong in a way the caller cannot correct — and it would be believed, because it is
+// labelled tokens.
+//
+// Characters are exact, stable, and convertible by whoever knows their own model. A caller with an
+// eight-thousand-token allowance and a model averaging four characters to the token asks for thirty-two
+// thousand characters. That is their arithmetic with their number, rather than ours with a guess.
+//
+// # Why not rows
+//
+// A row is not a size. One fact carries a two-word quote and another carries a paragraph, so a caller
+// converting rows to anything has to assume the worst — which means asking for far less than they can
+// afford, every time, to avoid overrunning once.
+type Budget struct {
+	// Characters bounds what comes back. Zero takes the default.
+	Characters int
+	// MaxRows bounds the query rather than the answer. It exists so an enormous budget cannot ask
+	// the database for an unbounded read, and it is not the unit a caller reasons in.
+	MaxRows int
 }
 
-// New builds a recaller. A limit of zero or less takes the default.
-func New(store Store, limit int) *Recaller {
-	if limit <= 0 {
-		limit = 50
+// DefaultBudget is deliberately modest. It is a cut nothing has ranked, so a caller who has not said
+// what they can afford should be given a small arbitrary slice rather than a large one.
+func DefaultBudget() Budget { return Budget{Characters: 16000, MaxRows: 200} }
+
+// Recaller answers questions against one tenant's memory.
+type Recaller struct {
+	store  Store
+	budget Budget
+}
+
+// There is deliberately no constructor taking a bare number.
+//
+// One existed and took a ROW limit. When the unit became characters it kept compiling and changed
+// meaning, so every caller passing 50 silently went from fifty facts to fifty characters — which is
+// the worst kind of change, because nothing fails and the behaviour is wrong. A compile error is the
+// cheaper outcome, so the number now arrives inside a type that names its unit.
+
+// NewWithBudget builds a recaller over an explicit budget.
+func NewWithBudget(store Store, b Budget) *Recaller {
+	if b.Characters <= 0 {
+		b.Characters = DefaultBudget().Characters
 	}
-	return &Recaller{store: store, limit: limit}
+	if b.MaxRows <= 0 {
+		b.MaxRows = DefaultBudget().MaxRows
+	}
+	return &Recaller{store: store, budget: b}
 }
 
 // Recall resolves a question to entities and returns the facts naming them.
@@ -124,18 +163,38 @@ func (r *Recaller) RecallFrom(ctx context.Context, scopes []string, question str
 		ids = append(ids, a.Entity.ID)
 	}
 
-	// One more than the limit, so a full result is distinguishable from a truncated one without a
-	// second count query — and without the caller having to guess from the row count whether they
-	// are looking at everything.
-	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.limit+1, sources)
+	// One more than the row bound, so a full result is distinguishable from a truncated one without
+	// a second count query. The row bound is a guard on the QUERY — it stops an enormous budget
+	// asking the database for an unbounded read — and is not the unit the caller reasons in.
+	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.budget.MaxRows+1, sources)
 	if err != nil {
 		return domain.Bundle{}, err
 	}
-	bundle := domain.Bundle{Anchors: anchors, Facts: facts}
-	if len(facts) > r.limit {
-		bundle.Facts = facts[:r.limit]
+
+	bundle := domain.Bundle{Anchors: anchors}
+	if len(facts) > r.budget.MaxRows {
+		facts = facts[:r.budget.MaxRows]
 		bundle.Truncated = true
 	}
+
+	// Cut by what the caller can afford. Nothing has ranked these, so the cut drops arbitrary
+	// members rather than the least useful ones — which is why the bundle says it was cut, and why
+	// the unit matters: arbitrary measured in characters is usable, arbitrary measured in rows is
+	// not, because one fact is a two-word quote and another is a paragraph.
+	spent := 0
+	for _, f := range facts {
+		size := factSize(f)
+		if spent+size > r.budget.Characters && len(bundle.Facts) > 0 {
+			// At least one fact always comes back. A budget too small for the first fact returns it
+			// anyway and says it was cut: an empty bundle would be indistinguishable from a memory
+			// with nothing in it, which is the one thing a cut must not look like.
+			bundle.Truncated = true
+			break
+		}
+		bundle.Facts = append(bundle.Facts, f)
+		spent += size
+	}
+	bundle.Characters = spent
 
 	// After the cut, not before. Co-derivation is a statement about what is IN the bundle, and naming
 	// a fact the caller cannot see would be a citation that resolves to nothing.
@@ -242,3 +301,15 @@ func markCoDerived(facts []domain.CitedFact) {
 // NormalizeSubject compares subjects the way entity resolution does, so two facts naming one person
 // in different casing are recognised as being about the same subject.
 func NormalizeSubject(s string) string { return domain.NormalizeName(s) }
+
+// factSize is what a fact costs a caller, in characters.
+//
+// The fields that are rendered, and only those: a caller pays for what arrives, and counting an
+// identifier they receive but never read into their context would make the budget describe something
+// other than what it bounds. Approximate by a few characters of JSON punctuation per fact, and
+// deliberately so — an exact serialisation cost would depend on the encoder rather than on the
+// content.
+func factSize(f domain.CitedFact) int {
+	return len(f.Subject) + len(f.Predicate) + len(f.Object) + len(f.Statement) +
+		len(f.Evidence.Quote)
+}

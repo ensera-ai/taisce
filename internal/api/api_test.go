@@ -438,7 +438,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 		pg.NewProjectStore(pool, schema),
 		pg.NewObservationStore(pool),
 		pg.NewEraser(pool),
-		recall.New(pg.NewRecallStore(pool, schema), 50),
+		recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50}),
 		schema,
 		nil,
 	).Handler())

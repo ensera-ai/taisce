@@ -474,6 +474,24 @@ type Bundle struct {
 	// than the least relevant ones, and a caller that does not know that will read the cut as a
 	// verdict.
 	Truncated bool
+	// Characters is what the returned facts cost, in the unit the cut was made in.
+	//
+	// Reported so a caller can see how much of their budget was used, and so a caller who asked for
+	// more than they can afford finds out from the answer rather than from their model.
+	Characters int
+	// Degraded names the parts of the retrieval that did not run.
+	//
+	// Empty today because the path either works or errors: anchors and facts are both required, and
+	// a failure in either is a failure of the whole. It is here before it is needed because it
+	// cannot be added afterwards — the moment anything in the path can fail on its own, a bundle
+	// that silently comes back smaller is indistinguishable from a scope with less in it, and a
+	// caller reads a dead dependency as an empty memory. Adding a field to a published contract is a
+	// version; adding it now is free.
+	//
+	// The reason a degraded path returns a smaller bundle rather than an error: memory enhances a
+	// turn and is not a precondition for one. An agent handed less keeps working; an agent handed an
+	// error stops.
+	Degraded []string
 	// Reach says how the bundle was arrived at: what the question offered, what of it was found, and
 	// where the facts came from.
 	//

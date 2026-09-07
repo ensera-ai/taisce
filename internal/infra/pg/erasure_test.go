@@ -102,7 +102,7 @@ func TestEverythingDerivedFromASubjectIsErasedWithAResidualOfZero(t *testing.T) 
 	}
 
 	// And the facts are recallable, so what disappears afterwards is something that was there.
-	recaller := recall.New(pg.NewRecallStore(pool, schema), 50)
+	recaller := recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50})
 	before, err := recaller.Recall(ctx, []string{"p1"}, "Where does Marta work?")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -296,7 +296,7 @@ func TestAProjectionSharedWithAnotherSubjectIsKeptAndIsNotAResidual(t *testing.T
 	}
 
 	// And the other subject still recalls what they said.
-	other, err := recall.New(pg.NewRecallStore(pool, schema), 50).
+	other, err := recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50}).
 		Recall(ctx, []string{"p1"}, "Where does Tomas work?")
 	if err != nil {
 		t.Fatalf("recall: %v", err)

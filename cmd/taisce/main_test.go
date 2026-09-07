@@ -166,18 +166,18 @@ func TestAPortAlreadyInUseStopsTheProcessStarting(t *testing.T) {
 	}
 }
 
-// The bundle cap falls back rather than failing, because a malformed number is a deployment typo and
-// refusing to start over one would be a worse outcome than a default the operator can see in the log.
-func TestTheBundleCapFallsBackRatherThanFailing(t *testing.T) {
+// The bundle budget falls back rather than failing, because a malformed number is a deployment typo
+// and refusing to start over one is worse than a default an operator can see in the log.
+func TestTheBundleBudgetFallsBackRatherThanFailing(t *testing.T) {
 	for _, value := range []string{"", "not-a-number", "0", "-5"} {
-		t.Setenv(envBundleLimit, value)
-		if n := bundleLimit(); n <= 0 {
-			t.Fatalf("%q produced a cap of %d, which would return nothing", value, n)
+		t.Setenv(envBundleBudget, value)
+		if b := bundleBudget(); b.Characters <= 0 || b.MaxRows <= 0 {
+			t.Fatalf("%q produced %+v, which would return nothing", value, b)
 		}
 	}
-	t.Setenv(envBundleLimit, "7")
-	if n := bundleLimit(); n != 7 {
-		t.Fatalf("a valid cap was ignored: %d", n)
+	t.Setenv(envBundleBudget, "2048")
+	if b := bundleBudget(); b.Characters != 2048 {
+		t.Fatalf("a valid budget was ignored: %+v", b)
 	}
 }
 

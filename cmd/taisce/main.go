@@ -41,7 +41,10 @@ const (
 	envRegistryDSN = "TAISCE_REGISTRY_DSN"
 	envTenant      = "TAISCE_SCHEMA"
 	envAddr        = "TAISCE_ADDR"
-	envBundleLimit = "TAISCE_BUNDLE_LIMIT"
+	// The bundle budget, in CHARACTERS. Not tokens: a token count is a property of the caller's
+	// tokeniser, not ours, and one computed with the wrong tokeniser is wrong in a way they cannot
+	// correct. Not rows: a row is not a size.
+	envBundleBudget = "TAISCE_BUNDLE_CHARACTERS"
 	// The identity that may change the schema. Only the operator commands use it; the server never
 	// holds a connection that can run DDL.
 	envAdminDSN = "TAISCE_ADMIN_DSN"
@@ -148,7 +151,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 		pg.NewProjectStore(memory, schema),
 		pg.NewObservationStore(memory),
 		pg.NewEraser(memory),
-		recall.New(pg.NewRecallStore(memory, schema), bundleLimit()),
+		recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()),
 		schema,
 		log,
 	)
@@ -250,17 +253,20 @@ func run(ctx context.Context, log *slog.Logger) error {
 	}
 }
 
-func bundleLimit() int {
-	const fallback = 50
-	raw := strings.TrimSpace(os.Getenv(envBundleLimit))
+func bundleBudget() recall.Budget {
+	b := recall.DefaultBudget()
+	raw := strings.TrimSpace(os.Getenv(envBundleBudget))
 	if raw == "" {
-		return fallback
+		return b
 	}
 	var n int
 	if _, err := fmt.Sscanf(raw, "%d", &n); err != nil || n <= 0 {
-		return fallback
+		// A typo falls back rather than refusing to start. A deployment that cannot serve because a
+		// number is misspelled is a worse outcome than one serving a default it can see in the log.
+		return b
 	}
-	return n
+	b.Characters = n
+	return b
 }
 
 // startDriver brings up formation behind the append.
