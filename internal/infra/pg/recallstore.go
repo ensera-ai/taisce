@@ -18,16 +18,15 @@ type RecallStore struct {
 	schema Schema
 }
 
-// NewRecallStore binds a reader to one tenant. The schema is held rather than passed per call
-// because this is the read path a request handler drives, and a tenant chosen per query is a tenant
-// that can be chosen wrongly per query.
+// NewRecallStore binds a reader to the instance memory namespace. Project authorization is a
+// predicate on each read; a request never chooses a database namespace.
 func NewRecallStore(pool *pgxpool.Pool, schema Schema) *RecallStore {
 	return &RecallStore{pool: pool, schema: schema}
 }
 
 // Anchors resolves candidate terms to entities inside the authorised scopes.
 //
-// # Canonical name and aliases in one pass
+// # Canonical name and alias lookup
 //
 // An entity accumulates the surface forms it has actually been referred to. Matching only the
 // canonical name would miss a question that used the same words the conversation used — which is
@@ -35,9 +34,8 @@ func NewRecallStore(pool *pgxpool.Pool, schema Schema) *RecallStore {
 //
 // # The scope predicate is on every read
 //
-// A project is a permission inside a tenant, so the authorised set is a parameter and the check is a
-// predicate. That is the soft boundary; the hard one is the schema name in the statement, which no
-// predicate can be wrong about.
+// The authorised project set is a parameter. Runtime database privileges cover the instance;
+// they do not replace these project predicates.
 func (s *RecallStore) Anchors(ctx context.Context, scopes, terms []string) ([]domain.Anchor, error) {
 	return s.AnchorsForSubject(ctx, scopes, terms, "")
 }
@@ -45,7 +43,10 @@ func (s *RecallStore) Anchors(ctx context.Context, scopes, terms []string) ([]do
 // AnchorsForSubject includes the selected speaker without requiring their name in the question.
 // The filter is caller attribution within authorised projects, not proof of an end user's identity.
 func (s *RecallStore) AnchorsForSubject(ctx context.Context, scopes, terms []string, subject string) ([]domain.Anchor, error) {
-	rows, err := s.pool.Query(ctx, s.schema.SQL(selectAnchorsSQL), scopes, terms, nullIfEmpty(subject))
+	if err := domain.ValidateRecallTerms(terms); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, s.schema.SQL(selectAnchorsSQL), scopes, terms, nullIfEmpty(subject), domain.MaxRecallMatches+1)
 	if err != nil {
 		return nil, fmt.Errorf("resolve anchors: %w", err)
 	}
@@ -59,6 +60,9 @@ func (s *RecallStore) AnchorsForSubject(ctx context.Context, scopes, terms []str
 			return nil, err
 		}
 		out = append(out, a)
+		if len(out) > domain.MaxRecallMatches {
+			return nil, domain.ErrRecallMatches
+		}
 	}
 	return out, rows.Err()
 }
@@ -71,11 +75,22 @@ func (s *RecallStore) AnchorsForSubject(ctx context.Context, scopes, terms []str
 // is not a ranking of facts; it is the order the anchors are reported in, and it exists so a reader
 // sees the most specific thing the question named at the top.
 const selectAnchorsSQL = `
+WITH terms AS (SELECT DISTINCT unnest($2::text[]) AS term)
 SELECT * FROM (
+ SELECT * FROM (
     SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity_type, t.term
-      FROM unnest($2::text[]) AS t(term)
+      FROM terms t
       JOIN {schema}.entity e ON e.scope = ANY($1) AND e.identity_kind='named'
-       AND (e.normalized_name=t.term OR t.term=ANY(e.normalized_aliases))
+       AND e.normalized_name=t.term
+     WHERE $3::text IS NULL OR EXISTS (
+        SELECT 1 FROM {schema}.projection_dependency d
+         WHERE d.scope=e.scope AND d.projection_kind='entity' AND d.projection_id=e.entity_id::text
+           AND d.data_subject_id=$3)
+    UNION ALL
+    SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity_type, t.term
+      FROM terms t
+      JOIN {schema}.entity e ON e.scope=ANY($1) AND e.identity_kind='named'
+       AND e.normalized_aliases @> ARRAY[t.term] AND e.normalized_name<>t.term
      WHERE $3::text IS NULL OR EXISTS (
         SELECT 1 FROM {schema}.projection_dependency d
          WHERE d.scope=e.scope AND d.projection_kind='entity' AND d.projection_id=e.entity_id::text
@@ -84,6 +99,7 @@ SELECT * FROM (
     SELECT e.entity_id::text,e.scope,e.canonical_name,e.normalized_name,e.entity_type,'speaker'
       FROM {schema}.entity e
      WHERE e.scope=ANY($1) AND e.identity_kind='speaker' AND e.speaker_subject_id=$3
+ ) candidates LIMIT $4
 ) anchors
 ORDER BY length(term) DESC, canonical_name, entity_id`
 

@@ -29,10 +29,12 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Database integrity [#100](https://github.com/althunibat/taisce/issues/100) | Core implemented; `d66537a`. Deferred project-consistent references, runtime catalog restrictions, exact report/child provenance, concurrent report retry fix, shared retention and source-evidence removal. | General rebuild/formation/erasure concurrency. No RLS confidentiality claim; D68 records the assessment. |
 | Single-tenant provisioning [#99](https://github.com/althunibat/taisce/issues/99) | Closed; `17ac077`. One default memory namespace, compatible instance-wide override, explicit provisioning names, fresh/restart/upgrade tests, reconciled service-role flags. | Effective privilege drift from existing grants/memberships/ownership is tracked in [#109](https://github.com/althunibat/taisce/issues/109). |
 | Effective runtime privileges [#109](https://github.com/althunibat/taisce/issues/109) | Closed; `bab1c0b`. Bootstrap and each new pool connection check direct/inherited privileges, SET ROLE, ownership and protected catalogs. Registry runtime is read-only. | No remaining scope in this issue. D70 documents remediation and connection-admission limits. |
-| Atomic project storage [#110](https://github.com/althunibat/taisce/issues/110) | Implemented and tested in this batch. One name contract, transactional DDL/row creation, bounded collision-resistant physical names, catalog validation and legacy reuse. | None in this issue; vector strategy/scale measurements remain #101. |
+| Atomic project storage [#110](https://github.com/althunibat/taisce/issues/110) | Closed; `1309e72`. One name contract, transactional DDL/row creation, bounded collision-resistant physical names, catalog validation and legacy reuse. | None in this issue; vector strategy/scale measurements remain #101. |
 
-The complete real-PostgreSQL suite and uncached repeat for atomic project provisioning pass at
-**89.1%**, now the enforced floor. Integrity's targeted race checks and `go vet ./...` pass. These
+| Exact anchor admission [#102](https://github.com/althunibat/taisce/issues/102) | Core implemented in this batch. Separate indexed name/alias arms, question/term/match limits, explicit refusal before traversal, real-database plan and attribution/erasure tests. | Alias-specific ownership and concurrent registration, normalized-relation comparison and controlled-host workload measurements. Issue remains open. |
+
+The complete real-PostgreSQL suite and uncached repeat through anchor admission pass at
+**89.2%**, now the enforced floor. Integrity's targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
 Inference profiles are tracked separately. The full local inference suite passed in 2140.657 seconds
@@ -41,8 +43,8 @@ against `17ac077` passed in 462.482 seconds. Known semantic separation limitatio
 in the tests. OpenRouter stopped on upstream HTTP 429; a later bounded retry was also rate-limited.
 Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist configuration.
 
-Next: indexed/bounded anchoring (#102), admission controls and operational measurements under their existing
-issues. The generation/rebuild lifecycle is required before closing #84 or #100. Product and adapter
+Next: shared admission/backlog controls (#93) and operational measurements under their existing
+issues. Anchoring’s remaining ownership and workload criteria stay in #102. The generation/rebuild lifecycle is required before closing #84 or #100. Product and adapter
 journeys retain their acceptance criteria and remain in the execution order below.
 
 ## Assessment

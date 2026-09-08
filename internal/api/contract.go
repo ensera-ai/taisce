@@ -29,6 +29,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/ensera-ai/taisce/internal/domain"
 )
 
 // Contract renders the public description of this surface.
@@ -52,6 +54,10 @@ func Contract() string {
 		"Duplicate keys (including case aliases), unknown fields, invalid Unicode escapes and " +
 		"nesting beyond 128 levels are refused with HTTP 400 and `invalid_body`. " +
 		"The 1 MiB limit includes all bytes of the body, including trailing whitespace.\n")
+	fmt.Fprintf(&b, "\nRecall questions are limited to %d UTF-8 bytes, %d distinct candidate names "+
+		"and %d matching entity/name pairs. Exceeding a limit returns HTTP 400 and `invalid_question`, "+
+		"with no partial bundle. The match count includes the selected speaker. Fact-budget cuts "+
+		"remain successful responses with `truncated: true`.\n", domain.MaxRecallQuestionBytes, domain.MaxRecallTerms, domain.MaxRecallMatches)
 
 	b.WriteString("\n## Operations\n\n")
 	b.WriteString("| Operation | Method | Path | On success |\n|---|---|---|---|\n")

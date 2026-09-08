@@ -2287,3 +2287,50 @@ this codebase rather than justified by where it was seen.
 Copying files is blocked separately and for a different reason: that repository carries no licence and
 almost all of its history is authored under a company address, so publishing derived code under
 Apache-2.0 is a question of who owns it rather than a question of engineering. #79 holds it.
+
+
+## D72 — Exact anchoring uses separate indexable lookups and refuses excessive expansion
+
+**Date:** 2026-09-08. **Tracking:** [#102](https://github.com/althunibat/taisce/issues/102),
+[#93](https://github.com/althunibat/taisce/issues/93).
+
+**Decision.** Canonical names use the existing project/name B-tree identity index. Alias lookup
+uses array containment in a separate query arm, which the existing GIN operator class supports.
+An alias identical to the canonical name does not duplicate that match. Distinct matching terms
+remain visible; this does not merge entities, add fuzzy matching, or invent aliases. Subject
+attribution and authorized project predicates apply in both arms, and the selected speaker retains
+its own identity path.
+
+A question may contain at most 8192 UTF-8 bytes and expand into at most 512 distinct candidate names.
+Direct store calls also admit at most 32768 aggregate term bytes. The SQL returns at most 257
+entity/name pairs, including the selected speaker, before its final ordering. More than 256 matches
+refuses the whole recall before graph traversal. HTTP returns `400 invalid_question`; it does not
+return an arbitrary partial bundle or suggest that nothing was known. Ordinary fact-budget cuts
+continue to return a successful bundle marked `truncated`. These are conservative admission
+ceilings, not measured optimal settings or relevance thresholds. #93 owns workload-based tuning.
+
+**Security and cost.** A compromised project credential can submit long questions or common aliases.
+Checking bytes before term expansion bounds that allocation; checking term count/bytes before SQL
+bounds the database arguments; checking match overflow before facts bounds traversal seeds.
+Per-term GIN work can still depend on posting lists in other projects, pending index entries and
+planner decisions. These controls do not establish a corpus-independent read cost or replace
+instance/project concurrency and backlog admission.
+
+**Evidence and alternatives.** `TestAnchorQueryPlans` explains the actual production query on
+20,000 entities across two projects with 16 aliases each, using normal planner settings. It checks
+canonical hits, aliases, misses and a 128-term missing question, including index use and project
+results. The previous OR expression scanned the entity table in that fixture. A single batched
+array-overlap lookup also selected a full scan for the large question; it was not selected. A
+normalized, project-keyed alias relation remains under evaluation in #102 because its write and
+erasure ownership contract needs measurement and design. Local plan diagnostics are documented in
+[05-anchor-query-plans.md](05-anchor-query-plans.md); no local latency result is a production claim.
+
+Rejecting overflow was chosen over silent anchor truncation, which could discard the selected
+speaker or a legitimate ambiguity and make the surviving facts appear complete. Adding a model
+call to recognize names was rejected: it changes the exact-match contract and adds inference
+latency and availability to each read.
+
+**Undo cost.** No persisted representation changes. Query structure can be replaced without a
+migration. Limits are documented client-visible refusals; raising them requires resource evidence,
+and lowering them requires a compatibility review. Alias ownership, concurrent registration,
+normalized-relation comparison and controlled-host measurements remain open under #102.

@@ -4,13 +4,8 @@
 // Package recall answers a question from entities outward.
 //
 // Retrieval starts at the entities a question names and returns the facts about them. It does not
-// search passages and it does not fan out over the corpus, which is the whole inversion: cost is
-// proportional to a neighbourhood rather than to how much has been stored.
-//
-// This is the thinnest honest form of that: anchor, facts, bundle. Nothing ranks, nothing fuses,
-// nothing traverses. Every one of those is a stage that can only be justified by a measurement it
-// improves, and adding one before the plain path is measured makes it impossible to say which stage
-// is doing the work — or which is doing harm.
+// search passages. Question expansion and anchor matches have admission ceilings; graph traversal
+// has hop and fanout bounds. Anchor index work still depends on stored name/alias distributions.
 package recall
 
 import (
@@ -193,6 +188,9 @@ func (r *Recaller) RecallAsOf(ctx context.Context, scopes []string, question str
 // project-wide recall; a supplied subject is applied by the store to anchors, each hop and evidence.
 func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, question string,
 	sources []string, at domain.AsOf, hops int, subject string) (domain.Bundle, error) {
+	if len(question) > domain.MaxRecallQuestionBytes {
+		return domain.Bundle{}, domain.ErrRecallQuestionSize
+	}
 	if hops < DirectHop {
 		hops = DirectHop
 	}
@@ -206,6 +204,9 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 		return domain.Bundle{}, nil
 	}
 	terms := Terms(question)
+	if err := domain.ValidateRecallTerms(terms); err != nil {
+		return domain.Bundle{}, err
+	}
 	if len(terms) == 0 {
 		return domain.Bundle{}, nil
 	}
@@ -214,6 +215,9 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	anchors, err := r.store.AnchorsForSubject(ctx, scopes, terms, subject)
 	if err != nil {
 		return domain.Bundle{}, err
+	}
+	if len(anchors) > domain.MaxRecallMatches {
+		return domain.Bundle{}, domain.ErrRecallMatches
 	}
 	reach.Anchored = len(anchors)
 	if len(anchors) == 0 {

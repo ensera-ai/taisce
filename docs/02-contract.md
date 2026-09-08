@@ -8,6 +8,8 @@ The version is in the path. It is permanent from the day the first client ships:
 
 Requests must contain one complete UTF-8 JSON object followed only by whitespace. Duplicate keys (including case aliases), unknown fields, invalid Unicode escapes and nesting beyond 128 levels are refused with HTTP 400 and `invalid_body`. The 1 MiB limit includes all bytes of the body, including trailing whitespace.
 
+Recall questions are limited to 8192 UTF-8 bytes, 512 distinct candidate names and 256 matching entity/name pairs. Exceeding a limit returns HTTP 400 and `invalid_question`, with no partial bundle. The match count includes the selected speaker. Fact-budget cuts remain successful responses with `truncated: true`.
+
 ## Operations
 
 | Operation | Method | Path | On success |
