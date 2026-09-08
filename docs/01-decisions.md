@@ -3399,3 +3399,37 @@ There is no implicit rekey/merge of existing IDs. HTTP/PostgreSQL tests cover tw
 missing-fact recovery, project/read-only boundaries, exact references, races, counted erasure,
 source-aware expiry, quiet-project scheduling and rollback. This completes the subject contract in
 #95; full generations remain #58 and do not require inferring registry contents.
+
+## D95 — Operator recovery repairs missing support without replacing retained records
+
+**Decision.** `recover facts` handles both missing fact rows and missing receipt-backed support for
+retained facts. `restored` counts newly recovered fact rows; `repaired` counts existing records whose
+original evidence, temporal history or erasure registration was restored. These counts are disjoint
+and sum to the success-audit magnitude. A failed page reports no committed progress. Ordinary
+formation and authored replay retain the existing missing-fact helper and do not run this extra work.
+
+Retained records are locked with their receipt and surviving source before support repair. Exact
+source bytes and attribution must agree. Existing conflicting evidence, history, ownership or
+pipeline metadata is refused, never overwritten. Missing support is inserted with conflict checks;
+both original and causal observations own restored temporal history. Statements, current intervals,
+versions and human withdrawals remain unchanged. Evidence restoration still advances the source's
+report revision and invalidates derived reports atomically. A repeated complete page performs no
+projection mutation or revision bump. Erased source/receipt state cannot be reconstructed.
+
+**Cost and alternatives.** This adds source validation and indexed support/registration checks for
+retained records on an operator recovery page; ordinary recall and ingestion gain no additional
+queries or model calls. Pages remain limited to 100 receipts with the operator's 30-second deadline;
+actual supporting history rows are determined by retained source receipts, not a throughput promise.
+Skipping retained records leaves missing citation/history data unrepaired. Deleting and recreating
+those records needlessly restamps state and risks losing human edits. Blind upsert would overwrite
+conflicting retained evidence instead of exposing an integrity failure. Re-extraction cannot reproduce
+the exact original knowledge state and remains an explicit separate generation operation.
+
+**Reversal and proof.** Small before release: the additional operator repair branch can be disabled
+without rewriting stored state. The `repaired` progress field is then zero. The regression test first
+failed with retained facts and missing evidence, and now restores exact evidence/history plus both
+erasure registrations. Other tests cover preserved withdrawals/versions, no-op source revisions,
+conflicting support, atomic storage/audit failure, and races with human withdrawal and erasure.
+This advances #58; unrecorded additional support, full projection generations and changed-model
+reinterpretation remain open. Source receipts and authoritative artifact/subject storage still need
+backups; model-based rebuild must preserve those governance roots.

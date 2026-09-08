@@ -78,6 +78,17 @@ func TestRecoveryCommandRestoresOneSourceAndReturnsOnlyProgress(t *testing.T) {
 	if _, err := uuid.Parse(page.Principal); err != nil {
 		t.Fatal(err)
 	}
+
+	if _, err := pool.Exec(ctx, schema.SQL(`DELETE FROM {schema}.fact_evidence WHERE fact_id=$1::uuid`), id); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := recoveryCommand(ctx, args, &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out.Bytes(), &page); err != nil || page.Restored != 0 || page.Repaired != 1 || page.Examined != 1 || bytes.Contains(out.Bytes(), []byte("private")) {
+		t.Fatal("support repair was not reported as content-free progress")
+	}
 	if err := recoveryCommand(ctx, args, failedRecoveryOutput{}); err == nil {
 		t.Fatal("output error swallowed")
 	}

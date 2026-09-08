@@ -24,6 +24,7 @@ var ErrInvalidReceipt = errors.New("formation receipt no longer matches its surv
 type RecoveryPage struct {
 	Examined int    `json:"examined"`
 	Restored int    `json:"restored"`
+	Repaired int    `json:"repaired"`
 	Next     string `json:"next,omitempty"`
 }
 
@@ -88,10 +89,18 @@ func (s *FactStore) RecoverFacts(ctx context.Context, schema Schema, scope, sour
 			out.Examined++
 			if restored {
 				out.Restored++
+			} else {
+				repaired, err := repairFactSupportTx(ctx, tx, schema, scope, e.id)
+				if err != nil {
+					return err
+				}
+				if repaired {
+					out.Repaired++
+				}
 			}
 		}
 		_, err = tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.audit_entry(operation,principal,principal_kind,project,magnitude,outcome)
-            VALUES('formation.recover',$1,'operator',$2,$3,'allowed')`), principal, scope, out.Restored)
+            VALUES('formation.recover',$1,'operator',$2,$3,'allowed')`), principal, scope, out.Restored+out.Repaired)
 		return err
 	})
 	if err != nil {

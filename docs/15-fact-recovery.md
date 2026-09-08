@@ -13,7 +13,7 @@ Run with the operator database connection configured:
 taisce recover facts --project default --limit 100
 ```
 
-The JSON result contains `examined`, `restored`, an optional `next` cursor and `audit_principal`.
+The JSON result contains `examined`, `restored`, `repaired`, an optional `next` cursor and `audit_principal`.
 When `next` is present, pass it as `--after <fact-uuid>` on the next invocation. No `next` means that
 pass reached the end. `--source <observation-uuid>` restricts a pass to one surviving observation.
 The command checks project existence and uses a 30-second deadline. A failed page commits nothing.
@@ -30,8 +30,16 @@ for recovery. Source bytes that no longer agree with the receipt cause refusal, 
 sources cannot be reconstructed. A foreign source filter returns no records for this project.
 
 This operation restores **missing admitted facts** and their evidence, entity identities and temporal
-history. It preserves original extraction and pipeline stamps. It does not run newer extraction rules,
-restore a lost receipt, regenerate summaries or embeddings, restore entity-only/evidence-only loss,
-or recover unsupported direct SQL inserts. Back up observations, authored input, withdrawal
-instructions and formation receipts together. D88 records the storage cost and supported boundary;
-#58 tracks the remaining generation workflows.
+history. `restored` counts newly recovered fact rows; `repaired` counts retained records whose missing
+original evidence, temporal history or erasure registrations were repaired. Support repair itself preserves fact statements,
+intervals, versions and human withdrawals. Missing-successor link recovery still has the version
+behavior described above. Both original and causal history owners
+are registered. Existing conflicting evidence, history, ownership or pipeline stamps cause an atomic
+refusal rather than being overwritten. Restoring evidence advances its source revision and invalidates
+reports through the normal database mechanism; repeating a complete page does not invalidate them.
+
+Recovery preserves original extraction and pipeline stamps. It does not run newer extraction rules,
+restore a lost receipt, regenerate summaries or embeddings, restore unrecorded additional evidence or
+entity-only loss, or recover unsupported direct SQL inserts. Back up observations, authored input,
+withdrawal instructions and formation receipts together. D88 records the source-receipt boundary and
+D95 adds retained-record support repair; #58 tracks the remaining generation workflows.
