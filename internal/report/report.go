@@ -34,6 +34,7 @@ import (
 type Fact struct {
 	// Source identity is governance metadata. It is never rendered into model input.
 	SourceObservationID string
+	SourceRevision      int64
 	// Entity IDs distinguish equal displayed names. They are projection identities, not protected
 	// data-subject keys; empty IDs retain compatibility with caller-supplied named-only material.
 	SubjectID string
@@ -72,6 +73,7 @@ type Report struct {
 	// Loaded from persisted dependency registrations when a child is substituted. Model-returned
 	// values are ignored by persistence; only the supplied context determines report provenance.
 	SourceObservationIDs []string
+	SourceRevisions      map[string]int64
 	// Title names the subject, not the community. "The Dublin office move" rather than "Community 7".
 	Title string
 	// Summary is the paragraph a thematic answer is built from.

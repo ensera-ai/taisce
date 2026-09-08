@@ -2817,3 +2817,51 @@ temporal/erasure boundaries. A portable JSON fixture records these cases for SDK
 Go test checks budget isolation and a Unicode/path test catches byte counting or uncharged graph
 text. Changing the accounting unit after a supported release would change client context sizing and
 require a versioned contract decision. No stored rows, SQL writer or model prompt changes are needed.
+
+
+## D83 — Reports are valid only for the source fact revisions they read
+
+**Context.** A retained observation can remain available while its derived facts change. Checking
+only source existence at report persistence permits a model call started before supersession to
+publish an outdated claim afterwards. Already persisted reports also need invalidation when their
+source projections change. This is a prerequisite for curated retractions and rebuild, tracked in
+[#117](https://github.com/althunibat/taisce/issues/117).
+
+**Decision.** Each observation carries a positive, monotonic fact revision. Fact updates/deletes and
+evidence inserts/updates/deletes advance the affected source revisions and remove reports registered
+to those sources in the same transaction. A report inherited through child substitution carries the
+same source revisions, so parent summaries are invalidated too. A new fact becomes report material
+through its evidence; the evidence insert advances the revision.
+
+Material reads capture each revision in the same database statement as the facts. Revision metadata
+stays outside model input. Report persistence merges the revisions from direct facts and child
+reports, refuses missing or contradictory metadata, then locks sources in identifier order and
+compares the retained revisions before inserting anything. Those locks conflict with revision
+advancement: a racing source change either makes persistence refuse or removes the report it just
+stored. A deferred composite foreign key also prevents committing a report registration whose
+revision differs from its source. The model response cannot supply persistence authority.
+
+**Alternatives rejected.** Source existence is insufficient when projections change but the log is
+retained. Timestamps can collide and confuse observation time with projection changes. A project-wide
+revision would invalidate summaries of unrelated observations whenever any fact changed. Checking
+without a conflicting lock leaves a window between validation and insertion. Holding a transaction
+open across model inference would consume database resources for the entire provider latency.
+
+**Costs and limits.** Writes add a source-row update and invalidate every summary supported by that
+observation, including summaries whose particular subset of facts was unaffected. Regeneration can
+cost model calls. This deliberately chooses a conservative source-level boundary over a new
+fact-level report dependency graph. Ordinary recall gains no revision lookup. Fact/evidence changes
+are covered; entity-label edits and model/pipeline version transitions remain separate generation
+work. This mechanism does not implement record retractions or rebuild itself. Controlled-host write
+amplification and contention measurements remain under #103; no production latency claim is made.
+
+**Evidence.** Real PostgreSQL tests cover supersession with retained citation sources, direct/parent
+invalidation, stale and missing metadata, rollback, removed evidence, substrate-level revision
+constraints and concurrent report publication versus fact changes. The prompt-material regression
+proves that source IDs and revision metadata do not change the provider input. Existing project,
+erasure, source-provenance and concurrent-retry tests remain part of the full suite.
+
+**Reversal.** The counter, dependency column, constraints and triggers are derived-state machinery.
+A replacement can rebuild reports with a different dependency model from retained observations and
+facts. Source identifiers, fact identifiers and citation bytes do not change. Define the supported
+schema transition before a released deployment relies on it; this implementation remains greenfield.

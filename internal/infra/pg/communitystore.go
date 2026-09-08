@@ -28,7 +28,7 @@ import (
 // words in a row the erasure counted as retained.
 const ProjectionCommunityReport = "community_report"
 
-var ErrReportSourceUnavailable = errors.New("report source provenance is missing, erased, or outside the project")
+var ErrReportSourceUnavailable = errors.New("report source provenance is missing, stale, erased, or outside the project")
 
 // CommunityStore reads the graph a partition is made over and stores what came back.
 type CommunityStore struct {
@@ -281,7 +281,7 @@ func (s *CommunityStore) Material(ctx context.Context, scope string, entityIDs [
 	var facts []report.Fact
 	for rows.Next() {
 		var f report.Fact
-		if err := rows.Scan(&f.SourceObservationID, &f.SubjectID, &f.Subject, &f.Predicate, &f.ObjectID, &f.Object, &f.Statement, &f.Quote); err != nil {
+		if err := rows.Scan(&f.SourceObservationID, &f.SourceRevision, &f.SubjectID, &f.Subject, &f.Predicate, &f.ObjectID, &f.Object, &f.Statement, &f.Quote); err != nil {
 			return nil, nil, err
 		}
 		facts = append(facts, f)
@@ -300,11 +300,12 @@ func (s *CommunityStore) Material(ctx context.Context, scope string, entityIDs [
 // Both ends inside the community, because a relation reaching out of it is about the neighbour rather
 // than about this subject — and a report written from it would describe something it does not contain.
 const selectMaterialSQL = `
-SELECT e.source_observation_id::text, s.entity_id::text, s.canonical_name, f.predicate, o.entity_id::text, o.canonical_name, f.statement, e.quote
+SELECT e.source_observation_id::text, source.fact_revision, s.entity_id::text, s.canonical_name, f.predicate, o.entity_id::text, o.canonical_name, f.statement, e.quote
   FROM {schema}.fact f
   JOIN {schema}.entity s ON s.entity_id = f.subject_entity_id AND s.scope = f.scope
   JOIN {schema}.entity o ON o.entity_id = f.object_entity_id  AND o.scope = f.scope
   JOIN {schema}.fact_evidence e ON e.fact_id = f.fact_id
+  JOIN {schema}.observation source ON source.scope=e.scope AND source.observation_id=e.source_observation_id
  WHERE f.scope = $1
    AND f.subject_entity_id = ANY($2::uuid[])
    AND f.object_entity_id  = ANY($2::uuid[])
@@ -341,9 +342,13 @@ func (s *CommunityStore) Report(ctx context.Context, scope, communityID string) 
                ARRAY(SELECT DISTINCT d.source_observation_id::text
                        FROM {schema}.projection_dependency d
                       WHERE d.scope=r.scope AND d.projection_kind='community_report'
-                        AND d.projection_id=r.report_id::text ORDER BY d.source_observation_id::text)
+                        AND d.projection_id=r.report_id::text ORDER BY d.source_observation_id::text),
+               coalesce((SELECT jsonb_object_agg(d.source_observation_id::text,d.report_source_revision)
+                       FROM {schema}.projection_dependency d
+                      WHERE d.scope=r.scope AND d.projection_kind='community_report'
+                        AND d.projection_id=r.report_id::text),'{}'::jsonb)
           FROM {schema}.community_report r WHERE scope = $1 AND community_id = $2::uuid`),
-		scope, communityID).Scan(&r.Title, &r.Summary, &r.Importance, &r.ImportanceReason, &findings, &r.SourceObservationIDs)
+		scope, communityID).Scan(&r.Title, &r.Summary, &r.Importance, &r.ImportanceReason, &findings, &r.SourceObservationIDs, &r.SourceRevisions)
 	if err == pgx.ErrNoRows {
 		return report.Report{}, false, nil
 	}
@@ -375,19 +380,30 @@ func (s *CommunityStore) Write(ctx context.Context, scope, communityID string, r
 	if err != nil {
 		return fmt.Errorf("encode findings: %w", err)
 	}
-	sources := map[string]bool{}
+	sources := map[string]int64{}
+	addSource := func(id string, revision int64) bool {
+		if id == "" || revision < 1 {
+			return false
+		}
+		if previous, found := sources[id]; found && previous != revision {
+			return false
+		}
+		sources[id] = revision
+		return true
+	}
 	for _, f := range c.Facts {
-		if f.SourceObservationID == "" {
+		if !addSource(f.SourceObservationID, f.SourceRevision) {
 			return ErrReportSourceUnavailable
 		}
-		sources[f.SourceObservationID] = true
 	}
 	for _, child := range c.Children {
-		if len(child.SourceObservationIDs) == 0 {
+		if len(child.SourceObservationIDs) == 0 || len(child.SourceRevisions) != len(child.SourceObservationIDs) {
 			return ErrReportSourceUnavailable
 		}
 		for _, id := range child.SourceObservationIDs {
-			sources[id] = true
+			if !addSource(id, child.SourceRevisions[id]) {
+				return ErrReportSourceUnavailable
+			}
 		}
 	}
 	if len(sources) == 0 {
@@ -400,25 +416,25 @@ func (s *CommunityStore) Write(ctx context.Context, scope, communityID string, r
 	sort.Strings(sourceIDs)
 
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// A lost race is a no-op. Never register a freshly generated ID when ON CONFLICT stored no row.
-		var id string
-		err := tx.QueryRow(ctx, s.schema.SQL(insertReportSQL), scope, uuid.New(), communityID, r.Title, r.Summary,
-			r.Importance, r.ImportanceReason, findings, c.Substituted, c.Dropped).Scan(&id)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("store report: %w", err)
-		}
 		// Lock the exact source set until the report and its registrations commit. A source erased
 		// during generation is a refusal, not an INSERT SELECT that silently registers fewer people.
-		rows, err := tx.Query(ctx, s.schema.SQL(`SELECT observation_id FROM {schema}.observation
-            WHERE scope=$1 AND observation_id=ANY($2::uuid[]) ORDER BY observation_id FOR KEY SHARE`), scope, sourceIDs)
+		rows, err := tx.Query(ctx, s.schema.SQL(`SELECT observation_id::text,fact_revision FROM {schema}.observation
+            WHERE scope=$1 AND observation_id=ANY($2::uuid[]) ORDER BY observation_id FOR SHARE`), scope, sourceIDs)
 		if err != nil {
 			return fmt.Errorf("lock report sources: %w", err)
 		}
 		count := 0
 		for rows.Next() {
+			var sourceID string
+			var revision int64
+			if err := rows.Scan(&sourceID, &revision); err != nil {
+				rows.Close()
+				return err
+			}
+			if sources[sourceID] != revision {
+				rows.Close()
+				return ErrReportSourceUnavailable
+			}
 			count++
 		}
 		err = rows.Err()
@@ -428,6 +444,16 @@ func (s *CommunityStore) Write(ctx context.Context, scope, communityID string, r
 		}
 		if count != len(sourceIDs) {
 			return ErrReportSourceUnavailable
+		}
+		// A lost race is a no-op. Never register a freshly generated ID when ON CONFLICT stored no row.
+		var id string
+		err = tx.QueryRow(ctx, s.schema.SQL(insertReportSQL), scope, uuid.New(), communityID, r.Title, r.Summary,
+			r.Importance, r.ImportanceReason, findings, c.Substituted, c.Dropped).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("store report: %w", err)
 		}
 		if _, err := tx.Exec(ctx, s.schema.SQL(registerReportSQL), scope, id, sourceIDs, ProjectionCommunityReport); err != nil {
 			return fmt.Errorf("register report: %w", err)
@@ -448,8 +474,8 @@ ON CONFLICT (scope, community_id) DO NOTHING RETURNING report_id::text`
 // correct: nobody can erase it by subject and it goes when the observation does.
 const registerReportSQL = `
 INSERT INTO {schema}.projection_dependency
-    (source_observation_id, scope, projection_kind, projection_id, data_subject_id)
-SELECT o.observation_id, $1, $4, $2, o.data_subject_id
+    (source_observation_id, scope, projection_kind, projection_id, data_subject_id, report_source_revision)
+SELECT o.observation_id, $1, $4, $2, o.data_subject_id, o.fact_revision
   FROM {schema}.observation o
  WHERE o.scope=$1 AND o.observation_id=ANY($3::uuid[])
 ON CONFLICT DO NOTHING`

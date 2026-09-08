@@ -47,11 +47,12 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Operator formation recovery [#113](https://github.com/althunibat/taisce/issues/113) | Closed; `fa844ba`. Bounded metadata pagination and project-scoped retry with atomic audit and watermark correction. | None in this issue. |
 | Read-only credentials [#89](https://github.com/althunibat/taisce/issues/89) | Explicit restricted issuance, shared permission gate, content-free denied-operation audit with registry-authoritative access using one opaque token format (D79). | Bounded inventory/history inspection is implemented under D81. Corrections, retractions, batches, entity purge and fine-grained human authorization remain open. |
 | Temporal knowledge [#116](https://github.com/althunibat/taisce/issues/116) | Preserved validity versions, stable fact IDs, recorded supersession sources, causal erasure/retention and history from the first assertion (D78). | Mixed-workload measurement and generation/rebuild integration remain open. |
+| Report freshness [#117](https://github.com/althunibat/taisce/issues/117) | Source fact revisions, atomic stale-write refusal and invalidation of direct/parent summaries (D83). Database concurrency, rollback and prompt-metadata regressions cover the boundary. | None in this issue; curated retractions/rebuild remain #89/#58. |
 | Recall controls [#92](https://github.com/althunibat/taisce/issues/92) | Complete; per-request character ceilings, explicit labeled source roles, effective hop/row limits and hard Unicode content accounting (D82). HTTP conformance and concurrent-client checks cover filters and truncation. | None in this issue. SDK runners reuse the fixture under adapter conformance #26; document ingestion remains #91. |
 | Saved citations [#90](https://github.com/althunibat/taisce/issues/90) | Independent project-scoped resolution, exact source-byte verification and bounded evidence pagination. D77 records scope and limits. | Supersession links and temporal preservation are added under D78; retraction and rebuild mappings remain open. |
 | Operational health [#94](https://github.com/althunibat/taisce/issues/94) | Bounded dependency readiness, actual worker progress, content-free operator aggregates and Compose probes. D76 records scope and limits. | Helm integration depends on #76; issue remains open. |
 
-The complete uncached real-PostgreSQL suite through record inspection and recall controls passes at **91.2%**,
+The complete uncached real-PostgreSQL suite through record inspection, recall controls and report freshness passes at **91.3%**,
 matching the enforced floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
@@ -66,7 +67,7 @@ content-free operator aggregates. Compose consumes the probe contract; Helm inte
 Temporal preservation (#116) now archives validity under its original knowledge interval (D78),
 with stable fact IDs, causal erasure/retention and history from the first assertion. Controlled workload
 measurement and rebuild integration remain open. Record browsing and history (#89) now expose bounded project/subject inventory and archived intervals
-(D81). Next: corrections/retractions and rebuild (#58).
+(D81). Source-revision validation and report invalidation (#117) protect the next correction/retraction and rebuild work (#89/#58).
 Anchoring’s ownership and workload criteria stay in #102. The generation/rebuild lifecycle is
 required before closing #84 or #100. Product and adapter journeys retain their acceptance criteria
 and remain in the execution order below.
