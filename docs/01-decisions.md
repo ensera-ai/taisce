@@ -1297,6 +1297,77 @@ for adapter use of stable keys and conformance under #26.
 
 ## Substrate
 
+
+### D66 — Speaker identity binds to stored attribution inside a project
+
+A speaker reference and a named entity are different identity kinds. Reserved first-person terms
+live in `speaker_term`; an accepted reference resolves to `(scope, speaker_subject_id)` in the
+speaker namespace. Named identities retain `(scope, normalized_name)` and a shared organization
+remains shared. Type is still an attribute for named identities. D5/D6 apply to that named namespace.
+The displayed speaker name is the generic `speaker`; the attribution key is separate metadata.
+
+The model supplies words, never a subject identifier. Fact admission compares the claimed binding
+with the stored observation's project and subject and the source message's user role. Missing or
+mismatched attribution is refused. The production vocabulary admits supported first-person terms
+for this binding; polarity, tense and exact quote validation still run before persistence. English
+and Arabic explicit-reference fixtures run through formation and HTTP recall, including concurrent
+speakers, corrections, quoted speech, missing identity and erasure. This is a bounded reference
+vocabulary, not general pronoun resolution or proof that a model understood every sentence.
+
+`data_subject_id` on recall is an optional attribution filter inside the credential's project. When
+present it selects that speaker without requiring a name in the question, restricts named anchors
+to that subject's registrations, filters facts before each hop's fanout and filters evidence by its
+source observation. Empty retains project-wide named-anchor recall. The filter is not a new
+permission: a project credential can supply any subject, just as it can already export or erase one.
+Human authentication and subject-specific capabilities remain separate work.
+
+**Upgrade behavior.** Migration 0022 refuses old name-only speaker entities before changing the
+identity constraints. Such nodes may already have retired another person's fact; assigning an ID
+cannot restore that history. The failed migration rolls back its DDL and version marker. Named-only
+databases upgrade without reidentifying their entities. Databases with ambiguous history need a
+projection rebuild from retained observations into the new representation. The generation/rebuild
+workflow remains an explicit delivery dependency; this migration does not implement it or silently
+claim existing data was repaired. Source export and erasure remain available on the prior version.
+
+**Rejected:** hashing a subject into its displayed name (propagates protected attribution into every
+statement and model context); using the message role as identity (all users share one role); merging
+speakers by semantic similarity; retaining ambiguous first-person lookup when no subject is supplied;
+filtering only the final bundle (other people's edges would already have guided traversal); guessing
+old intervals during migration without re-forming the source that established them.
+
+**Impact.** Separate unique indexes prevent cross-speaker supersession. Source binding adds an
+indexed reference classification and a source lookup on speaker writes; it adds no inference call.
+Subject-filtered reads use indexed speaker identity plus attribution predicates. No production
+latency claim is made. Export includes stored attribution metadata for the selected subject, and
+registered speaker entities participate in erasure. Sharing a named entity does not preserve another
+subject's speaker. Undoing this requires a migration and another projection rebuild; widening the
+read filter would also change a public contract callers rely on.
+
+
+### D67 — Report material keeps entity references separate from display names
+
+A report fact carries subject and object entity IDs alongside its displayed names. Community reads
+supply those IDs; child ownership includes them in its identity key, so replacing one child's raw
+material cannot remove another speaker's identical sentence. Model input renders opaque entity
+references beside the names. Quotes and recorded statements are unchanged, and the reference labels
+are counted by the same material-size calculation that drives substitution and truncation.
+
+These are projection entity IDs already used for anchoring, not data-subject identifiers or hashes
+of them. A shared organization carries the same reference across its contributors. Caller-supplied
+material without IDs retains its named-only representation; the database path always provides IDs.
+The input fence includes the rendered references along with the remaining material.
+
+**Rejected:** name-plus-quote identity (two people can say the same words); putting protected subject
+keys into model input; relying on the model to infer distinct speakers from identical displayed
+names. Identity in the input prevents deterministic loss in context construction; it does not prove
+that generated prose preserves every distinction. Free-text report quality remains measured against
+its corpus, and old reports need regeneration to acquire the new input semantics.
+
+**Impact.** Child substitution and report context budgets now account for opaque references. This
+adds no model call and transmits no new data-subject key. Removing the fields is cheap in code but
+would recreate the ambiguity; existing generated reports must be regenerated after changing their
+input representation.
+
 ### D1 — PostgreSQL is the only required dependency
 
 Not a vector database, graph engine, message broker, cache or object store.
@@ -1354,6 +1425,8 @@ also the hottest contention point on the write path); optimistic retry on a uniq
 index cannot express interval overlap, which is the actual invariant).
 
 ### D5 — Entity identity is `(scope, normalized_name)`. Type is an attribute
+
+D66 limits this name-based key to named entities and gives speaker references a separate namespace.
 
 Putting the type in the identity key makes one thing extracted once as `place` and once as `thing`
 into **two nodes holding two halves of its facts** — a silent under-merge on every hop, invisible

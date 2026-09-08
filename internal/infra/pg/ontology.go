@@ -80,7 +80,8 @@ func LoadVocabulary(ctx context.Context, pool *pgxpool.Pool, schema Schema) (dom
 	}
 
 	rows, err := pool.Query(ctx, schema.SQL(
-		`SELECT term FROM {schema}.unresolvable_term WHERE lang = $1`), "en")
+		`SELECT DISTINCT term FROM {schema}.unresolvable_term u
+          WHERE NOT EXISTS (SELECT 1 FROM {schema}.speaker_term s WHERE s.term=u.term)`))
 	if err != nil {
 		return domain.Vocabulary{}, fmt.Errorf("read unresolvable terms: %w", err)
 	}

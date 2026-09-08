@@ -66,6 +66,7 @@ POST `/v1/recalls` → 200
 
 | Field | Type |
 |---|---|
+| `data_subject_id` | string |
 | `question` | string |
 | `as_of` | timestamp (RFC 3339), optional |
 | `as_known_at` | timestamp (RFC 3339), optional |

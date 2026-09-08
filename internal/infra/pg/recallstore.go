@@ -39,7 +39,13 @@ func NewRecallStore(pool *pgxpool.Pool, schema Schema) *RecallStore {
 // predicate. That is the soft boundary; the hard one is the schema name in the statement, which no
 // predicate can be wrong about.
 func (s *RecallStore) Anchors(ctx context.Context, scopes, terms []string) ([]domain.Anchor, error) {
-	rows, err := s.pool.Query(ctx, s.schema.SQL(selectAnchorsSQL), scopes, terms)
+	return s.AnchorsForSubject(ctx, scopes, terms, "")
+}
+
+// AnchorsForSubject includes the selected speaker without requiring their name in the question.
+// The filter is caller attribution within authorised projects, not proof of an end user's identity.
+func (s *RecallStore) AnchorsForSubject(ctx context.Context, scopes, terms []string, subject string) ([]domain.Anchor, error) {
+	rows, err := s.pool.Query(ctx, s.schema.SQL(selectAnchorsSQL), scopes, terms, nullIfEmpty(subject))
 	if err != nil {
 		return nil, fmt.Errorf("resolve anchors: %w", err)
 	}
@@ -65,12 +71,21 @@ func (s *RecallStore) Anchors(ctx context.Context, scopes, terms []string) ([]do
 // is not a ranking of facts; it is the order the anchors are reported in, and it exists so a reader
 // sees the most specific thing the question named at the top.
 const selectAnchorsSQL = `
-SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity_type, t.term
-  FROM unnest($2::text[]) AS t(term)
-  JOIN {schema}.entity e
-    ON e.scope = ANY($1)
-   AND (e.normalized_name = t.term OR t.term = ANY(e.normalized_aliases))
- ORDER BY length(t.term) DESC, e.canonical_name`
+SELECT * FROM (
+    SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity_type, t.term
+      FROM unnest($2::text[]) AS t(term)
+      JOIN {schema}.entity e ON e.scope = ANY($1) AND e.identity_kind='named'
+       AND (e.normalized_name=t.term OR t.term=ANY(e.normalized_aliases))
+     WHERE $3::text IS NULL OR EXISTS (
+        SELECT 1 FROM {schema}.projection_dependency d
+         WHERE d.scope=e.scope AND d.projection_kind='entity' AND d.projection_id=e.entity_id::text
+           AND d.data_subject_id=$3)
+    UNION ALL
+    SELECT e.entity_id::text,e.scope,e.canonical_name,e.normalized_name,e.entity_type,'speaker'
+      FROM {schema}.entity e
+     WHERE e.scope=ANY($1) AND e.identity_kind='speaker' AND e.speaker_subject_id=$3
+) anchors
+ORDER BY length(term) DESC, canonical_name, entity_id`
 
 // FactsAbout returns the currently-valid facts naming any of these entities, with their evidence.
 //
@@ -102,6 +117,13 @@ SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity
 // gets every project (D24).
 func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int,
 	sources []string, at domain.AsOf, hops int) ([]domain.CitedFact, error) {
+	return s.FactsAboutForSubject(ctx, scopes, entityIDs, limit, sources, at, hops, "")
+}
+
+// FactsAboutForSubject applies attribution before fanout at EVERY hop, including through shared
+// named entities. Filtering the final bundle would already have let other people's edges guide it.
+func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityIDs []string, limit int,
+	sources []string, at domain.AsOf, hops int, subject string) ([]domain.CitedFact, error) {
 
 	if len(sources) == 0 {
 		// An empty set returns nothing rather than everything. A caller that computed its source
@@ -116,7 +138,7 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 		hops = 1
 	}
 	stmt := selectFactsAboutSQL
-	args := []any{scopes, entityIDs, limit, sources, domain.ContextWindow, hops, domain.Fanout}
+	args := []any{scopes, entityIDs, limit, sources, domain.ContextWindow, hops, domain.Fanout, nullIfEmpty(subject)}
 	switch {
 	case at.HasValid() && at.HasKnown():
 		stmt, args = selectFactsBitemporalSQL, append(args, at.Valid.UTC(), at.Known.UTC())
@@ -226,6 +248,7 @@ WITH RECURSIVE reachable AS (
                WHERE f.scope = ANY($1)
                  AND f.subject_entity_id = r.entity_id
                  AND f.source_role = ANY($4)
+                 AND ($8::text IS NULL OR f.data_subject_id=$8)
                  AND %[1]s
                ORDER BY f.fact_id
                LIMIT $7
@@ -239,6 +262,7 @@ WITH RECURSIVE reachable AS (
                WHERE f.scope = ANY($1)
                  AND f.object_entity_id = r.entity_id
                  AND f.source_role = ANY($4)
+                 AND ($8::text IS NULL OR f.data_subject_id=$8)
                  AND %[1]s
                ORDER BY f.fact_id
                LIMIT $7
@@ -269,6 +293,9 @@ SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name
           LEFT JOIN {schema}.entity pe ON pe.entity_id = p.id AND pe.scope = ANY($1))
   FROM reached r
   JOIN {schema}.fact_evidence e ON e.fact_id = r.fact_id
+   AND ($8::text IS NULL OR EXISTS (SELECT 1 FROM {schema}.observation source
+        WHERE source.observation_id=e.source_observation_id AND source.scope=r.scope
+          AND source.data_subject_id=$8))
   LEFT JOIN {schema}.entity s ON s.entity_id = r.subject_entity_id
   LEFT JOIN {schema}.entity o ON o.entity_id = r.object_entity_id
   LEFT JOIN {schema}.observation src
@@ -311,9 +338,9 @@ var (
 	selectFactsAboutSQL = fmt.Sprintf(factsAboutTemplate,
 		"upper_inf(f.valid) AND upper_inf(f.known)")
 	selectFactsValidAtSQL = fmt.Sprintf(factsAboutTemplate,
-		"f.valid @> $8::timestamptz AND upper_inf(f.known)")
+		"f.valid @> $9::timestamptz AND upper_inf(f.known)")
 	selectFactsKnownAtSQL = fmt.Sprintf(factsAboutTemplate,
-		"upper_inf(f.valid) AND f.known @> $8::timestamptz")
+		"upper_inf(f.valid) AND f.known @> $9::timestamptz")
 	selectFactsBitemporalSQL = fmt.Sprintf(factsAboutTemplate,
-		"f.valid @> $8::timestamptz AND f.known @> $9::timestamptz")
+		"f.valid @> $9::timestamptz AND f.known @> $10::timestamptz")
 )

@@ -32,7 +32,7 @@ const longestAnchor = 4
 // separable from where the rows are — and so the anchoring rules can be read without reading SQL.
 type Store interface {
 	// Anchors resolves candidate terms to entities within the authorised scopes.
-	Anchors(ctx context.Context, scopes, terms []string) ([]domain.Anchor, error)
+	AnchorsForSubject(ctx context.Context, scopes, terms []string, subject string) ([]domain.Anchor, error)
 	// FactsAbout returns the currently-valid facts naming any of the given entities, with their
 	// evidence, up to limit+1 rows so the caller can tell a full result from a truncated one.
 	//
@@ -45,8 +45,8 @@ type Store interface {
 	//
 	// `hops` is how far from the anchors the traversal may go. One is the ordinary read: facts about
 	// what the question named. More is a chain, and it comes back with the relations it followed.
-	FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int, sources []string,
-		at domain.AsOf, hops int) ([]domain.CitedFact, error)
+	FactsAboutForSubject(ctx context.Context, scopes, entityIDs []string, limit int, sources []string,
+		at domain.AsOf, hops int, subject string) ([]domain.CitedFact, error)
 }
 
 // Budget is how much a caller can afford to be given back.
@@ -186,6 +186,13 @@ const MaxHops = 2
 // held in March from reading as a fact that holds now.
 func (r *Recaller) RecallAsOf(ctx context.Context, scopes []string, question string,
 	sources []string, at domain.AsOf, hops int) (domain.Bundle, error) {
+	return r.RecallForSubjectAsOf(ctx, scopes, question, sources, at, hops, "")
+}
+
+// RecallForSubjectAsOf narrows attribution inside the authorised projects. Empty subject preserves
+// project-wide recall; a supplied subject is applied by the store to anchors, each hop and evidence.
+func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, question string,
+	sources []string, at domain.AsOf, hops int, subject string) (domain.Bundle, error) {
 	if hops < DirectHop {
 		hops = DirectHop
 	}
@@ -204,7 +211,7 @@ func (r *Recaller) RecallAsOf(ctx context.Context, scopes []string, question str
 	}
 	reach := domain.Reach{Terms: len(terms), FactsPerAnchor: map[string]int{}}
 
-	anchors, err := r.store.Anchors(ctx, scopes, terms)
+	anchors, err := r.store.AnchorsForSubject(ctx, scopes, terms, subject)
 	if err != nil {
 		return domain.Bundle{}, err
 	}
@@ -224,7 +231,7 @@ func (r *Recaller) RecallAsOf(ctx context.Context, scopes []string, question str
 	// One more than the row bound, so a full result is distinguishable from a truncated one without
 	// a second count query. The row bound is a guard on the QUERY — it stops an enormous budget
 	// asking the database for an unbounded read — and is not the unit the caller reasons in.
-	facts, err := r.store.FactsAbout(ctx, scopes, ids, r.budget.MaxRows+1, sources, at, hops)
+	facts, err := r.store.FactsAboutForSubject(ctx, scopes, ids, r.budget.MaxRows+1, sources, at, hops, subject)
 	if err != nil {
 		return domain.Bundle{}, err
 	}

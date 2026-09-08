@@ -1062,7 +1062,7 @@ func TestABlankEndIsUnresolvedRatherThanRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
-	id, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "", domain.Claim{
+	id, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", domain.Claim{
 		Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany,
 		// Blank, and blank after normalisation, which is the case that matters: whitespace is not
 		// an entity either.
@@ -1535,7 +1535,7 @@ func TestContextIsNotReadFromAnotherProjectsMessage(t *testing.T) {
 	at := strings.Index(secret, "Ensera")
 	if _, err := pg.NewFactStore(pool).Assert(ctx, schema, "p2", stored.ID, domain.RoleUser, "subject-2",
 		domain.Claim{
-			Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany,
+			Subject: "Named claimant", Predicate: "works_at", Cardinality: domain.CardinalityMany,
 			Object: "Ensera", Statement: "The user works at Ensera.", Quote: "Ensera",
 			ByteStart: at, ByteEnd: at + len("Ensera"),
 		}); err != nil {
@@ -1663,7 +1663,7 @@ func TestThreeQuestionsAboutOneSubjectGetThreeAnswers(t *testing.T) {
 	store := pg.NewRecallStore(pool, schema)
 	var user string
 	if err := pool.QueryRow(ctx, schema.SQL(
-		`SELECT entity_id::text FROM {schema}.entity WHERE normalized_name = 'the user'`)).Scan(&user); err != nil {
+		`SELECT entity_id::text FROM {schema}.entity WHERE identity_kind = 'speaker' AND scope='p1' AND speaker_subject_id='subject-1'`)).Scan(&user); err != nil {
 		t.Fatalf("find entity: %v", err)
 	}
 	ask := func(at domain.AsOf) map[string]*time.Time {
@@ -1856,7 +1856,7 @@ func TestAFactRecordedAMomentAgoIsVisibleToAReadOfThePast(t *testing.T) {
 
 	var user string
 	if err := pool.QueryRow(ctx, schema.SQL(
-		`SELECT entity_id::text FROM {schema}.entity WHERE normalized_name = 'the user'`)).Scan(&user); err != nil {
+		`SELECT entity_id::text FROM {schema}.entity WHERE identity_kind = 'speaker' AND scope='p1' AND speaker_subject_id='subject-1'`)).Scan(&user); err != nil {
 		t.Fatalf("find entity: %v", err)
 	}
 	// Immediately, with no wait: the read happens within the skew between the two clocks, which is

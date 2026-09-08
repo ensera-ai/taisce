@@ -114,7 +114,8 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 		Truncated bool `json:"truncated"`
 	}
 	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
-		"question": "Where does the user work?",
+		"question":        "Where does the user work?",
+		"data_subject_id": "subject-1",
 	}, http.StatusOK, &bundle)
 
 	if len(bundle.Anchors) == 0 {
@@ -182,7 +183,8 @@ func TestTheWholeJourneyRunsOverHTTP(t *testing.T) {
 		Facts []json.RawMessage `json:"facts"`
 	}
 	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
-		"question": "Where does the user work?",
+		"question":        "Where does the user work?",
+		"data_subject_id": "subject-1",
 	}, http.StatusOK, &afterErasure)
 	if len(afterErasure.Facts) != 0 {
 		t.Fatalf("%d facts survived an erasure that reported a residual of zero", len(afterErasure.Facts))
@@ -1156,7 +1158,8 @@ func TestAQuestionCanBeAskedOfAMomentInThePast(t *testing.T) {
 
 	// The current read: the facts are there, and nothing has superseded them.
 	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
-		"question": "Where does the user work?",
+		"question":        "Where does the user work?",
+		"data_subject_id": "subject-1",
 	}, http.StatusOK, &bundle)
 	if len(bundle.Facts) == 0 {
 		t.Fatal("the current read came back empty")
@@ -1183,8 +1186,9 @@ func TestAQuestionCanBeAskedOfAMomentInThePast(t *testing.T) {
 		} `json:"reach"`
 	}
 	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{
-		"question": "Where does the user work?",
-		"as_of":    "2020-01-01T00:00:00Z",
+		"question":        "Where does the user work?",
+		"data_subject_id": "subject-1",
+		"as_of":           "2020-01-01T00:00:00Z",
 	}, http.StatusOK, &past)
 	if len(past.Facts) != 0 {
 		t.Fatalf("a read of 2020 returned facts that became true in 2026: %+v", past.Facts)
@@ -1196,8 +1200,9 @@ func TestAQuestionCanBeAskedOfAMomentInThePast(t *testing.T) {
 
 	// A time that is not a time is refused with the body, not parsed into an accidental instant.
 	status, body := h.raw(t, http.MethodPost, "/v1/recalls", map[string]any{
-		"question": "Where does the user work?",
-		"as_of":    "last tuesday",
+		"question":        "Where does the user work?",
+		"data_subject_id": "subject-1",
+		"as_of":           "last tuesday",
 	}, h.token)
 	if status != http.StatusBadRequest {
 		t.Fatalf("a malformed instant returned %d: %s", status, body)

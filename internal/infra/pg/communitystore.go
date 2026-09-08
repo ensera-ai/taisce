@@ -278,7 +278,7 @@ func (s *CommunityStore) Material(ctx context.Context, scope string, entityIDs [
 	var facts []report.Fact
 	for rows.Next() {
 		var f report.Fact
-		if err := rows.Scan(&f.Subject, &f.Predicate, &f.Object, &f.Statement, &f.Quote); err != nil {
+		if err := rows.Scan(&f.SubjectID, &f.Subject, &f.Predicate, &f.ObjectID, &f.Object, &f.Statement, &f.Quote); err != nil {
 			return nil, nil, err
 		}
 		facts = append(facts, f)
@@ -297,7 +297,7 @@ func (s *CommunityStore) Material(ctx context.Context, scope string, entityIDs [
 // Both ends inside the community, because a relation reaching out of it is about the neighbour rather
 // than about this subject — and a report written from it would describe something it does not contain.
 const selectMaterialSQL = `
-SELECT s.canonical_name, f.predicate, o.canonical_name, f.statement, e.quote
+SELECT s.entity_id::text, s.canonical_name, f.predicate, o.entity_id::text, o.canonical_name, f.statement, e.quote
   FROM {schema}.fact f
   JOIN {schema}.entity s ON s.entity_id = f.subject_entity_id AND s.scope = f.scope
   JOIN {schema}.entity o ON o.entity_id = f.object_entity_id  AND o.scope = f.scope

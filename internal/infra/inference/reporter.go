@@ -190,7 +190,7 @@ func renderContext(c report.Context) string {
 	if len(c.Facts) > 0 {
 		b.WriteString("\nWHAT WAS RECORDED ABOUT THEM\n")
 		for _, f := range c.Facts {
-			fmt.Fprintf(&b, "- %s %s %s\n  said: %q\n", f.Subject, f.Predicate, f.Object, f.Quote)
+			fmt.Fprintf(&b, "- %s %s %s\n  said: %q\n", f.SubjectLabel(), f.Predicate, f.ObjectLabel(), f.Quote)
 		}
 	}
 
@@ -217,9 +217,9 @@ func materialText(c report.Context) string {
 		b.WriteString(e)
 	}
 	for _, f := range c.Facts {
-		b.WriteString(f.Subject)
+		b.WriteString(f.SubjectLabel())
 		b.WriteString(f.Predicate)
-		b.WriteString(f.Object)
+		b.WriteString(f.ObjectLabel())
 		b.WriteString(f.Statement)
 		b.WriteString(f.Quote)
 	}

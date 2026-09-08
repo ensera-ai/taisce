@@ -98,6 +98,11 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 			switch {
 			case err == nil:
 				report.FactsAsserted++
+			case errors.Is(err, pg.ErrUnboundSpeaker):
+				result.Rejected = append(result.Rejected, domain.RejectedClaim{
+					Statement: claim.Statement, Predicate: claim.Predicate,
+					Quote: claim.Quote, SourceOrdinal: claim.SourceOrdinal, Reason: domain.ReasonUnresolvableSubject,
+				})
 			case errors.Is(err, pg.ErrNotSpokenByPrincipal):
 				report.ClaimsRefusedByRole++
 			default:

@@ -139,7 +139,7 @@ answer.
 TOKEN=$(docker compose logs bootstrap | grep -o 'tsk_[A-Za-z0-9_-]*' | head -1)
 
 curl -X POST localhost:8080/v1/observations -H "Authorization: Bearer $TOKEN" \
-  -d '{"scope":"default","data_subject_id":"alice",
+  -d '{"data_subject_id":"alice",
        "messages":[{"role":"user","content":"I work at Ensera and I live in Dublin."}]}'
 
 curl "localhost:8080/v1/freshness" -H "Authorization: Bearer $TOKEN"
@@ -162,15 +162,30 @@ And erasure returns a counted residual rather than a claim that it worked:
 
 ```bash
 curl -X POST localhost:8080/v1/erasures -H "Authorization: Bearer $TOKEN" \
-  -d '{"scope":"default","data_subject_id":"alice","reason":"right to erasure"}'
+  -d '{"data_subject_id":"alice","reason":"right to erasure"}'
 # "deleted": {"observation":1,"fact":2,"entity":3,"chunk":1}
 # "residual": {"fact":0,"entity":0,"chunk":0,"rejected_claim":0}, "clean": true
 ```
 
-**A question has to name something in memory.** Recall anchors on the entities a question mentions,
-so *"What do we know about Ensera?"* works and *"Where does the user work?"* returns nothing — the
-entity is recorded as `I`. Reaching an entity by meaning rather than by name is real work that is not
-built yet.
+**Personal recall names the data subject explicitly.** For example:
+
+```bash
+curl -X POST localhost:8080/v1/recalls -H "Authorization: Bearer $TOKEN" \
+  -d '{"question":"Where do I work?","data_subject_id":"alice","hops":2}'
+```
+
+This resolves Alice's speaker entity and filters anchors, every traversal hop, and evidence to
+Alice's attributed observations. Without `data_subject_id`, recall remains project-wide and requires
+an ordinary named anchor such as Ensera; an ambiguous `I` does not select everybody. The subject is
+caller-supplied attribution, not an authenticated end-user identity. The project credential still
+authorizes access to the whole project. Named shared organizations retain one identity.
+
+Speaker references (`I`, `me`, `myself`, `the user`, `user`, `أنا`, `انا`, `نفسي`) bind only to the
+stored user message and its nonempty data subject. Other pronouns and implicit references are not
+inferred by this binding. Source text and quotes stay unchanged; protected identifiers are not added
+to displayed names or statements. Migration 0022 refuses databases containing old name-only speaker
+entities: those projections require rebuilding from retained observations before upgrading. It does
+not guess whose supersession history should be restored. See D66 and the rebuild backlog.
 
 ### Developing on it
 

@@ -420,7 +420,9 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credent
 // ── Recall ────────────────────────────────────────────────────────────────────────────────────
 
 type recallRequest struct {
-	Question string `json:"question"`
+	// Optional attribution filter, not a new authentication or project grant.
+	DataSubjectID string `json:"data_subject_id"`
+	Question      string `json:"question"`
 	// AsOf and AsKnownAt are the two instants a bitemporal read is taken at: what was true of the
 	// world then, as this system understood things then. Both are optional and independent — the
 	// half a caller does not name is the open interval, which is what we believe now, and is not a
@@ -579,8 +581,8 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 
 	// The credential's project, and only ever that. The authorised set is still an argument on
 	// every read rather than a default (D24) — it has one member now, which is the whole of D47.
-	bundle, err := s.recaller.RecallAsOf(r.Context(), []string{grant.Project}, req.Question,
-		recall.PrincipalSources, req.at(), req.Hops)
+	bundle, err := s.recaller.RecallForSubjectAsOf(r.Context(), []string{grant.Project}, req.Question,
+		recall.PrincipalSources, req.at(), req.Hops, req.DataSubjectID)
 	if err != nil {
 		s.log.Error("recall", "error", err)
 		writeError(w, http.StatusInternalServerError, codeInternal, "the question could not be answered")

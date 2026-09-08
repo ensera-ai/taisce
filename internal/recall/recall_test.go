@@ -161,8 +161,9 @@ func world(t *testing.T, name string, turns ...domain.Turn) (*pgxpool.Pool, pg.S
 
 func turn(scope string, contents ...string) domain.Turn {
 	out := domain.Turn{
-		Scope:      scope,
-		OccurredAt: time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC),
+		Scope:         scope,
+		DataSubjectID: "recall-fixture-subject",
+		OccurredAt:    time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC),
 	}
 	for i, content := range contents {
 		out.Messages = append(out.Messages,
@@ -369,11 +370,11 @@ func TestANonsenseBundleCapFallsBackRatherThanReturningNothing(t *testing.T) {
 // stubStore answers nothing, which is enough to exercise the cap.
 type stubStore struct{}
 
-func (stubStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
+func (stubStore) AnchorsForSubject(context.Context, []string, []string, string) ([]domain.Anchor, error) {
 	return nil, nil
 }
 
-func (stubStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf, int) ([]domain.CitedFact, error) {
+func (stubStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
 	return nil, nil
 }
 
@@ -391,11 +392,11 @@ func coDerivedStore(facts []domain.CitedFact) stubFactStore { return stubFactSto
 
 type stubFactStore struct{ facts []domain.CitedFact }
 
-func (s stubFactStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
+func (s stubFactStore) AnchorsForSubject(context.Context, []string, []string, string) ([]domain.Anchor, error) {
 	return []domain.Anchor{{Entity: domain.Entity{ID: "e1", CanonicalName: "Marta"}, Matched: "marta"}}, nil
 }
 
-func (s stubFactStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf, int) ([]domain.CitedFact, error) {
+func (s stubFactStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
 	return s.facts, nil
 }
 
@@ -640,11 +641,11 @@ func TestTheCountsDescribeWhatTheCallerGot(t *testing.T) {
 // emptyAnchorStore is a memory that holds nothing the question names.
 type emptyAnchorStore struct{}
 
-func (emptyAnchorStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
+func (emptyAnchorStore) AnchorsForSubject(context.Context, []string, []string, string) ([]domain.Anchor, error) {
 	return nil, nil
 }
 
-func (emptyAnchorStore) FactsAbout(context.Context, []string, []string, int, []string, domain.AsOf, int) ([]domain.CitedFact, error) {
+func (emptyAnchorStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
 	return nil, nil
 }
 
@@ -838,12 +839,12 @@ type recordingStore struct {
 	hops  int
 }
 
-func (s *recordingStore) Anchors(context.Context, []string, []string) ([]domain.Anchor, error) {
+func (s *recordingStore) AnchorsForSubject(context.Context, []string, []string, string) ([]domain.Anchor, error) {
 	return []domain.Anchor{{Entity: domain.Entity{ID: "e1", CanonicalName: "Marta"}, Matched: "marta"}}, nil
 }
 
-func (s *recordingStore) FactsAbout(_ context.Context, _, _ []string, _ int, _ []string,
-	at domain.AsOf, hops int) ([]domain.CitedFact, error) {
+func (s *recordingStore) FactsAboutForSubject(_ context.Context, _, _ []string, _ int, _ []string,
+	at domain.AsOf, hops int, _ string) ([]domain.CitedFact, error) {
 	s.hops = hops
 	s.asked = at
 	return s.facts, nil

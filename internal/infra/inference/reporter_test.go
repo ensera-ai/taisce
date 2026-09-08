@@ -171,3 +171,35 @@ func TestACancelledReportStops(t *testing.T) {
 		t.Fatal("a cancelled write returned a report")
 	}
 }
+
+func TestReportInputDistinguishesEqualSpeakerNamesWithoutChangingQuotes(t *testing.T) {
+	cfg := serving(t, func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		content := request.Messages[len(request.Messages)-1].Content
+		for _, label := range []string{"speaker [entity:speaker-a]", "speaker [entity:speaker-b]", "Ensera [entity:shared-company]"} {
+			if !strings.Contains(content, label) {
+				t.Errorf("missing distinct reference %q", label)
+			}
+		}
+		if strings.Count(content, `said: "I work at Ensera"`) != 2 {
+			t.Error("source quotes were collapsed or rewritten")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": `{"title":"Work","summary":"Two speakers work at Ensera.","importance":1,"importance_reason":"work","findings":[]}`}}}})
+	})
+	first := report.Fact{SubjectID: "speaker-a", ObjectID: "shared-company", Subject: "speaker", Object: "Ensera", Predicate: "works_at", Quote: "I work at Ensera"}
+	second := first
+	second.SubjectID = "speaker-b"
+	if _, err := inference.NewReporter(cfg).Write(context.Background(), report.Context{Entities: []string{"speaker", "speaker", "Ensera"}, Facts: []report.Fact{first, second}}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -37,6 +37,9 @@ const ExtractorVersion = "extract/v1"
 // message it came from was not the principal speaking.
 var ErrNotSpokenByPrincipal = errors.New("claim is not the principal's to make")
 
+// ErrUnboundSpeaker refuses a relative reference without matching stored user attribution.
+var ErrUnboundSpeaker = errors.New("speaker reference needs the observation's attributed user")
+
 // Assert resolves both entity ends and writes the fact with its evidence, in one transaction.
 //
 // # The role policy is enforced here, not at the edge
@@ -65,11 +68,15 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 
 	var factID string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		subjectID, err := resolveEntity(ctx, tx, schema, scope, observationID, claim.Subject, claim.SubjectType, dataSubjectID)
+		subjectSpeaker, objectSpeaker, err := bindSpeaker(ctx, tx, schema, scope, observationID, speaker, dataSubjectID, claim)
 		if err != nil {
 			return err
 		}
-		objectID, err := resolveEntity(ctx, tx, schema, scope, observationID, claim.Object, claim.ObjectType, dataSubjectID)
+		subjectID, err := resolveEntity(ctx, tx, schema, scope, observationID, claim.Subject, claim.SubjectType, dataSubjectID, subjectSpeaker)
+		if err != nil {
+			return err
+		}
+		objectID, err := resolveEntity(ctx, tx, schema, scope, observationID, claim.Object, claim.ObjectType, dataSubjectID, objectSpeaker)
 		if err != nil {
 			return err
 		}
@@ -157,8 +164,11 @@ func nullIfEmptyString(s string) any {
 // that do not exist — harmless individually, and exactly the kind of drift that makes an entity
 // count stop meaning anything.
 func resolveEntity(ctx context.Context, tx pgx.Tx, schema Schema, scope, observationID, name, entityType,
-	dataSubjectID string) (string, error) {
+	dataSubjectID string, isSpeaker bool) (string, error) {
 
+	if isSpeaker {
+		return resolveSpeaker(ctx, tx, schema, scope, observationID, dataSubjectID)
+	}
 	normalized := domain.NormalizeName(name)
 	if normalized == "" {
 		// A blank end is not an entity. Empty rather than an error: the fact is still worth
@@ -199,7 +209,7 @@ func resolveEntity(ctx context.Context, tx pgx.Tx, schema Schema, scope, observa
 const upsertEntitySQL = `
 INSERT INTO {schema}.entity (entity_id, scope, canonical_name, normalized_name, entity_type)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (scope, normalized_name) DO UPDATE
+ON CONFLICT (scope, normalized_name) WHERE identity_kind = 'named' DO UPDATE
    SET resolution_version = {schema}.entity.resolution_version
 RETURNING entity_id::text`
 

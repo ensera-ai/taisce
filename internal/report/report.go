@@ -32,6 +32,10 @@ import (
 // summaries: the extractor already compressed a sentence into a triple, and compressing that again
 // loses the thing a reader would check. What the model sees is what was said.
 type Fact struct {
+	// Entity IDs distinguish equal displayed names. They are projection identities, not protected
+	// data-subject keys; empty IDs retain compatibility with caller-supplied named-only material.
+	SubjectID string
+	ObjectID  string
 	Subject   string
 	Predicate string
 	Object    string
@@ -41,7 +45,17 @@ type Fact struct {
 
 // Size is what one fact costs a context, in characters.
 func (f Fact) Size() int {
-	return len(f.Subject) + len(f.Predicate) + len(f.Object) + len(f.Statement) + len(f.Quote)
+	return len(f.SubjectLabel()) + len(f.Predicate) + len(f.ObjectLabel()) + len(f.Statement) + len(f.Quote)
+}
+
+// Labels carry disambiguation into model input without changing the recorded statement or quote.
+func (f Fact) SubjectLabel() string { return entityLabel(f.Subject, f.SubjectID) }
+func (f Fact) ObjectLabel() string  { return entityLabel(f.Object, f.ObjectID) }
+func entityLabel(name, id string) string {
+	if id == "" {
+		return name
+	}
+	return name + " [entity:" + id + "]"
 }
 
 // Report is what a community says about itself.
@@ -293,5 +307,5 @@ func reportsOf(reports map[string]Report, replaced map[string]bool) []Report {
 // factKey identifies a fact within a context. The quote is part of it: two relations between the same
 // ends from different sentences are two pieces of material, and collapsing them would drop one.
 func factKey(f Fact) string {
-	return f.Subject + "\x00" + f.Predicate + "\x00" + f.Object + "\x00" + f.Quote
+	return f.SubjectID + "\x00" + f.ObjectID + "\x00" + f.Subject + "\x00" + f.Predicate + "\x00" + f.Object + "\x00" + f.Quote
 }

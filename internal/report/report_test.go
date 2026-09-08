@@ -295,3 +295,28 @@ func sizeOf(facts []report.Fact) int {
 	}
 	return total
 }
+
+// Equal names and quotes do not identify a fact's owner. Substituting Alice's child report must
+// retain Bob's raw material, even when they used identical words about the same organization.
+func TestChildSubstitutionUsesEntityIdentityRatherThanSpeakerDisplayName(t *testing.T) {
+	alice := report.Fact{SubjectID: "alice-entity", ObjectID: "company-entity", Subject: "speaker", Predicate: "works_at", Object: "Ensera", Quote: strings.Repeat("I work at Ensera. ", 20)}
+	bob := alice
+	bob.SubjectID = "bob-entity"
+	childReports := map[string]report.Report{"a": {Title: "Alice", Summary: "one"}, "b": {Title: "Bob", Summary: "two"}}
+	got := report.BuildContext([]string{"speaker", "speaker", "Ensera"}, []report.Fact{alice, bob},
+		map[string][]report.Fact{"a": {alice}, "b": {bob}}, childReports, bob.Size()+20)
+	if got.Substituted != 1 || len(got.Facts) != 1 || got.Facts[0].SubjectID != bob.SubjectID || len(got.Children) != 1 || got.Children[0].Title != "Alice" {
+		t.Fatalf("substitution removed the wrong speaker: %+v", got)
+	}
+	withoutIDs := alice
+	withoutIDs.SubjectID = ""
+	withoutIDs.ObjectID = ""
+	extra := len(alice.SubjectLabel()) - len(alice.Subject) + len(alice.ObjectLabel()) - len(alice.Object)
+	if alice.Size()-withoutIDs.Size() != extra {
+		t.Fatal("opaque references bypass the material budget")
+	}
+	cut := report.BuildContext(nil, []report.Fact{alice}, nil, nil, withoutIDs.Size())
+	if len(cut.Facts) != 0 || cut.Dropped != 1 {
+		t.Fatal("a reference-bearing fact exceeded its budget")
+	}
+}
