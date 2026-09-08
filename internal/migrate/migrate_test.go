@@ -119,9 +119,9 @@ func TestTheVectorSearchPrunesToOnePartitionAndUsesItsIndex(t *testing.T) {
 		INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role, embedding)
 		SELECT gen_random_uuid(),
 		       CASE WHEN i % 2 = 0 THEN 'projecta' ELSE 'projectb' END,
-		       gen_random_uuid(), 'chunk ' || i, now(), 'user',
+		       CASE WHEN i % 2=0 THEN $1::uuid ELSE $2::uuid END, 'chunk ' || i, now(), 'user',
 		       (SELECT array_agg(random())::vector FROM generate_series(1, 1024))
-		  FROM generate_series(1, 2000) i`)); err != nil {
+		  FROM generate_series(1, 2000) i`), seedObservation(t, pool, schema, "projecta"), seedObservation(t, pool, schema, "projectb")); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if _, err := pool.Exec(ctx, schema.SQL(`ANALYZE {schema}.chunk`)); err != nil {
@@ -223,7 +223,7 @@ func TestAnUnprovisionedScopeStillAcceptsWrites(t *testing.T) {
 
 	if _, err := pool.Exec(ctx, schema.SQL(`
 		INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role)
-		VALUES (gen_random_uuid(), 'neverprovisioned', gen_random_uuid(), 'orphan', now(), 'user')`)); err != nil {
+		VALUES (gen_random_uuid(), 'neverprovisioned', $1::uuid, 'orphan', now(), 'user')`), seedObservation(t, pool, schema, "neverprovisioned")); err != nil {
 		t.Fatalf("write to unprovisioned scope must succeed: %v", err)
 	}
 
@@ -261,8 +261,8 @@ func TestOneTenantCannotAddressAnother(t *testing.T) {
 		schema, _ := NewSchema(tenant)
 		if _, err := pool.Exec(ctx, schema.SQL(`
 			INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role, data_subject_id)
-			VALUES (gen_random_uuid(), 'shared', gen_random_uuid(), $1, now(), 'user', 'subject-1')`),
-			tenant+" secret"); err != nil {
+			VALUES (gen_random_uuid(), 'shared', $2::uuid, $1, now(), 'user', 'subject-1')`),
+			tenant+" secret", seedObservation(t, pool, schema, "shared")); err != nil {
 			t.Fatalf("seed %s: %v", tenant, err)
 		}
 	}
@@ -302,8 +302,8 @@ func TestProjectsAreASoftBoundaryWithinATenant(t *testing.T) {
 		}
 		if _, err := pool.Exec(ctx, schema.SQL(`
 			INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role)
-			VALUES (gen_random_uuid(), $1, gen_random_uuid(), $2, now(), 'user')`),
-			scope, scope+" content"); err != nil {
+			VALUES (gen_random_uuid(), $1, $3::uuid, $2, now(), 'user')`),
+			scope, scope+" content", seedObservation(t, pool, schema, scope)); err != nil {
 			t.Fatalf("seed %s: %v", scope, err)
 		}
 	}
@@ -409,4 +409,17 @@ func TestSalienceIsGoneAndConfidenceIsNot(t *testing.T) {
 	if !confidence {
 		t.Fatal("confidence went with it; the distinction was the point, not the deletion")
 	}
+}
+
+// A source root for synthetic index fixtures. It adds no extra chunks to the measured corpus.
+func seedObservation(t *testing.T, pool *pgxpool.Pool, schema Schema, scope string) string {
+	t.Helper()
+	var id string
+	err := pool.QueryRow(context.Background(), schema.SQL(`INSERT INTO {schema}.observation
+        (observation_id,scope,log_offset,kind,occurred_at,source_role)
+        VALUES(gen_random_uuid(),$1,0,'turn',now(),'user') RETURNING observation_id::text`), scope).Scan(&id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

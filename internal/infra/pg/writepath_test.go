@@ -1530,6 +1530,12 @@ func TestContextIsNotReadFromAnotherProjectsMessage(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
+	// Deliberately simulate owner-level corruption to keep the defensive context join exercised.
+	// Runtime writes cannot create this state: the project FKs are verified in the integrity suite.
+	if _, err := pool.Exec(ctx, schema.SQL(`ALTER TABLE {schema}.projection_dependency DROP CONSTRAINT dependency_source_project_fk;
+        ALTER TABLE {schema}.fact_evidence DROP CONSTRAINT evidence_source_project_fk`)); err != nil {
+		t.Fatal(err)
+	}
 	// A fact in another project whose evidence points at this project's message: the shape a defect
 	// upstream would produce.
 	at := strings.Index(secret, "Ensera")
@@ -1587,6 +1593,13 @@ func TestAFactWhoseMessageIsGoneKeepsItsQuoteWithNoContext(t *testing.T) {
 			ByteStart: at, ByteEnd: at + len("Ensera"),
 		}); err != nil {
 		t.Fatalf("assert: %v", err)
+	}
+	// Only the schema owner can simulate this damage now. Ordinary deletion with surviving
+	// evidence is refused by deferred constraints; retain the fallback read test for damaged data.
+	if _, err := pool.Exec(ctx, schema.SQL(`ALTER TABLE {schema}.fact_evidence DROP CONSTRAINT evidence_source_project_fk;
+        ALTER TABLE {schema}.fact_evidence DROP CONSTRAINT evidence_message_fk;
+        ALTER TABLE {schema}.chunk DROP CONSTRAINT chunk_source_project_fk`)); err != nil {
+		t.Fatal(err)
 	}
 	// The messages go by cascade, which is what an erasure does to them.
 	if _, err := pool.Exec(ctx, schema.SQL(

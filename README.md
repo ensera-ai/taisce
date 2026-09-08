@@ -133,6 +133,12 @@ highest accepted offset so an old write receipt does not become indistinguishabl
 erasure and export call nothing at all — so a slow or absent provider costs you formation, never an
 answer.
 
+Migration 0023 validates project-consistent database relationships and refuses inconsistent existing
+rows atomically. It also invalidates previously generated community reports because their source
+registrations may be incomplete; the worker regenerates them from retained facts. Observations,
+messages, facts and evidence are preserved. Review the regeneration cost before upgrading; see
+[D68](docs/01-decisions.md#d68--relationships-agree-on-the-project-and-reports-register-exact-source-identities).
+
 ### The journey, over HTTP
 
 ```bash

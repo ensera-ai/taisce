@@ -32,6 +32,8 @@ import (
 // summaries: the extractor already compressed a sentence into a triple, and compressing that again
 // loses the thing a reader would check. What the model sees is what was said.
 type Fact struct {
+	// Source identity is governance metadata. It is never rendered into model input.
+	SourceObservationID string
 	// Entity IDs distinguish equal displayed names. They are projection identities, not protected
 	// data-subject keys; empty IDs retain compatibility with caller-supplied named-only material.
 	SubjectID string
@@ -67,6 +69,9 @@ func entityLabel(name, id string) string {
 // blob would have to be re-parsed by everything that reads it, and a model asked for a blob returns a
 // different shape each time — so the parse would be a guess repeated at every call site.
 type Report struct {
+	// Loaded from persisted dependency registrations when a child is substituted. Model-returned
+	// values are ignored by persistence; only the supplied context determines report provenance.
+	SourceObservationIDs []string
 	// Title names the subject, not the community. "The Dublin office move" rather than "Community 7".
 	Title string
 	// Summary is the paragraph a thematic answer is built from.

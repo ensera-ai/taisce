@@ -92,6 +92,13 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 			return err
 		}
 		for _, k := range kinds {
+			shared := ""
+			if k.survivesSharing {
+				shared = ` AND NOT EXISTS (SELECT 1 FROM {schema}.projection_dependency other
+                    WHERE other.scope=d.scope AND other.projection_kind=d.projection_kind
+                      AND other.projection_id=d.projection_id
+                      AND NOT (other.source_observation_id=ANY($1::uuid[])))`
+			}
 			// Interpolated from `projection_kind`, whose constraints permit nothing that is not an
 			// identifier — the same safety erasure relies on.
 			tag, err := tx.Exec(ctx, s.schema.SQL(fmt.Sprintf(`
@@ -99,13 +106,17 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 				 WHERE p.%s::text IN (
 				       SELECT d.projection_id FROM {schema}.projection_dependency d
 				        WHERE d.source_observation_id = ANY($1::uuid[])
-				          AND d.projection_kind = '%s')`, k.table, k.idCol, k.kind)), expired)
+				          AND d.projection_kind = '%s'%s)`, k.table, k.idCol, k.kind, shared)), expired)
 			if err != nil {
 				return fmt.Errorf("expire %s: %w", k.kind, err)
 			}
 			out.Deleted[k.kind] = int(tag.RowsAffected())
 		}
 
+		// A jointly supported fact can remain, but its expired source quote cannot.
+		if _, err := tx.Exec(ctx, s.schema.SQL(`DELETE FROM {schema}.fact_evidence WHERE source_observation_id=ANY($1::uuid[])`), expired); err != nil {
+			return fmt.Errorf("expire evidence: %w", err)
+		}
 		if _, err := tx.Exec(ctx, s.schema.SQL(
 			`DELETE FROM {schema}.projection_dependency WHERE source_observation_id = ANY($1::uuid[])`),
 			expired); err != nil {

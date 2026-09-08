@@ -203,6 +203,11 @@ func grantTenantToDataPlane(ctx context.Context, pool *pgxpool.Pool, schema Sche
 		// operation and the memory service has no reason to change a table's shape.
 		fmt.Sprintf(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %s TO %s`, schema, DataRole),
 		fmt.Sprintf(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %s TO %s`, schema, DataRole),
+		// Runtime DML must not redefine erasure targets, admitted relations, speaker terms or
+		// migration state. These catalogs are changed by reviewed migrations through the owner.
+		fmt.Sprintf(`REVOKE INSERT, UPDATE, DELETE ON %s.projection_kind, %s.predicate,
+            %s.unresolvable_term, %s.speaker_term, %s.schema_migration FROM %s`,
+			schema, schema, schema, schema, schema, DataRole),
 	} {
 		if _, err := pool.Exec(ctx, statement); err != nil {
 			return fmt.Errorf("grant tenant %q to the data plane: %w", schema, err)

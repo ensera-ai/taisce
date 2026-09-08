@@ -106,6 +106,12 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 			out.Residual[k.kind] = residual
 		}
 
+		// A shared fact may survive on another observation's support. Its erased source's quote
+		// must not survive with it, even though the semantic fact still has lawful evidence.
+		if _, err := tx.Exec(ctx, schema.SQL(`DELETE FROM {schema}.fact_evidence e USING {schema}.observation o
+            WHERE o.observation_id=e.source_observation_id AND o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID); err != nil {
+			return fmt.Errorf("erase source evidence: %w", err)
+		}
 		// Last, because the cascade takes the registrations with it and the count above needs them.
 		// The observation is the root: after this, the turn's messages are gone too, and a rebuild
 		// derives only from what survived rather than repairing what did not.

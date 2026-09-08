@@ -23,20 +23,23 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Observation retries [#85](https://github.com/althunibat/taisce/issues/85) | Server implemented; `2ad0a16`. Project-scoped UUID keys, stable receipt, conflict refusal, atomic persistence and erased-key tombstones. Twenty-four concurrent HTTP attempts produce one observation and one extraction call. | Stable keys in actual adapters and shared conformance. Issue remains open. |
 | Atomic message groups [#86](https://github.com/althunibat/taisce/issues/86) | Server implemented; `33b1d44`. Explicit contiguous groups, safe ordinary-message defaults, tool-group requirement and export identity. | Compaction and adapter conformance. Issue remains open. |
 | Public snapshot ancestry [#104](https://github.com/althunibat/taisce/issues/104) | Closed; `a18394a`. Separate preparation/publish phases, exact destinations, atomic compare-and-swap publication, independent private version markers. Disposable Git tests include a concurrent push race. | Signing, artifacts and release readiness remain [#37](https://github.com/althunibat/taisce/issues/37). No public release or visibility change was performed. |
+| Speaker binding [#84](https://github.com/althunibat/taisce/issues/84) | Core implemented; `651cf61`. Stored subject/user-role binding, separate named/speaker identities, subject-filtered recursive recall, multilingual formation, corrections, export and erasure. | Existing-data generation/rebuild workflow and complete nonlocal profile verification. Issue remains open. |
+| Report input identity [#108](https://github.com/althunibat/taisce/issues/108) | Closed; `651cf61`. Opaque entity references distinguish equal speaker labels in model context and child substitution. | Generated prose quality remains subject to inference corpus evaluation. |
+| Quickstart contract [#107](https://github.com/althunibat/taisce/issues/107) | Closed; `651cf61`. Examples use credential-bound project and explicit subject attribution. | None in this issue. |
+| Database integrity [#100](https://github.com/althunibat/taisce/issues/100) | Implemented and tested in this batch. Deferred project-consistent references, runtime catalog restrictions, exact report/child provenance, concurrent report retry fix, shared retention and source-evidence removal. | General rebuild/formation/erasure concurrency. No RLS confidentiality claim; D68 records the assessment. |
 
-The complete real-PostgreSQL suite after these changes passes with **88.7%** coverage, and an uncached
-repeat measures **88.8%**. The enforced floor is **88.7%**. Targeted retry/authentication race tests,
-`go vet ./...`, contract generation and the publisher's disposable-Git tests pass. These are
-correctness checks, not production latency or scaling measurements.
+The complete real-PostgreSQL suite for `651cf61` and an uncached repeat pass at **88.8%** coverage;
+the integrity batch passes an uncached repeat at **88.9%**, now the enforced floor. Targeted race checks
+and `go vet ./...` pass. These are correctness checks, not production latency or scaling measurements.
 
-Next: complete the explicit speaker binding and subject-scoped recall in
-[#84](https://github.com/althunibat/taisce/issues/84), then project-consistent database relationships
-in [#100](https://github.com/althunibat/taisce/issues/100). The identity change must reconcile the
-production extractor's rejection of first-person terms with lower-level name-based entity merging;
-neither a uniqueness change alone nor a prompt change alone meets the acceptance criteria. Preserve
-named shared entities, prove multilingual formation and correction, and re-prove erasure before
-closing it. Fixed single-tenant provisioning, indexed/bounded anchoring, admission controls and
-operational measurements follow under the existing database and security issues. Product and adapter
+Inference profiles are tracked separately. The local English/Arabic speaker/correction corpus passed
+with real inference (five fixtures, 96.75 seconds). Its full inference suite is running. The
+OpenRouter speaker run passed its first fixture, then stopped on upstream HTTP 429; that is incomplete,
+not a pass. The GPU profile has no endpoint/model/allowlist configured and awaits operator details.
+
+Next: finish database integrity validation in #100, then fixed single-tenant provisioning (#99),
+indexed/bounded anchoring, admission controls and operational measurements under their existing
+issues. The generation/rebuild lifecycle is required before closing #84 or #100. Product and adapter
 journeys retain their acceptance criteria and remain in the execution order below.
 
 ## Assessment

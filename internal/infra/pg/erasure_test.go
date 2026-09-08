@@ -216,18 +216,23 @@ func TestAProjectionKindThatIsNotDeclaredCannotBeRegistered(t *testing.T) {
 		t.Fatal("an undeclared projection kind was registered; erasure would never see it")
 	}
 
-	// Declaring it is all it takes, and then the registration is accepted — so the constraint is a
-	// requirement to declare rather than a wall around the four kinds that exist today.
+	// A catalog row alone cannot make an unchecked relationship registrable. The extension
+	// migration must also bind its target to a real row in the same project.
 	if _, err := pool.Exec(ctx, schema.SQL(`
 		INSERT INTO {schema}.projection_kind (kind, projection_table, id_column, description)
 		VALUES ('embedding', 'chunk', 'chunk_id', 'A vector derived from a chunk.')`)); err != nil {
 		t.Fatalf("declare: %v", err)
 	}
-	if _, err := pool.Exec(ctx, schema.SQL(`
-		INSERT INTO {schema}.projection_dependency
-		    (source_observation_id, scope, projection_kind, projection_id, data_subject_id)
-		VALUES ($1, 'p1', 'embedding', gen_random_uuid()::text, 'subject-1')`), observation); err != nil {
-		t.Fatalf("a declared kind must be registrable: %v", err)
+	if _, err := pool.Exec(ctx, schema.SQL(`INSERT INTO {schema}.projection_dependency
+        (source_observation_id,scope,projection_kind,projection_id)
+        VALUES($1,'p1','embedding',gen_random_uuid()::text)`), observation); err == nil {
+		t.Fatal("catalog declaration bypassed target integrity")
+	}
+	extendProjectionFixture(t, pool, schema, "embedding", "chunk", "chunk_id")
+	if _, err := pool.Exec(ctx, schema.SQL(`INSERT INTO {schema}.projection_dependency
+        (source_observation_id,scope,projection_kind,projection_id,data_subject_id)
+        SELECT $1,'p1','embedding',chunk_id::text,'subject-1' FROM {schema}.chunk WHERE source_observation_id=$1`), observation); err != nil {
+		t.Fatal(err)
 	}
 
 	// And the eraser covers it without having been changed, because it iterates the declarations.
@@ -759,7 +764,7 @@ func TestAKindThatAggregatesTextIsNotSavedByBeingShared(t *testing.T) {
 		CREATE TABLE {schema}.digest (
 		    digest_id uuid PRIMARY KEY,
 		    scope     text NOT NULL,
-		    body      text NOT NULL)`)); err != nil {
+		    body      text NOT NULL, UNIQUE(scope,digest_id))`)); err != nil {
 		t.Fatalf("create the table: %v", err)
 	}
 	if _, err := pool.Exec(ctx, schema.SQL(`
@@ -769,6 +774,7 @@ func TestAKindThatAggregatesTextIsNotSavedByBeingShared(t *testing.T) {
 		t.Fatalf("declare the kind: %v", err)
 	}
 
+	extendProjectionFixture(t, pool, schema, "digest", "digest", "digest_id")
 	var digest string
 	if err := pool.QueryRow(ctx, schema.SQL(`
 		INSERT INTO {schema}.digest (digest_id, scope, body)
@@ -866,5 +872,23 @@ func TestAKindThatDoesNotSayIsTreatedAsHoldingText(t *testing.T) {
 		if !survives {
 			t.Fatalf("%q changed behaviour, and this migration is not the place to do that", kind)
 		}
+	}
+}
+
+// A test-only extension migration: the generic eraser still learns kinds from the catalog,
+// while every new target gets the same integrity contract as the built-in projections.
+func extendProjectionFixture(t *testing.T, pool *pgxpool.Pool, schema pg.Schema, kind, table, id string) {
+	t.Helper()
+	// All identifiers are closed fixture constants, never application input.
+	if kind != "embedding" && kind != "digest" {
+		t.Fatal("unknown fixture kind")
+	}
+	_, err := pool.Exec(context.Background(), schema.SQL(`ALTER TABLE {schema}.projection_dependency
+        ADD COLUMN extension_ref uuid GENERATED ALWAYS AS (CASE WHEN projection_kind='`+kind+`' THEN projection_id::uuid END) STORED,
+        DROP CONSTRAINT dependency_one_target_chk,
+        ADD CONSTRAINT dependency_one_target_chk CHECK(num_nonnulls(entity_ref,fact_ref,chunk_ref,rejected_ref,report_ref,extension_ref)=1),
+        ADD CONSTRAINT dependency_extension_fk FOREIGN KEY(scope,extension_ref) REFERENCES {schema}.`+table+`(scope,`+id+`) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED`))
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -117,7 +117,7 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 		// a plausible fragment of the wrong sentence and looks entirely correct.
 		if _, err := tx.Exec(ctx, schema.SQL(insertEvidenceSQL),
 			id, observationID, claim.SourceOrdinal, claim.Quote, claim.ByteStart, claim.ByteEnd,
-			ExtractorVersion); err != nil {
+			ExtractorVersion, scope); err != nil {
 			return fmt.Errorf("insert evidence: %w", err)
 		}
 
@@ -255,8 +255,8 @@ UPDATE {schema}.fact
 
 const insertEvidenceSQL = `
 INSERT INTO {schema}.fact_evidence
-    (fact_id, source_observation_id, source_ordinal, quote, byte_start, byte_end, extractor_version)
-VALUES ($1, $2, $3, $4, $5, $6, $7)`
+    (fact_id, source_observation_id, source_ordinal, quote, byte_start, byte_end, extractor_version, scope)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 
 // ProjectionRejectedClaim is the projection kind a rejected claim registers as.
 //

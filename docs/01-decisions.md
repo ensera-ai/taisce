@@ -1368,6 +1368,61 @@ adds no model call and transmits no new data-subject key. Removing the fields is
 would recreate the ambiguity; existing generated reports must be regenerated after changing their
 input representation.
 
+### D68 — Relationships agree on the project, and reports register exact source identities
+
+Migration 0023 adds composite project/ID foreign keys for fact endpoints, evidence, chunks,
+rejected claims, community membership and parentage, and both sides of projection dependencies.
+Checks are deferred until transaction commit where deletion order requires it. Deleting an entity
+before its facts within a complete transaction is valid; committing only the entity deletion is not.
+This supersedes the original decision to tolerate dangling fact endpoints for erasure ordering.
+
+The polymorphic dependency registry uses one generated UUID reference per declared built-in kind,
+with exactly one reference present and a foreign key to its actual target in the same project.
+A new kind now requires a relationship migration as well as its registry row (amending D26).
+The eraser still discovers kinds through the registry. Runtime credentials can read policy catalogs
+but cannot rewrite the kind mapping, vocabulary, speaker terms or migration state. Target deletion
+cascades only registrations for targets actually removed. Source deletion remains last; commit-time
+foreign keys also refuse surviving evidence or graph references. This strengthens D28's residual
+accounting without claiming that a registration alone proves every derived row was registered.
+
+Retention applies the same sharing policy as requested erasure. A shared identity or independently
+supported fact survives; evidence from the departing observation does not. Aggregated report text
+is removed when any contributing source leaves. Reports carry exact source observation IDs from
+raw material and every substituted child. Quote equality is not provenance. Persistence checks and
+locks the complete source set, refuses an erased/missing/foreign source, and ignores model-returned
+source metadata. A concurrent report writer that loses the unique-key race creates no registration.
+
+**Migration and recovery.** Existing relationships are validated atomically, and inconsistencies
+refuse the upgrade with its schema/version changes rolled back. No project assignment is guessed.
+Previously generated reports cannot be trusted to have complete source registrations, so migration
+0023 invalidates those reports and their registrations; the worker regenerates missing reports from
+retained facts. Observations, messages, facts and evidence are preserved. Review that regeneration
+cost and database migration locking before rollout. This is not the general generation/rebuild
+workflow: migration 0022's ambiguous speaker history still requires that separate workflow.
+
+**RLS assessment.** No row-level security policy is added in this change. The deployment runtime
+serves authorized cross-project reads and background work through a shared database identity.
+Transaction-local project context could catch a missing application predicate, but only after every
+read/write, pooled transaction, worker and administrative path has an explicit context contract.
+An application allowed to choose that context is still trusted; RLS would not defeat a compromised
+application or database owner. Runtime-role tests intentionally omit SELECT project predicates and
+see both projects, while inconsistent cross-project relationships are refused. Authenticated project
+filters therefore remain the read authorization boundary. The single-tenant runtime cleanup (#99)
+and privilege design retain responsibility for changing that contract; these foreign keys are not
+marketed as cross-project confidentiality.
+
+**Rejected:** dangling endpoints as normal erasure behavior; immediate checks requiring fragile
+per-table deletion order; quote-text joins for source ownership; runtime-mutable policy catalogs;
+dynamic per-write triggers that look up arbitrary target tables instead of ordinary foreign keys;
+adding a partial RLS policy without proving transaction/pool/worker behavior.
+
+**Impact and undo cost.** Composite keys and dependency indexes add storage and write amplification;
+workload measurements remain #102/#103, with no latency claim from correctness tests. Existing
+invalid relationships must be reconciled from authoritative observations before upgrade. Reversing
+the constraints needs a migration and weakens integrity; invalidated generated report prose is not
+restored by reversing DDL. General rebuild/formation/erasure concurrency remains part of #100's
+open acceptance until the generation lifecycle exists.
+
 ### D1 — PostgreSQL is the only required dependency
 
 Not a vector database, graph engine, message broker, cache or object store.
