@@ -464,6 +464,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 		recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50}),
 		pg.NewCitationStore(pool, schema),
 		pg.NewRecordStore(pool, schema),
+		pg.NewArtifactStore(pool, schema),
 		schema,
 		nil,
 	).Handler())
@@ -817,6 +818,10 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		domain.AuditRecordHistory:   {map[string]any{}, http.StatusOK},
 		domain.AuditRecordRetract:   {map[string]any{}, http.StatusOK},
 		domain.AuditRecordCorrect:   {map[string]any{}, http.StatusOK},
+		domain.AuditArtifactPut:     {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745", "data_subject_id": "artifact-owner", "kind": "state", "name": "scratch", "content": []byte("opaque scratchpad")}, http.StatusOK},
+		domain.AuditArtifactGet:     {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745"}, http.StatusOK},
+		domain.AuditArtifactList:    {map[string]any{}, http.StatusOK},
+		domain.AuditArtifactDelete:  {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745"}, http.StatusOK},
 		domain.AuditRecordAssert:    {map[string]any{"records": []pg.RecordAssertion{{IdempotencyKey: "29ec5631-bae3-4cf8-a165-a8759a8f9931", DataSubjectID: "subject-1", Subject: "Atlas", Predicate: "works_at", Object: "Ensera", Statement: "Atlas works at Ensera"}}}, http.StatusOK},
 		domain.AuditFreshness:       {nil, http.StatusOK},
 		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
@@ -878,6 +883,15 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	exercise[domain.AuditRecordRetract].body["records"] = []pg.RecordMutation{{ID: citationID, ExpectedVersion: version}}
 	run(domain.AuditRecordRetract)
 	run(domain.AuditRecordAssert)
+	run(domain.AuditArtifactPut)
+	run(domain.AuditArtifactGet)
+	run(domain.AuditArtifactList)
+	var artifactVersion string
+	if err := h.pool.QueryRow(ctx, h.schema.SQL(`SELECT version::text FROM {schema}.agent_artifact WHERE scope='p1'`)).Scan(&artifactVersion); err != nil {
+		t.Fatal(err)
+	}
+	exercise[domain.AuditArtifactDelete].body["expected_version"] = artifactVersion
+	run(domain.AuditArtifactDelete)
 	run(domain.AuditExport)
 	run(domain.AuditErase)
 	for _, o := range surface {

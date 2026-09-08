@@ -26,6 +26,10 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 
 | Operation | Method | Path | On success |
 |---|---|---|---|
+| `artifact.put` | POST | `/v1/artifacts/put` | 200 |
+| `artifact.get` | POST | `/v1/artifacts/get` | 200 |
+| `artifact.list` | POST | `/v1/artifacts/list` | 200 |
+| `artifact.delete` | POST | `/v1/artifacts/delete` | 200 |
 | `observe` | POST | `/v1/observations` | 201 |
 | `freshness` | GET | `/v1/freshness` | 200 |
 | `recall` | POST | `/v1/recalls` | 200 |
@@ -39,6 +43,107 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 | `record.retract` | POST | `/v1/records/retract` | 200 |
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
+
+## `artifact.put`
+
+POST `/v1/artifacts/put` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `expected_version` | string |
+| `data_subject_id` | string |
+| `kind` | string |
+| `name` | string |
+| `content` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `version` | string |
+| `data_subject_id` | string |
+| `kind` | string |
+| `name` | string |
+| `source_observation_id` | string |
+| `bytes` | integer |
+| `authored_by` | string |
+| `created_at` | timestamp (RFC 3339) |
+| `updated_at` | timestamp (RFC 3339) |
+| `expires_at` | timestamp (RFC 3339) |
+| `replayed` | boolean |
+
+
+## `artifact.get`
+
+POST `/v1/artifacts/get` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `version` | string |
+| `data_subject_id` | string |
+| `kind` | string |
+| `name` | string |
+| `source_observation_id` | string |
+| `bytes` | integer |
+| `authored_by` | string |
+| `created_at` | timestamp (RFC 3339) |
+| `updated_at` | timestamp (RFC 3339) |
+| `expires_at` | timestamp (RFC 3339) |
+| `content` | string |
+
+
+## `artifact.list`
+
+POST `/v1/artifacts/list` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `kind` | string |
+| `name_prefix` | string |
+| `data_subject_id` | string |
+| `after` | string |
+| `limit` | integer |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `artifacts` | array of {id: string, version: string, data_subject_id: string, kind: string, name: string, source_observation_id: string, bytes: integer, authored_by: string, created_at: timestamp (RFC 3339), updated_at: timestamp (RFC 3339), expires_at: timestamp (RFC 3339)} |
+| `next` | {id: string}, optional |
+
+
+## `artifact.delete`
+
+POST `/v1/artifacts/delete` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `expected_version` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `deleted` | boolean |
+
 
 ## `observe`
 
@@ -307,6 +412,9 @@ Any operation may answer with any of these.
 | `invalid_record_mutation` |
 | `record_conflict` |
 | `record_mutation_limit` |
+| `invalid_artifact` |
+| `artifact_conflict` |
+| `storage_capacity` |
 
 ## Liveness
 

@@ -15,6 +15,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/ensera-ai/taisce/internal/recall"
 	"github.com/ensera-ai/taisce/internal/report"
+	"github.com/google/uuid"
 )
 
 // The stub derives its quotes from the message, so every fact it produces is genuinely citable and
@@ -126,6 +127,10 @@ func TestEverythingDerivedFromASubjectIsErasedWithAResidualOfZero(t *testing.T) 
 		at := time.Date(2026, time.Month(1+i), 1, 0, 0, 0, 0, time.UTC)
 		statedAt(t, ctx, pg.NewObservationStore(pool), pg.NewFactStore(pool), schema, at,
 			"Marta lives in "+city, domain.Claim{Subject: "Marta", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: city, Statement: "Marta lives in " + city, ValidFrom: at})
+	}
+
+	if _, err := pg.NewArtifactStore(pool, schema).Put(ctx, "p1", uuid.NewString(), pg.ArtifactPut{ID: uuid.NewString(), DataSubjectID: "subject-1", Kind: "state", Content: []byte("opaque session state")}); err != nil {
+		t.Fatal(err)
 	}
 
 	described(t, pool, schema)

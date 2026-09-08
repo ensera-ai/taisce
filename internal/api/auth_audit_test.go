@@ -33,7 +33,7 @@ func TestAnonymousAuditIsContentFreeAndBounded(t *testing.T) {
 	var logs bytes.Buffer
 	audit := pg.NewAuditStore(h.pool, h.schema)
 	server := httptest.NewServer(api.NewServer(credentials, audit, nil, pg.NewProjectStore(h.pool, h.schema),
-		pg.NewObservationStore(h.pool), nil, nil, nil, nil, h.schema, slog.New(slog.NewTextHandler(&logs, nil))).Handler())
+		pg.NewObservationStore(h.pool), nil, nil, nil, nil, nil, h.schema, slog.New(slog.NewTextHandler(&logs, nil))).Handler())
 	defer server.Close()
 	inputs := []string{"", "person@example.invalid", "private-note-more-text", "tsk_unknown-secret-content", revoked}
 	var expected string

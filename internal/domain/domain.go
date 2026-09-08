@@ -888,24 +888,29 @@ func (e Erasure) Clean() bool {
 // Operations the ledger records. Closed, because an operation nobody has heard of cannot be counted,
 // and the point of the ledger is that the set of things which happen is knowable.
 const (
-	AuditObserve          = "observe"
-	AuditRecall           = "recall"
-	AuditErase            = "erase"
-	AuditFreshness        = "freshness"
-	AuditExport           = "export"
-	AuditProjectCreate    = "project.create"
-	AuditProjectSuspend   = "project.suspend"
-	AuditProjectResume    = "project.resume"
-	AuditCredentialIssue  = "credential.issue"
-	AuditCredentialRevoke = "credential.revoke"
-	AuditFormationUnpark  = "formation.unpark"
-	AuditFormationRecover = "formation.recover"
-	AuditCitationResolve  = "citation.resolve"
-	AuditRecordList       = "record.list"
-	AuditRecordHistory    = "record.history"
-	AuditRecordRetract    = "record.retract"
-	AuditRecordCorrect    = "record.correct"
-	AuditRecordAssert     = "record.assert"
+	AuditObserve           = "observe"
+	AuditRecall            = "recall"
+	AuditErase             = "erase"
+	AuditFreshness         = "freshness"
+	AuditExport            = "export"
+	AuditProjectCreate     = "project.create"
+	AuditProjectSuspend    = "project.suspend"
+	AuditProjectResume     = "project.resume"
+	AuditCredentialIssue   = "credential.issue"
+	AuditCredentialRevoke  = "credential.revoke"
+	AuditFormationUnpark   = "formation.unpark"
+	AuditFormationRecover  = "formation.recover"
+	AuditCitationResolve   = "citation.resolve"
+	AuditRecordList        = "record.list"
+	AuditRecordHistory     = "record.history"
+	AuditRecordRetract     = "record.retract"
+	AuditRecordCorrect     = "record.correct"
+	AuditRecordAssert      = "record.assert"
+	AuditArtifactPut       = "artifact.put"
+	AuditArtifactGet       = "artifact.get"
+	AuditArtifactList      = "artifact.list"
+	AuditArtifactDelete    = "artifact.delete"
+	AuditArtifactConfigure = "artifact.configure"
 	// AuditAuthenticate records a credential being refused. A successful authentication is recorded
 	// as the operation it went on to perform, because a row for every accepted request twice over
 	// would double the ledger and say nothing the operation's own row does not.
@@ -924,7 +929,7 @@ func RecordableOperation(name string) bool {
 	switch name {
 	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
 		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,
-		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate, AuditFormationUnpark, AuditFormationRecover, AuditCitationResolve, AuditRecordList, AuditRecordHistory, AuditRecordRetract, AuditRecordCorrect, AuditRecordAssert:
+		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate, AuditFormationUnpark, AuditFormationRecover, AuditCitationResolve, AuditRecordList, AuditRecordHistory, AuditRecordRetract, AuditRecordCorrect, AuditRecordAssert, AuditArtifactPut, AuditArtifactGet, AuditArtifactList, AuditArtifactDelete, AuditArtifactConfigure:
 		return true
 	}
 	return false

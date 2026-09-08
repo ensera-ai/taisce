@@ -3240,3 +3240,73 @@ would duplicate the existing tombstone and source-erasure mechanism without a ne
 must remain inspectable and erasable, and retry tombstones must not be forgotten while queued clients
 can replay them. Changing fingerprint semantics requires an explicit version decision. Independent
 assertion does not complete feedback, entity purge, human-specific authority or full generations in #89/#58.
+
+## D92 — Agent artifacts are bounded opaque storage with declared ownership
+
+**Decision.** A project stores agent `state` and `file` objects through one artifact contract:
+put, get, bounded metadata inventory with kind/literal-name-prefix filters and version-checked deletion.
+Metadata search does not inspect opaque contents. Each object has a UUID identity,
+an immutable declared data subject and kind, an optional display name, opaque bytes and an opaque
+version. Names are metadata and never filesystem paths. A credential supplies the project and writer;
+read-only credentials can inspect but cannot write or delete. This is project-scoped storage, with
+no implied session lifecycle. Session/history/checkpoint protocols remain #23 and framework adapters
+remain #26.
+
+An artifact has its own completed `artifact` observation, assistant role and a stamped expiry. It
+creates no message, chunk, fact, embedding or inferred claim and spends no inference reservation.
+Its source cannot change owner/role/kind or be made unformed. The bytes live in `agent_artifact`,
+registered as a non-sharing projection kind for governance. Deferred relationships require the row,
+source, project, owner and erasure registration to agree. Export, erasure and retention discover it
+through the existing registry, including the same residual-count predicate. The registration means
+that erasure can reach the bytes; it does not make opaque application state reproducible by a model.
+These rows are authoritative storage and must be backed up. A projection-generation reset must
+preserve them; there is no model-based recovery of a deleted artifact.
+
+**Ownership limit.** The application declares ownership. Opaque bytes are not inspected to discover
+other people mentioned inside them. Erasing the declared subject deletes the whole artifact. It
+cannot identify an undeclared person in another subject's file. Applications must keep one declared
+owner per artifact and avoid putting unrelated people's personal data inside it when their erasure
+must also reach it. This is a real limitation, not an anonymization claim. Project credentials grant
+project-wide access under D90, not subject-restricted access.
+
+**Mutation and retries.** Creation uses a caller-generated UUID and an operation-namespaced source
+retry receipt. An identical create retry returns current metadata without overwriting later bytes;
+a changed create or reuse after deletion/erasure/expiry conflicts. Tombstones retain only the key
+digest after source deletion. Updates require the current version. The last accepted prior-version
+and exact payload digest recognize a repeated overwrite after a lost acknowledgement. Older versions
+conflict. Source identity, ownership and original expiry remain fixed. There is no archive of prior
+opaque payloads. Deletion also requires the current version and removes the source; repeating a
+completed delete returns not found. Each mutation and its content-free success audit commit together.
+Concurrent storage errors/deadlocks abort the transaction; callers retry the same request and inspect
+on a version conflict. Failed writes must not reserve bytes or leave unregistered sources.
+
+**Bounds.** Requests use canonical base64 within the shared 1 MiB body/admission budget. The safety
+ceiling is 512 KiB decoded per object. Names are at most 256 UTF-8 bytes; declared owners at most 1,024.
+Default project allowances are 256 KiB/object, 16 MiB of retained payload, 128 objects and 720 hours
+maximum lifetime. `taisce artifact limits` reads usage or atomically replaces all four allowances
+through an administrator connection. Configurable ceilings are 512 KiB/object, 1 GiB/project,
+100,000 objects and 8,760 hours. This is operator-controlled entitlement, with no billing dependency.
+PostgreSQL counters serialize quota reservations across processes and release capacity transactionally
+on overwrite shrink, deletion, erasure and expiry. Runtime credentials cannot edit either limits or
+usage. Reducing allowances retains accepted data and still permits shrinking/deletion. Expiry is
+stamped at creation using the shorter artifact/project policy and never extended on overwrite.
+Expired objects are unavailable immediately; the existing retention sweep reclaims their storage and
+allowance. A delayed sweep may therefore temporarily refuse new writes despite hidden expired rows.
+
+**Cost.** Each create writes a source, opaque row, registration, retry receipt and audit entry.
+Payload allowance measures current bytes, not indexes, metadata, WAL, replicas or backup storage;
+object-count limits bound metadata separately. PostgreSQL payloads increase write/backup volume and
+contend on one quota row per project. There is no model cost or extra recall stage. Minimal retry
+tombstones outlive payload erasure; total ledger/tombstone growth remains part of #93/#103 capacity
+work. The defaults are safety budgets, not production throughput or latency measurements.
+
+**Alternatives rejected.** A second object store adds a separate dependency and erasure sweep.
+Extracting scratchpads promotes agent working notes into personal memory. Unbounded project storage
+has no defensible lifetime or resource ceiling. Session-only storage makes the byte journey depend
+on a framework lifecycle that is not yet defined. Blind overwrite loses concurrent edits; retaining
+all previous byte versions would enlarge both retention and erasure without a requested reader.
+
+**Reversal.** Moderate before release, substantial after clients retain identities. Changing to
+session ownership or adding multiple owners needs an explicit migration and erasure policy. Moving
+bytes to another substrate requires preserving registration, expiry, versions and counted erasure.
+Retiring the endpoint cannot forget outstanding retry tombstones while clients may replay them.

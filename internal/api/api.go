@@ -50,6 +50,7 @@ type Server struct {
 	recaller     *recall.Recaller
 	citations    *pg.CitationStore
 	records      *pg.RecordStore
+	artifacts    *pg.ArtifactStore
 	schema       pg.Schema
 	log          *slog.Logger
 	authAudits   refusedAuthBudget
@@ -62,7 +63,7 @@ type Server struct {
 // the registry connection. That separation is the point: a memory query cannot read a key.
 func NewServer(credentials *credential.Store, audit *pg.AuditStore, exporter *pg.Exporter,
 	projects *pg.ProjectStore, observations *pg.ObservationStore, eraser *pg.Eraser,
-	recaller *recall.Recaller, citations *pg.CitationStore, records *pg.RecordStore, schema pg.Schema, log *slog.Logger, admission ...*Admission) *Server {
+	recaller *recall.Recaller, citations *pg.CitationStore, records *pg.RecordStore, artifacts *pg.ArtifactStore, schema pg.Schema, log *slog.Logger, admission ...*Admission) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -79,7 +80,7 @@ func NewServer(credentials *credential.Store, audit *pg.AuditStore, exporter *pg
 	return &Server{
 		credentials: credentials, audit: audit, exporter: exporter, projects: projects,
 		observations: observations,
-		eraser:       eraser, recaller: recaller, citations: citations, records: records, schema: schema, log: log, admission: gate,
+		eraser:       eraser, recaller: recaller, citations: citations, records: records, artifacts: artifacts, schema: schema, log: log, admission: gate,
 	}
 }
 
@@ -150,6 +151,14 @@ type route struct {
 }
 
 var operations = []route{
+	{Operation{domain.AuditArtifactPut, http.MethodPost, "/artifacts/put", http.StatusOK},
+		func(s *Server) grantedHandler { return s.putArtifact }, pg.ArtifactPut{}, pg.ArtifactWrite{}},
+	{Operation{domain.AuditArtifactGet, http.MethodPost, "/artifacts/get", http.StatusOK},
+		func(s *Server) grantedHandler { return s.getArtifact }, artifactIDRequest{}, pg.Artifact{}},
+	{Operation{domain.AuditArtifactList, http.MethodPost, "/artifacts/list", http.StatusOK},
+		func(s *Server) grantedHandler { return s.listArtifacts }, artifactListRequest{}, pg.ArtifactPage{}},
+	{Operation{domain.AuditArtifactDelete, http.MethodPost, "/artifacts/delete", http.StatusOK},
+		func(s *Server) grantedHandler { return s.deleteArtifact }, artifactDeleteRequest{}, artifactDeleted{}},
 	{Operation{domain.AuditObserve, http.MethodPost, "/observations", http.StatusCreated},
 		func(s *Server) grantedHandler { return s.observe }, observeRequest{}, observeResponse{}},
 	{Operation{domain.AuditFreshness, http.MethodGet, "/freshness", http.StatusOK},
@@ -868,6 +877,9 @@ const (
 	codeInvalidRecordMutation errorCode = "invalid_record_mutation"
 	codeRecordConflict        errorCode = "record_conflict"
 	codeRecordMutationLimit   errorCode = "record_mutation_limit"
+	codeInvalidArtifact       errorCode = "invalid_artifact"
+	codeArtifactConflict      errorCode = "artifact_conflict"
+	codeStorageCapacity       errorCode = "storage_capacity"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -885,7 +897,7 @@ const (
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
-	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit,
+	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.
