@@ -52,7 +52,7 @@ Takes no body.
 | Field | Type |
 |---|---|
 | `scope` | string |
-| `stored` | integer |
+| `stored` | integer, optional |
 | `formed` | integer, optional |
 | `parked` | integer |
 

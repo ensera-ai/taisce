@@ -148,8 +148,10 @@ type Observation struct {
 // already knows it. Formed is what a recall depends on, and it is the one being asked about.
 type Freshness struct {
 	Scope string
-	// Stored is the highest offset appended in this scope.
-	Stored int64
+	// Stored is the highest offset ever appended in this scope. HasStored distinguishes
+	// an empty project from its first observation at offset zero, even after erasure.
+	Stored    int64
+	HasStored bool
 	// Formed is the highest offset whose turn has been through extraction, with nothing unformed
 	// below it. Absent until the scope's first turn forms — and absent is not zero, since zero is a
 	// real offset belonging to the first turn.

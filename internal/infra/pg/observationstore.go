@@ -342,11 +342,12 @@ func (s *ObservationStore) Freshness(ctx context.Context, schema Schema, scope s
 	var formed *int64
 	err := s.pool.QueryRow(ctx, schema.SQL(selectFreshnessSQL), scope).Scan(&out.Stored, &formed, &out.Parked)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Freshness{}, fmt.Errorf("scope %q has no turns", scope)
+		return out, nil
 	}
 	if err != nil {
 		return domain.Freshness{}, fmt.Errorf("read freshness: %w", err)
 	}
+	out.HasStored = true
 	if formed != nil {
 		out.Formed, out.HasFormed = *formed, true
 	}

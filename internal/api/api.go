@@ -359,7 +359,7 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 
 type freshnessResponse struct {
 	Scope  string `json:"scope"`
-	Stored int64  `json:"stored"`
+	Stored *int64 `json:"stored"`
 	// Formed is absent until the scope's first turn has formed. Absent rather than zero, because
 	// zero is a real offset belonging to the first turn, and a caller polling for "formed >= my
 	// offset" would be told yes before anything had happened.
@@ -378,7 +378,11 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credent
 		writeError(w, http.StatusInternalServerError, codeInternal, "freshness could not be read")
 		return
 	}
-	out := freshnessResponse{Scope: f.Scope, Stored: f.Stored, Parked: f.Parked}
+	out := freshnessResponse{Scope: f.Scope, Parked: f.Parked}
+	if f.HasStored {
+		stored := f.Stored
+		out.Stored = &stored
+	}
 	if f.HasFormed {
 		formed := f.Formed
 		out.Formed = &formed

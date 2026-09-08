@@ -113,6 +113,10 @@ somebody's words — generation sends a message, embedding sends text written fr
 that, and it cannot be arrived at by default: it is closed when unset and it names every host, so
 permitting one is always somebody writing the host down.
 
+A newly created project's freshness response has `stored: null` and `formed: null`. After its first
+observation, `stored` is `0`; `formed` stays null until formation finishes. Erasure preserves the
+highest accepted offset so an old write receipt does not become indistinguishable from a new project.
+
 **Nothing on the read path calls a model.** Recall resolves entity names with a lookup, and freshness,
 erasure and export call nothing at all — so a slow or absent provider costs you formation, never an
 answer.
@@ -126,7 +130,7 @@ curl -X POST localhost:8080/v1/observations -H "Authorization: Bearer $TOKEN" \
   -d '{"scope":"default","data_subject_id":"alice",
        "messages":[{"role":"user","content":"I work at Ensera and I live in Dublin."}]}'
 
-curl "localhost:8080/v1/freshness?scope=default" -H "Authorization: Bearer $TOKEN"
+curl "localhost:8080/v1/freshness" -H "Authorization: Bearer $TOKEN"
 # {"scope":"default","stored":0,"formed":null,"parked":0}   <- formed is absent until it forms
 
 curl -X POST localhost:8080/v1/recalls -H "Authorization: Bearer $TOKEN" \
