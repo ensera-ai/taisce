@@ -112,6 +112,19 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
             WHERE o.observation_id=e.source_observation_id AND o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID); err != nil {
 			return fmt.Errorf("erase source evidence: %w", err)
 		}
+		withdrawals, err := tx.Exec(ctx, schema.SQL(`DELETE FROM {schema}.record_retraction r USING {schema}.observation o
+            WHERE r.scope=o.scope AND r.source_observation_id=o.observation_id AND o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Deleted["record_retraction"] = int(withdrawals.RowsAffected())
+		var withdrawalResidual int
+		if err := tx.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.record_retraction r JOIN {schema}.observation o
+            ON r.scope=o.scope AND r.source_observation_id=o.observation_id WHERE o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID).Scan(&withdrawalResidual); err != nil {
+			return err
+		}
+		out.Residual["record_retraction"] = withdrawalResidual
+
 		// Last, because the cascade takes the registrations with it and the count above needs them.
 		// The observation is the root: after this, the turn's messages are gone too, and a rebuild
 		// derives only from what survived rather than repairing what did not.

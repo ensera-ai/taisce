@@ -815,6 +815,7 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		domain.AuditCitationResolve: {map[string]any{}, http.StatusOK},
 		domain.AuditRecordList:      {map[string]any{}, http.StatusOK},
 		domain.AuditRecordHistory:   {map[string]any{}, http.StatusOK},
+		domain.AuditRecordRetract:   {map[string]any{}, http.StatusOK},
 		domain.AuditFreshness:       {nil, http.StatusOK},
 		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
 		domain.AuditExport:          {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
@@ -863,6 +864,12 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	run(domain.AuditRecordList)
 	exercise[domain.AuditRecordHistory].body["id"] = citationID
 	run(domain.AuditRecordHistory)
+	var version string
+	if err := h.pool.QueryRow(ctx, h.schema.SQL(`SELECT version::text FROM {schema}.fact WHERE fact_id=$1`), citationID).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	exercise[domain.AuditRecordRetract].body["records"] = []pg.RecordMutation{{ID: citationID, ExpectedVersion: version}}
+	run(domain.AuditRecordRetract)
 	run(domain.AuditExport)
 	run(domain.AuditErase)
 	for _, o := range surface {

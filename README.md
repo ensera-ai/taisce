@@ -152,6 +152,7 @@ freshness and export without memory mutation. Ordinary issuance defaults to read
 [credential access](docs/10-project-credentials.md) for issuance and permissions.
 [Record inspection](docs/11-record-inspection.md) supports bounded browsing and temporal history;
 [citation resolution](docs/08-citation-resolution.md) provides the supporting source bytes.
+[Record retraction](docs/13-record-retractions.md) withdraws claims with version checks and atomic batches.
 [Recall controls](docs/12-recall-controls.md) let each client set a smaller context allowance and
 explicitly select labeled source roles.
 

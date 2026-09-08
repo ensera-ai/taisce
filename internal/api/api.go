@@ -166,6 +166,8 @@ var operations = []route{
 		func(s *Server) grantedHandler { return s.listRecords }, recordListRequest{}, pg.RecordPage{}},
 	{Operation{domain.AuditRecordHistory, http.MethodPost, "/records/history", http.StatusOK},
 		func(s *Server) grantedHandler { return s.recordHistory }, recordHistoryRequest{}, pg.RecordHistoryPage{}},
+	{Operation{domain.AuditRecordRetract, http.MethodPost, "/records/retract", http.StatusOK},
+		func(s *Server) grantedHandler { return s.retractRecords }, recordRetractionRequest{}, pg.RetractionBatch{}},
 }
 
 // The declaration is checked before anything can serve it, and a bad one stops the binary.
@@ -859,6 +861,9 @@ const (
 	codeForbidden             errorCode = "forbidden"
 	codeInvalidRecordPage     errorCode = "invalid_record_page"
 	codeInvalidRecallControls errorCode = "invalid_recall_controls"
+	codeInvalidRecordMutation errorCode = "invalid_record_mutation"
+	codeRecordConflict        errorCode = "record_conflict"
+	codeRecordMutationLimit   errorCode = "record_mutation_limit"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -876,7 +881,7 @@ const (
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
-	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls,
+	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

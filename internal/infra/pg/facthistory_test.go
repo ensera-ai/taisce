@@ -184,27 +184,33 @@ func TestConcurrentSupersessionCommitsOneCoherentKnowledgeTransition(t *testing.
 	}
 	start := make(chan struct{})
 	result := make(chan error, 12)
+	identities := make(chan string, 12)
 	var workers sync.WaitGroup
 	for i := 0; i < 12; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
 			<-start
-			_, err := facts.Assert(ctx, schema, "p1", source.ID, domain.RoleUser, "subject-1", domain.Claim{Subject: "user", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: "Oslo", Statement: "Oslo resident", Quote: "I live in Oslo", ByteEnd: 14, ValidFrom: march.AddDate(0, 1, 0)})
+			id, err := facts.Assert(ctx, schema, "p1", source.ID, domain.RoleUser, "subject-1", domain.Claim{Subject: "user", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: "Oslo", Statement: "Oslo resident", Quote: "I live in Oslo", ByteEnd: 14, ValidFrom: march.AddDate(0, 1, 0)})
 			result <- err
+			identities <- id
 		}()
 	}
 	close(start)
 	workers.Wait()
 	close(result)
-	success := 0
+	close(identities)
 	for err := range result {
-		if err == nil {
-			success++
+		if err != nil {
+			t.Fatalf("source replay failed: %v", err)
 		}
 	}
-	if success != 1 {
-		t.Fatalf("%d competing assertions committed", success)
+	var successor string
+	for id := range identities {
+		if id == "" || (successor != "" && successor != id) {
+			t.Fatal("source replay returned different successors")
+		}
+		successor = id
 	}
 	var snapshots, factsCount int
 	var aligned bool

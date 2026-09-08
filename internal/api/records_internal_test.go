@@ -14,7 +14,7 @@ import (
 
 func TestUnconfiguredRecordInspectionFailsClosed(t *testing.T) {
 	s := &Server{}
-	for _, handler := range []grantedHandler{s.listRecords, s.recordHistory} {
+	for _, handler := range []grantedHandler{s.listRecords, s.recordHistory, s.retractRecords} {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
 		handler(w, r, credential.Grant{})

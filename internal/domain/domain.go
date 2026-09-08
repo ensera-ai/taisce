@@ -902,6 +902,7 @@ const (
 	AuditCitationResolve  = "citation.resolve"
 	AuditRecordList       = "record.list"
 	AuditRecordHistory    = "record.history"
+	AuditRecordRetract    = "record.retract"
 	// AuditAuthenticate records a credential being refused. A successful authentication is recorded
 	// as the operation it went on to perform, because a row for every accepted request twice over
 	// would double the ledger and say nothing the operation's own row does not.
@@ -920,7 +921,7 @@ func RecordableOperation(name string) bool {
 	switch name {
 	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
 		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,
-		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate, AuditFormationUnpark, AuditCitationResolve, AuditRecordList, AuditRecordHistory:
+		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate, AuditFormationUnpark, AuditCitationResolve, AuditRecordList, AuditRecordHistory, AuditRecordRetract:
 		return true
 	}
 	return false

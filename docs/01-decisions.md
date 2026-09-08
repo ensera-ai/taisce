@@ -2865,3 +2865,62 @@ erasure, source-provenance and concurrent-retry tests remain part of the full su
 A replacement can rebuild reports with a different dependency model from retained observations and
 facts. Source identifiers, fact identifiers and citation bytes do not change. Define the supported
 schema transition before a released deployment relies on it; this implementation remains greenfield.
+
+
+## D84 — Retractions are versioned source instructions and replay keeps claim identity
+
+**Status:** Accepted. **Date:** 2026-09-08. Tracked by #89 and #118.
+
+**Decision.** A write credential can retract 1–20 retained records atomically using opaque UUID
+versions obtained through inspection. Every fact update advances its version, including temporal
+supersession. The transaction locks source observations by advisory key and target facts by sorted
+identifier, checks versions and complete bounded support, closes knowledge, persists instructions,
+invalidates reports through D83 and writes an attributable content-free success audit. Stale or
+already withdrawn records conflict. Validity and evidence are preserved; earlier knowledge remains
+queryable. The batch admits at most 128 evidence rows and reads at most 129 before refusing.
+
+An instruction belongs to a source message and matches a SHA-256 signature over a versioned encoding
+of predicate and normalized endpoint identity. Speaker endpoints use stored subject attribution;
+named endpoints use normalized names. The target UUID is historical metadata with no fact foreign
+key, so loss of a derived row does not discard human input. Source/message foreign keys cascade on
+deletion; export includes instructions and subject erasure counts their deletion and residual.
+The signature is an equality key, not anonymization or authority. No free-form reason or claim text
+is duplicated. A new independent source may assert the same relation after withdrawal.
+
+Formation uses the same per-source advisory lock and checks withdrawal before writing. A retained
+structural source claim has a deterministic UUIDv8 derived using SHA-256 from project, canonical source
+UUID, message ordinal and signature. Retries return an existing identity before entity updates or
+supersession, leaving its version, ranges and evidence intact. Recreating a lost derived claim returns
+that identity. Statement paraphrases, extracted types and valid-from dates are not identity: retrying
+model output must not turn wording variation into duplicate current memory. Explicit reinterpretation
+under changed rules remains generation work; replay does not silently replace retained semantics.
+
+**Alternatives rejected.** Physical deletion alone lets formation resurrect a claim from its source.
+Editing the source transcript corrupts citation evidence. Closing validity asserts an unsupported
+fact about when the claim was true. A project-wide transaction lock serializes unrelated sources.
+Checking versions outside the mutation transaction allows competing editors to succeed. A random
+UUID per assertion duplicates retry work and changes saved citation IDs after derived-row loss. A
+separate source-to-fact identity table duplicates a derivable key and adds another lifecycle to erase.
+Including paraphrases or dates in the key permits ordinary model variation to bypass withdrawals.
+
+**Security and cost.** The asset is project memory and its history. The credential registry supplies
+the project and actor; body-supplied ownership cannot widen access. Unknown/foreign/erased records
+share one not-found response; read-only credentials fail at the shared gate before mutation parsing.
+A stolen write credential can withdraw project knowledge, with an atomic actor/count ledger entry.
+Finer human authorization remains #89. Source locks serialize concurrent formation of one observation;
+SHA-256 work is bounded by existing claim-input limits. Normal current recall has no new query. Closed
+record detail adds a metadata lookup. The first scaling costs to measure are source lock contention,
+support fanout and D83 report regeneration, under #103; no production speed claim is made.
+
+**Evidence and limits.** Real PostgreSQL and HTTP tests cover temporal reads, source-byte retention,
+atomic rollback including audit failure, stale versions, project refusals, read-only access, support
+bounds, concurrent replay/retraction, export/erasure/retention and published/in-flight report
+invalidation. Concurrent source replay retains one fact and one evidence row; independent sources
+remain distinct. These tests do not prove complete rebuild, changed extraction mappings, entity-purge
+policy or arbitrary formation/erasure concurrency: #58/#89/#90/#100/#116 remain open for those scopes.
+
+**Reversal.** Endpoint removal after a supported release requires a contract change. Version tokens
+are disposable coordination metadata; source instructions are human input and must be preserved by
+any replacement. Changing signature or identity normalization after release requires a versioned
+mapping for retained citations and instructions. Greenfield schemas may still be consolidated before
+the first supported release; the source-preservation requirement remains.

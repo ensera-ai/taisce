@@ -78,6 +78,17 @@ func Contract() string {
 		"text uses its stored message role. Source selection preserves project, subject, erasure and temporal " +
 		"filters. Hops are clamped to 1–2. Every successful response reports effective limits, roles and hops " +
 		"in `controls`, including empty bundles.\n")
+	b.WriteString("\nRecord retraction accepts `records`, an atomic array of 1–20 objects with `id` and " +
+		"`expected_version`. Versions come from inventory, history or citation inspection. Invalid requests " +
+		"return `400 invalid_record_mutation`; any stale or already-withdrawn record returns `409 record_conflict`. " +
+		"Unknown, foreign and erased records return the same `404 not_found`. Batches exceeding 128 supporting " +
+		"evidence rows return `413 record_mutation_limit`. Any refusal leaves the whole batch unchanged.\n")
+	b.WriteString("\nRetraction closes knowledge at the server time while retaining valid time and exact citations. " +
+		"Current recall excludes the record; earlier knowledge remains inspectable. The response supplies " +
+		"new versions and credential-attributed retraction metadata. Source-backed instructions prevent the " +
+		"same structural claim from reappearing when its source message is re-extracted. A new independent " +
+		"observation can assert the claim again. Retraction is not source erasure. After an uncertain response, " +
+		"inspect the record instead of retrying with a newly fetched version.\n")
 	b.WriteString("\n## Operations\n\n")
 	b.WriteString("| Operation | Method | Path | On success |\n|---|---|---|---|\n")
 	for _, o := range operations {

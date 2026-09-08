@@ -16,6 +16,10 @@ Recall `max_characters` must be positive and no larger than the server's configu
 
 Recall `source_roles` defaults to `["user"]`. An explicit nonempty list may contain `user`, `assistant`, `system` and `tool`, without duplicates. Unknown roles, empty lists and invalid budgets return HTTP 400 and `invalid_recall_controls`. There is no `document` role; fetched document text uses its stored message role. Source selection preserves project, subject, erasure and temporal filters. Hops are clamped to 1–2. Every successful response reports effective limits, roles and hops in `controls`, including empty bundles.
 
+Record retraction accepts `records`, an atomic array of 1–20 objects with `id` and `expected_version`. Versions come from inventory, history or citation inspection. Invalid requests return `400 invalid_record_mutation`; any stale or already-withdrawn record returns `409 record_conflict`. Unknown, foreign and erased records return the same `404 not_found`. Batches exceeding 128 supporting evidence rows return `413 record_mutation_limit`. Any refusal leaves the whole batch unchanged.
+
+Retraction closes knowledge at the server time while retaining valid time and exact citations. Current recall excludes the record; earlier knowledge remains inspectable. The response supplies new versions and credential-attributed retraction metadata. Source-backed instructions prevent the same structural claim from reappearing when its source message is re-extracted. A new independent observation can assert the claim again. Retraction is not source erasure. After an uncertain response, inspect the record instead of retrying with a newly fetched version.
+
 ## Operations
 
 | Operation | Method | Path | On success |
@@ -28,6 +32,7 @@ Recall `source_roles` defaults to `["user"]`. An explicit nonempty list may cont
 | `citation.resolve` | POST | `/v1/citations/resolve` | 200 |
 | `record.list` | POST | `/v1/records/list` | 200 |
 | `record.history` | POST | `/v1/records/history` | 200 |
+| `record.retract` | POST | `/v1/records/retract` | 200 |
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
 
@@ -158,6 +163,8 @@ POST `/v1/citations/resolve` → 200
 
 | Field | Type |
 |---|---|
+| `version` | string |
+| `retraction` | {operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339)}, optional |
 | `id` | string |
 | `superseded_by` | string, optional |
 | `supersession_source_observation_id` | string, optional |
@@ -192,7 +199,7 @@ POST `/v1/records/list` → 200
 
 | Field | Type |
 |---|---|
-| `records` | array of {id: string, subject_entity_id: string, optional, object_entity_id: string, optional, predicate: string, statement_preview: string, statement_bytes: integer, preview_truncated: boolean, source_role: string, recorded_at: timestamp (RFC 3339), status: string} |
+| `records` | array of {version: string, id: string, subject_entity_id: string, optional, object_entity_id: string, optional, predicate: string, statement_preview: string, statement_bytes: integer, preview_truncated: boolean, source_role: string, recorded_at: timestamp (RFC 3339), status: string} |
 | `next` | {id: string}, optional |
 
 
@@ -212,10 +219,29 @@ POST `/v1/records/history` → 200
 
 | Field | Type |
 |---|---|
+| `version` | string |
+| `retraction` | {operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339)}, optional |
 | `id` | string |
 | `current` | {valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}} |
 | `previous` | array of {history_id: string, valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, ended_by_observation_id: string} |
 | `next` | {known_until: timestamp (RFC 3339), history_id: string}, optional |
+
+
+## `record.retract`
+
+POST `/v1/records/retract` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `records` | array of {id: string, expected_version: string} |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `records` | array of {id: string, version: string, operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339)} |
 
 
 ## Refusals
@@ -240,6 +266,9 @@ Any operation may answer with any of these.
 | `forbidden` |
 | `invalid_record_page` |
 | `invalid_recall_controls` |
+| `invalid_record_mutation` |
+| `record_conflict` |
+| `record_mutation_limit` |
 
 ## Liveness
 

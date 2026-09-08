@@ -78,6 +78,14 @@ func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubject
 		}
 		out.Sections["message"] = messages
 
+		withdrawals, err := exportRows(ctx, tx, schema, `SELECT to_jsonb(r) FROM {schema}.record_retraction r
+            JOIN {schema}.observation o ON o.scope=r.scope AND o.observation_id=r.source_observation_id
+            WHERE o.scope=$1 AND o.data_subject_id=$2 ORDER BY r.target_fact_id,r.source_observation_id,r.source_ordinal`, scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Sections["record_retraction"] = withdrawals
+
 		for _, k := range kinds {
 			// The same interpolation erasure uses, and safe for the same reason: these identifiers
 			// come from `projection_kind`, whose constraints permit nothing that is not one.

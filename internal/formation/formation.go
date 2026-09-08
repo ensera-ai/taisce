@@ -47,6 +47,8 @@ type Report struct {
 	// ClaimsRejected is proposals refused by the vocabulary or by the span rule. Recorded, because
 	// their rate is the only evidence that either is wrong.
 	ClaimsRejected int
+	// ClaimsRetracted counts source-backed human withdrawals enforced before projection writes.
+	ClaimsRetracted int
 	// ClaimsRefusedByRole is claims that would have become facts about the principal, from a message
 	// the principal did not speak. Counted and not recorded: unlike the other two this is not a
 	// quality signal — it is the policy working exactly as designed, and its rate is already
@@ -98,6 +100,8 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 			switch {
 			case err == nil:
 				report.FactsAsserted++
+			case errors.Is(err, pg.ErrRetractedClaim):
+				report.ClaimsRetracted++
 			case errors.Is(err, pg.ErrUnboundSpeaker):
 				result.Rejected = append(result.Rejected, domain.RejectedClaim{
 					Statement: claim.Statement, Predicate: claim.Predicate,

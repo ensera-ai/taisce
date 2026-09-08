@@ -46,6 +46,7 @@ type RecordCursor struct {
 }
 
 type RecordSummary struct {
+	Version          string    `json:"version"`
 	ID               string    `json:"id"`
 	SubjectID        *string   `json:"subject_entity_id"`
 	ObjectID         *string   `json:"object_entity_id"`
@@ -99,7 +100,7 @@ func (s *RecordStore) List(ctx context.Context, scope, subject string, after *Re
 			break
 		}
 		var record RecordSummary
-		if err := rows.Scan(&record.ID, &record.SubjectID, &record.ObjectID, &record.Predicate, &record.StatementPreview, &record.StatementBytes, &record.SourceRole, &record.RecordedAt, &record.Status); err != nil {
+		if err := rows.Scan(&record.Version, &record.ID, &record.SubjectID, &record.ObjectID, &record.Predicate, &record.StatementPreview, &record.StatementBytes, &record.SourceRole, &record.RecordedAt, &record.Status); err != nil {
 			return RecordPage{}, fmt.Errorf("read record: %w", err)
 		}
 		record.PreviewTruncated = record.StatementBytes > len(record.StatementPreview)
@@ -117,9 +118,9 @@ const recordListSQL = `WITH page AS MATERIALIZED (
  SELECT fact_id FROM {schema}.fact WHERE scope=$1 AND fact_id {comparison} $2::uuid
  ORDER BY fact_id LIMIT $3
 )
-SELECT f.fact_id::text,f.subject_entity_id::text,f.object_entity_id::text,f.predicate,
+SELECT f.version::text,f.fact_id::text,f.subject_entity_id::text,f.object_entity_id::text,f.predicate,
  left(f.statement,$4),octet_length(f.statement),f.source_role,f.recorded_at,
- CASE WHEN NOT upper_inf(f.known) THEN 'knowledge_closed' WHEN NOT upper_inf(f.valid) THEN 'validity_closed' ELSE 'current' END
+ CASE WHEN NOT upper_inf(f.known) THEN CASE WHEN EXISTS(SELECT 1 FROM {schema}.record_retraction rr WHERE rr.scope=f.scope AND rr.target_fact_id=f.fact_id) THEN 'retracted' ELSE 'knowledge_closed' END WHEN NOT upper_inf(f.valid) THEN 'validity_closed' ELSE 'current' END
  FROM page p JOIN {schema}.fact f ON f.scope=$1 AND f.fact_id=p.fact_id
  ORDER BY f.fact_id`
 
@@ -128,9 +129,9 @@ const subjectRecordListSQL = `WITH page AS MATERIALIZED (
  WHERE scope=$1 AND data_subject_id=$5 AND projection_kind='fact' AND fact_ref {comparison} $2::uuid
  ORDER BY fact_ref LIMIT $3
 )
-SELECT f.fact_id::text,f.subject_entity_id::text,f.object_entity_id::text,f.predicate,
+SELECT f.version::text,f.fact_id::text,f.subject_entity_id::text,f.object_entity_id::text,f.predicate,
  left(f.statement,$4),octet_length(f.statement),f.source_role,f.recorded_at,
- CASE WHEN NOT upper_inf(f.known) THEN 'knowledge_closed' WHEN NOT upper_inf(f.valid) THEN 'validity_closed' ELSE 'current' END
+ CASE WHEN NOT upper_inf(f.known) THEN CASE WHEN EXISTS(SELECT 1 FROM {schema}.record_retraction rr WHERE rr.scope=f.scope AND rr.target_fact_id=f.fact_id) THEN 'retracted' ELSE 'knowledge_closed' END WHEN NOT upper_inf(f.valid) THEN 'validity_closed' ELSE 'current' END
  FROM page p JOIN {schema}.fact f ON f.scope=$1 AND f.fact_id=p.fact_ref ORDER BY f.fact_id`
 
 type RecordTemporalState struct {
@@ -150,10 +151,12 @@ type RecordHistoryCursor struct {
 }
 
 type RecordHistoryPage struct {
-	ID       string                 `json:"id"`
-	Current  RecordTemporalState    `json:"current"`
-	Previous []RecordHistoryVersion `json:"previous"`
-	Next     *RecordHistoryCursor   `json:"next,omitempty"`
+	Version    string                 `json:"version"`
+	Retraction *RetractionDetails     `json:"retraction,omitempty"`
+	ID         string                 `json:"id"`
+	Current    RecordTemporalState    `json:"current"`
+	Previous   []RecordHistoryVersion `json:"previous"`
+	Next       *RecordHistoryCursor   `json:"next,omitempty"`
 }
 
 // History reads the current state and its archive in one snapshot. Across pages history is live:
@@ -181,15 +184,21 @@ func (s *RecordStore) History(ctx context.Context, scope, id string, before *Rec
 	}
 	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		current := &out.Current
-		err := tx.QueryRow(ctx, s.schema.SQL(`SELECT lower(valid),upper(valid),lower_inc(valid),upper_inc(valid),lower(known),upper(known),lower_inc(known),upper_inc(known)
+		err := tx.QueryRow(ctx, s.schema.SQL(`SELECT version::text,lower(valid),upper(valid),lower_inc(valid),upper_inc(valid),lower(known),upper(known),lower_inc(known),upper_inc(known)
  FROM {schema}.fact WHERE scope=$1 AND fact_id=$2`), scope, out.ID).Scan(
-			&current.Valid.From, &current.Valid.Until, &current.Valid.FromInclusive, &current.Valid.UntilInclusive,
+			&out.Version, &current.Valid.From, &current.Valid.Until, &current.Valid.FromInclusive, &current.Valid.UntilInclusive,
 			&current.Known.From, &current.Known.Until, &current.Known.FromInclusive, &current.Known.UntilInclusive)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRecordNotFound
 		}
 		if err != nil {
 			return err
+		}
+		if current.Known.Until != nil {
+			out.Retraction, err = readRetraction(ctx, tx, s.schema, scope, out.ID)
+			if err != nil {
+				return err
+			}
 		}
 		rows, err := tx.Query(ctx, s.schema.SQL(strings.ReplaceAll(recordHistorySQL, "{cursor}", cursor)), args...)
 		if err != nil {

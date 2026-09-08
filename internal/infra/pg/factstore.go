@@ -68,9 +68,27 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 
 	var factID string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockClaimSource(ctx, tx, schema, scope, observationID); err != nil {
+			return err
+		}
 		subjectSpeaker, objectSpeaker, err := bindSpeaker(ctx, tx, schema, scope, observationID, speaker, dataSubjectID, claim)
 		if err != nil {
 			return err
+		}
+		if err := refuseRetractedClaim(ctx, tx, schema, scope, observationID, dataSubjectID, claim, subjectSpeaker, objectSpeaker); err != nil {
+			return err
+		}
+		id, err := sourceClaimID(scope, observationID, dataSubjectID, claim, subjectSpeaker, objectSpeaker)
+		if err != nil {
+			return err
+		}
+		var retained bool
+		if err := tx.QueryRow(ctx, schema.SQL(`SELECT EXISTS(SELECT 1 FROM {schema}.fact WHERE scope=$1 AND fact_id=$2)`), scope, id).Scan(&retained); err != nil {
+			return err
+		}
+		if retained {
+			factID = id.String()
+			return nil
 		}
 		subjectID, err := resolveEntity(ctx, tx, schema, scope, observationID, claim.Subject, claim.SubjectType, dataSubjectID, subjectSpeaker)
 		if err != nil {
@@ -81,7 +99,6 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 			return err
 		}
 
-		id := uuid.New()
 		validFrom := claim.ValidFrom
 		if validFrom.IsZero() {
 			validFrom = time.Now().UTC()
