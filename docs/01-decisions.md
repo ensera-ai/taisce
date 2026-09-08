@@ -2667,3 +2667,36 @@ retention, export and an existing-data upgrade. A 2,000-version fixture checks i
 lookup. Production mixed-workload cost and rebuild integration remain #103/#58 and keep #116 open.
 Removing the archive after use discards acquired history and must not silently restore historical
 claims; retaining the migration boundary and refusing unavailable queries is mandatory on reversal.
+
+## D79 — Explicit read-only project credentials
+
+**Decision.** Registry credentials carry `read_only` or `read_write` access. Control migration 0004
+preserves existing keys as read/write; ordinary bootstrap and issuance retain that default.
+`taisce credential issue <name> --project <project> --read-only` issues a restricted key. Unexpected
+positional arguments are rejected so a misplaced flag cannot silently produce a writable key.
+
+The shared API gate runs after authentication, active-project validation and admission, but before
+body parsing or memory operations. Readers can recall, inspect citations, read freshness and export
+within their project. Observation ingestion and erasure return `403 forbidden` with an attributed,
+content-free refused-operation audit row. New operations default to denied for readers until added
+explicitly. Unknown access modes fail closed. This is memory authorization, not a commercial plan
+or a per-subject end-user identity. Readers can export project-authorized subject data.
+
+**Mixed-version safety.** Restricted tokens use `tsr_`; existing writable tokens keep `tsk_`.
+The marker is included in the stored digest. Earlier binaries reject the new prefix before lookup,
+so they cannot interpret a restricted key as a writer during rollout or rollback. Rewriting the
+marker changes the digest and does not elevate the key. New binaries cross-check the marker against
+registry access; changing an existing row's mode makes its token unusable. Revoke and reissue to
+change authority. Clients treat both token forms as opaque; scanners should recognize both markers.
+
+**Alternatives and limits.** An access column alone is unsafe when an earlier process ignores it.
+Changing every existing key to read-only breaks established clients without an operator decision.
+Fine-grained capabilities, human roles and per-subject grants remain separate work. This closes the
+permission prerequisite for curated memory under #89, not its record lifecycle or batch semantics.
+The gate prevents caller-requested memory mutation; reads still create audit/operational records.
+
+**Evidence and reversal cost.** Tests enumerate every served operation for a restricted key, verify
+no denied mutation changes memory, test audit privacy, malformed writes, token rewriting, revocation,
+registry drift, existing-key upgrade and CLI issuance. Retiring the feature can revoke restricted
+keys; removing the database column while new binaries run breaks resolution. Rolling back binaries
+refuses restricted keys and preserves existing writable ones, avoiding silent privilege expansion.

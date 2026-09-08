@@ -33,12 +33,13 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Exact anchor admission [#102](https://github.com/althunibat/taisce/issues/102) | Core implemented; `3b3a3bb`. Separate indexed name/alias arms, question/term/match limits, explicit refusal before traversal, real-database plan and attribution/erasure tests. | Alias-specific ownership and concurrent registration, normalized-relation comparison and controlled-host workload measurements. Issue remains open. |
 | Shared request admission [#93](https://github.com/althunibat/taisce/issues/93) | Request admission `cd6c76c`; durable backlog reservations `1b3b1fe`. Size and concurrency bounds, protected accounting across processes, atomic release on formation/erasure/retention, and retryable HTTP refusal. | Controlled-host workloads, deployment-wide request admission policy and live operational metrics remain open. |
 | Operator formation recovery [#113](https://github.com/althunibat/taisce/issues/113) | Closed; `fa844ba`. Bounded metadata pagination and project-scoped retry with atomic audit and watermark correction. | None in this issue. |
+| Read-only credentials [#89](https://github.com/althunibat/taisce/issues/89) | Explicit restricted issuance, shared permission gate, content-free denied-operation audit and safe refusal by older binaries (D79). | Curated record lifecycle, batches and fine-grained human authorization remain open. |
 | Temporal knowledge [#116](https://github.com/althunibat/taisce/issues/116) | Preserved validity versions, stable fact IDs, recorded supersession sources, causal erasure/retention and upgrade boundaries (D78). | Mixed-workload measurement and generation/rebuild integration remain open. |
 | Saved citations [#90](https://github.com/althunibat/taisce/issues/90) | Independent project-scoped resolution, exact source-byte verification and bounded evidence pagination. D77 records scope and limits. | Supersession links and temporal preservation are added under D78; retraction and rebuild mappings remain open. |
 | Operational health [#94](https://github.com/althunibat/taisce/issues/94) | Bounded dependency readiness, actual worker progress, content-free operator aggregates and Compose probes. D76 records scope and limits. | Helm integration depends on #76; issue remains open. |
 
-The complete real-PostgreSQL suite and uncached repeat through temporal knowledge preservation pass at
-**90.8%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
+The complete real-PostgreSQL suite and uncached repeat through temporal knowledge and read-only credentials pass at
+**90.9%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
 Inference profiles are tracked separately. The full local inference suite passed in 2140.657 seconds

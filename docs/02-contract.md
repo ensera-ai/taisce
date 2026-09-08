@@ -188,6 +188,7 @@ Any operation may answer with any of these.
 | `citation_limit` |
 | `not_found` |
 | `history_unavailable` |
+| `forbidden` |
 
 ## Liveness
 

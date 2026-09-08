@@ -236,7 +236,7 @@ func (s *Server) Handler(readiness ...http.Handler) http.Handler {
 	registerHealth(mux, ready)
 
 	for _, o := range operations {
-		mux.Handle(o.Method+" /"+Version+o.Path, s.authenticated(o.handler(s)))
+		mux.Handle(o.Method+" /"+Version+o.Path, s.authenticated(s.authorized(o.Name, o.handler(s))))
 	}
 
 	return mux
@@ -849,6 +849,7 @@ const (
 	codeCitationLimit      errorCode = "citation_limit"
 	codeNotFound           errorCode = "not_found"
 	codeHistoryUnavailable errorCode = "history_unavailable"
+	codeForbidden          errorCode = "forbidden"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -866,7 +867,7 @@ const (
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
-	codeInvalidCitation, codeCitationLimit, codeNotFound, codeHistoryUnavailable,
+	codeInvalidCitation, codeCitationLimit, codeNotFound, codeHistoryUnavailable, codeForbidden,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

@@ -28,6 +28,9 @@ import (
 // clear alongside the digest so a person can tell two credentials apart in a list.
 const Prefix = "tsk_"
 
+// ReadOnlyPrefix makes older binaries refuse restricted keys instead of treating them as writers.
+const ReadOnlyPrefix = "tsr_"
+
 // ErrUnknown is returned for a credential that does not resolve — absent, malformed, unknown or
 // revoked, deliberately without distinguishing them.
 //
@@ -36,11 +39,17 @@ const Prefix = "tsk_"
 // otherwise get.
 var ErrUnknown = errors.New("credential does not resolve")
 
-// Grant is what a credential resolves to, and it is deliberately nothing else.
-//
-// There is one tenant, so there is no tenant to resolve. There is no commercial line, so there are
-// no entitlements to carry. A grant that held more would be somewhere for authority to accumulate.
+// Access is the memory authority stored with a project credential.
+type Access string
+
+const (
+	ReadOnly  Access = "read_only"
+	ReadWrite Access = "read_write"
+)
+
+// Grant carries the authenticated project and memory access mode, never caller-supplied authority.
 type Grant struct {
+	Access       Access
 	CredentialID string
 	Name         string
 	// Project is the one project this credential reaches. A caller never names a project — the
@@ -80,7 +89,7 @@ func Digest(token string) []byte {
 // Resolve turns a presented token into a grant.
 func (s *Store) Resolve(ctx context.Context, token string) (Grant, error) {
 	token = strings.TrimSpace(token)
-	if token == "" || !strings.HasPrefix(token, Prefix) {
+	if token == "" || (!strings.HasPrefix(token, Prefix) && !strings.HasPrefix(token, ReadOnlyPrefix)) {
 		// Refused without a query. A malformed token is not a database question, and answering it
 		// with one is a free way for a stranger to make us work.
 		return Grant{}, ErrUnknown
@@ -88,16 +97,21 @@ func (s *Store) Resolve(ctx context.Context, token string) (Grant, error) {
 
 	var g Grant
 	err := s.registry.QueryRow(ctx, fmt.Sprintf(`
-		SELECT credential_id::text, name, project
+		SELECT credential_id::text, name, project, access
 		  FROM %s.credential
 		 WHERE token_digest = $1
 		   AND revoked_at IS NULL`, s.schema), Digest(token)).
-		Scan(&g.CredentialID, &g.Name, &g.Project)
+		Scan(&g.CredentialID, &g.Name, &g.Project, &g.Access)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Grant{}, ErrUnknown
 	}
 	if err != nil {
 		return Grant{}, fmt.Errorf("resolve credential: %w", err)
+	}
+	// Access is immutable for an issued token. Revoke and issue a new key to change authority;
+	// registry drift must not elevate a restricted token or bypass old-binary refusal.
+	if (g.Access != ReadOnly && g.Access != ReadWrite) || (g.Access == ReadOnly) != strings.HasPrefix(token, ReadOnlyPrefix) {
+		return Grant{}, ErrUnknown
 	}
 	return g, nil
 }
@@ -108,6 +122,15 @@ func (s *Store) Resolve(ctx context.Context, token string) (Grant, error) {
 // stored. That is the property being bought, and it is why this returns the token rather than
 // writing it anywhere.
 func (s *Store) Issue(ctx context.Context, name, project string) (string, Grant, error) {
+	return s.IssueWithAccess(ctx, name, project, ReadWrite)
+}
+
+// IssueWithAccess creates an explicitly restricted project credential. Access is registry metadata;
+// it is never taken from an HTTP request using that credential.
+func (s *Store) IssueWithAccess(ctx context.Context, name, project string, access Access) (string, Grant, error) {
+	if access != ReadOnly && access != ReadWrite {
+		return "", Grant{}, fmt.Errorf("credential access must be read_only or read_write")
+	}
 	if strings.TrimSpace(name) == "" {
 		return "", Grant{}, fmt.Errorf("a credential needs a name, so a person can tell it from another")
 	}
@@ -123,13 +146,17 @@ func (s *Store) Issue(ctx context.Context, name, project string) (string, Grant,
 		// randomness would produce a credential that looks identical and is not.
 		return "", Grant{}, fmt.Errorf("no randomness available to mint a credential: %w", err)
 	}
-	token := Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
+	prefix := Prefix
+	if access == ReadOnly {
+		prefix = ReadOnlyPrefix
+	}
+	token := prefix + base64.RawURLEncoding.EncodeToString(raw[:])
 
-	g := Grant{CredentialID: uuid.New().String(), Name: name, Project: project}
+	g := Grant{CredentialID: uuid.New().String(), Name: name, Project: project, Access: access}
 	if _, err := s.registry.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project)
-		VALUES ($1, $2, $3, $4, $5)`, s.schema),
-		g.CredentialID, Digest(token), token[:12], name, project); err != nil {
+		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access)
+		VALUES ($1, $2, $3, $4, $5, $6)`, s.schema),
+		g.CredentialID, Digest(token), token[:12], name, project, string(access)); err != nil {
 		return "", Grant{}, fmt.Errorf("issue credential: %w", err)
 	}
 	return token, g, nil

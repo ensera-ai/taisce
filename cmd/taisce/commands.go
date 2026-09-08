@@ -36,7 +36,7 @@ const usage = `taisce — memory for agents
   taisce project list              list the projects that exist
   taisce project suspend <name>    make a project's memory unreachable, reversibly
   taisce project resume <name>     return a suspended project to service
-  taisce credential issue <name>   mint a credential; the token is printed once and never stored
+  taisce credential issue <name>   mint a credential (--read-only restricts it); the token is shown once
   taisce credential revoke <id>    stop a credential resolving
   taisce audit verify              recompute the ledger's chain and report what it covers
   taisce audit seal                seal everything written since the last seal
@@ -285,7 +285,7 @@ func project(ctx context.Context, args []string) error {
 // credentialCommand mints and revokes credentials.
 func credentialCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taisce credential issue <name> [-scopes a,b] | taisce credential revoke <id>")
+		return fmt.Errorf("usage: taisce credential issue <name> [-project <name>] [--read-only] | taisce credential revoke <id>")
 	}
 	admin, _, err := adminPool(ctx)
 	if err != nil {
@@ -298,12 +298,16 @@ func credentialCommand(ctx context.Context, args []string) error {
 	case "issue":
 		flags := flag.NewFlagSet("issue", flag.ContinueOnError)
 		project := flags.String("project", "default", "the project this credential reaches")
+		readOnly := flags.Bool("read-only", false, "allow reads and exports, but no memory mutations")
 		if len(args) < 2 {
-			return fmt.Errorf("usage: taisce credential issue <name> [-project <name>]")
+			return fmt.Errorf("usage: taisce credential issue <name> [-project <name>] [--read-only]")
 		}
 		name := args[1]
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
+		}
+		if flags.NArg() != 0 {
+			return fmt.Errorf("unexpected credential arguments; flags must follow the credential name")
 		}
 
 		// Checked here rather than by a foreign key, because the project table is in the tenant
@@ -315,12 +319,16 @@ func credentialCommand(ctx context.Context, args []string) error {
 			return err
 		}
 
-		token, grant, err := store.Issue(ctx, name, *project)
+		access := credential.ReadWrite
+		if *readOnly {
+			access = credential.ReadOnly
+		}
+		token, grant, err := store.IssueWithAccess(ctx, name, *project, access)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("credential %s (%s) reaches project %s\ntoken: %s\n",
-			grant.Name, grant.CredentialID, grant.Project, token)
+		fmt.Printf("credential %s (%s) reaches project %s with %s access\ntoken: %s\n",
+			grant.Name, grant.CredentialID, grant.Project, grant.Access, token)
 		fmt.Print("\nThis token is shown once and cannot be recovered.\n")
 		return nil
 

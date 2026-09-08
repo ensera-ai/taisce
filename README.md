@@ -147,6 +147,10 @@ its value during upgrades. Changing it selects different storage and does not mi
 creation adds a project row and partition inside the existing memory namespace. Database grants
 protect credential secrets; authenticated project filters control memory reads.
 
+Project credentials can be issued with `--read-only` for recall, citation inspection, freshness and
+export without memory mutation. Existing keys remain read/write. See [credential access](docs/10-project-credentials.md)
+for issuance and mixed-version behavior.
+
 Serving requires non-owner database logins: the memory role serves project data, and the registry
 role reads credentials. Administrative DSNs belong to bootstrap/operator commands. Startup and new
 pool connections refuse elevated roles, unsafe inherited grants, credential access from the memory
