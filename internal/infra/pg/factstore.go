@@ -336,8 +336,11 @@ const ProjectionRejectedClaim = "rejected_claim"
 func (s *FactStore) Reject(ctx context.Context, schema Schema, scope, observationID, dataSubjectID string,
 	rejected domain.RejectedClaim) error {
 
+	id, err := rejectedIdentity(scope, observationID, rejected)
+	if err != nil {
+		return fmt.Errorf("identify rejected source: %w", err)
+	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		id := uuid.New()
 		if _, err := tx.Exec(ctx, schema.SQL(insertRejectedClaimSQL),
 			id, scope, observationID, rejected.SourceOrdinal, rejected.Predicate,
 			rejected.Statement, rejected.Quote, rejected.Reason, ExtractorVersion,
@@ -360,4 +363,5 @@ const insertRejectedClaimSQL = `
 INSERT INTO {schema}.rejected_claim
     (rejected_claim_id, scope, source_observation_id, source_ordinal, predicate, statement, quote,
      reason, extractor_version, data_subject_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (rejected_claim_id) DO NOTHING`

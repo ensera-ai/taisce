@@ -3023,3 +3023,34 @@ of archive/prior/successor boundaries and both historical answers. It fails with
 the fix. Concurrent replay, report invalidation and authored recovery remain regression checks. The
 policy changes timestamp selection only; removing it needs no schema migration but reintroduces the
 clock-ordering failure. Existing historical timestamps must remain retained.
+
+
+## D87 — Rejected proposal replay preserves exact diagnostic identity
+
+**Status:** Accepted. **Date:** 2026-09-08. Tracked by #120.
+
+**Decision.** Derive a UUIDv8 using SHA-256 over a versioned JSON string tuple containing project,
+canonical source UUID, message ordinal, predicate, statement, quote, reason and extractor version.
+Identical retries insert with conflict-do-nothing and retain their original recorded timestamp. The
+projection registration commits in the same transaction. Recreating a lost rejection uses the same
+identity; an independent source, differing diagnostic text or extractor version remains distinct.
+
+**Alternatives rejected.** A new random UUID on every rejection inflates diagnostic counts when a
+worker retries or source recovery resumes. A unique index over every text field risks index-entry
+size limits and duplicates long text in an index. Semantic or normalized-text merging hides the exact
+model proposals this diagnostic exists to show. An additional persistent identity map has no reader
+beyond a key that can already be derived.
+
+**Security and cost.** The digest is identity, not anonymization or authority. The source and project
+foreign keys still constrain persistence. The rejection and its derived identity are source-owned,
+exported and erased through the existing projection registration; neither is added to permanent
+audit. Hashing visits the already bounded model proposal once. Replays contend on one primary-key
+entry and add no rows; ordinary recall is unchanged. This deduplicates identical proposed diagnostics,
+not model invocations or the count of rejected proposals observed in a formation attempt.
+
+**Evidence and reversal.** Real PostgreSQL tests cover sixteen simultaneous replays, canonical UUID
+spelling, one retained timestamp and registration, derived-row recovery, distinct sources and text,
+export/erasure, foreign-source refusal and registration-failure rollback. Changing the identity format
+would create new diagnostic identities on replay and require a deliberate data-generation decision
+after release; no independent mapping table needs migration. This is a recovery prerequisite and
+does not itself implement the rebuild workflow under #58.
