@@ -72,9 +72,11 @@ func TestABlockedProjectCannotTakeAnotherProjectsMemoryConnections(t *testing.T)
 	}
 	defer memory.Close()
 	gate, _ := api.NewAdmission(4, 2)
-	server := httptest.NewServer(api.NewServer(credentials, pg.NewAuditStore(memory, h.schema), nil,
-		pg.NewProjectStore(memory, h.schema), pg.NewObservationStore(memory), nil,
-		recall.NewWithBudget(pg.NewRecallStore(memory, h.schema), recall.DefaultBudget()), nil, nil, nil, h.schema, nil, gate).Handler())
+	server := httptest.NewServer(api.NewServer(credentials, api.Stores{
+		Audit:        pg.NewAuditStore(memory, h.schema),
+		Projects:     pg.NewProjectStore(memory, h.schema),
+		Observations: pg.NewObservationStore(memory),
+		Recaller:     recall.NewWithBudget(pg.NewRecallStore(memory, h.schema), recall.DefaultBudget())}, h.schema, nil, gate).Handler())
 	defer server.Close()
 	request := func(ctx context.Context, token, path string, payload any) (int, string, error) {
 		wire, err := json.Marshal(payload)
@@ -205,7 +207,8 @@ func TestAnonymousBurstsCannotQueueUnboundedRegistryQueries(t *testing.T) {
 	}
 	defer registry.Close()
 	gate, _ := api.NewAdmission(4, 2)
-	server := httptest.NewServer(api.NewServer(credential.NewStore(registry, h.schema.String()), pg.NewAuditStore(h.pool, h.schema), nil, nil, nil, nil, nil, nil, nil, nil, h.schema, nil, gate).Handler())
+	server := httptest.NewServer(api.NewServer(credential.NewStore(registry, h.schema.String()), api.Stores{
+		Audit: pg.NewAuditStore(h.pool, h.schema)}, h.schema, nil, gate).Handler())
 	defer server.Close()
 	held, err := h.pool.Begin(ctx)
 	if err != nil {

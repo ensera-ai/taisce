@@ -16,6 +16,12 @@ Recall `max_characters` must be positive and no larger than the server's configu
 
 Recall `source_roles` defaults to `["user"]`. An explicit nonempty list may contain `user`, `assistant`, `system` and `tool`, without duplicates. Unknown roles, empty lists and invalid budgets return HTTP 400 and `invalid_recall_controls`. There is no `document` role; fetched document text uses its stored message role. Source selection preserves project, subject, erasure and temporal filters. Hops are clamped to 1–2. Every successful response reports effective limits, roles and hops in `controls`, including empty bundles.
 
+Subjects are optional project-authorized identity bookkeeping. Register with a required UUID `idempotency_key`, optional exact `external_reference` (at most 1024 UTF-8 bytes) and `label` (at most 256). Registration returns a random stable UUID to use as `data_subject_id`. Get accepts exactly one of `id` and `external_reference`; list defaults to 20 and permits 1–100 entries, with `after` taken from `next.id`. Unknown, foreign, erased and inactive unused subjects return `404 not_found`. Invalid fields return `400 invalid_subject`.
+
+Subject updates require `id` and `expected_version` and replace the current reference and label; omitted/empty metadata clears it. References are exact and case-sensitive, unique within a project; there is no automatic normalization or merging. An immediate identical update retry is replayed; stale competing versions, conflicting references and changed/erased registration keys return `409 subject_conflict`. Original registration retries return current metadata. Use the stable UUID for memory operations; rotating metadata never rewrites attribution. Read-only keys can get/list but cannot register/update. Export/erasure include the registry and live retry metadata.
+
+A subject's `inactive_after` is stamped from project retention at registration. A null value means retain until erasure. Once due, a mapping is unavailable and eligible for physical expiry only when no attributed observation remains, including artifact sources. Updates do not extend this deadline. Expiry/erasure clears mapping and retry payload metadata but retains a retry-key digest tombstone. New collection requires a new registration key and receives a new subject ID. Existing application-managed opaque IDs remain valid; the registry does not authenticate a human or grant subject-specific permissions. See docs/19-subject-registry.md.
+
 Record retraction accepts `records`, an atomic array of 1–20 objects with `id` and `expected_version`. Versions come from inventory, history or citation inspection. Invalid requests return `400 invalid_record_mutation`; any stale or already-withdrawn record returns `409 record_conflict`. Unknown, foreign and erased records return the same `404 not_found`. Batches exceeding 128 supporting evidence rows return `413 record_mutation_limit`. Any refusal leaves the whole batch unchanged.
 
 Retraction closes knowledge at the server time while retaining valid time and exact citations. Current recall excludes the record; earlier knowledge remains inspectable. The response supplies new versions and credential-attributed retraction metadata. Source-backed instructions prevent the same structural claim from reappearing when its source message is re-extracted. A new independent observation can assert the claim again. Retraction is not source erasure. After an uncertain response, inspect the record instead of retrying with a newly fetched version.
@@ -26,6 +32,10 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 
 | Operation | Method | Path | On success |
 |---|---|---|---|
+| `subject.register` | POST | `/v1/subjects/register` | 200 |
+| `subject.get` | POST | `/v1/subjects/get` | 200 |
+| `subject.list` | POST | `/v1/subjects/list` | 200 |
+| `subject.update` | POST | `/v1/subjects/update` | 200 |
 | `artifact.put` | POST | `/v1/artifacts/put` | 200 |
 | `artifact.get` | POST | `/v1/artifacts/get` | 200 |
 | `artifact.list` | POST | `/v1/artifacts/list` | 200 |
@@ -43,6 +53,105 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 | `record.retract` | POST | `/v1/records/retract` | 200 |
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
+
+## `subject.register`
+
+POST `/v1/subjects/register` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `idempotency_key` | string |
+| `external_reference` | string |
+| `label` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `version` | string |
+| `external_reference` | string |
+| `label` | string |
+| `updated_by` | string |
+| `created_at` | timestamp (RFC 3339) |
+| `updated_at` | timestamp (RFC 3339) |
+| `inactive_after` | timestamp (RFC 3339), optional |
+| `replayed` | boolean |
+
+
+## `subject.get`
+
+POST `/v1/subjects/get` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `external_reference` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `version` | string |
+| `external_reference` | string |
+| `label` | string |
+| `updated_by` | string |
+| `created_at` | timestamp (RFC 3339) |
+| `updated_at` | timestamp (RFC 3339) |
+| `inactive_after` | timestamp (RFC 3339), optional |
+
+
+## `subject.list`
+
+POST `/v1/subjects/list` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `after` | string |
+| `limit` | integer |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `subjects` | array of {id: string, version: string, external_reference: string, label: string, updated_by: string, created_at: timestamp (RFC 3339), updated_at: timestamp (RFC 3339), inactive_after: timestamp (RFC 3339), optional} |
+| `next` | {id: string}, optional |
+
+
+## `subject.update`
+
+POST `/v1/subjects/update` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `expected_version` | string |
+| `external_reference` | string |
+| `label` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `version` | string |
+| `external_reference` | string |
+| `label` | string |
+| `updated_by` | string |
+| `created_at` | timestamp (RFC 3339) |
+| `updated_at` | timestamp (RFC 3339) |
+| `inactive_after` | timestamp (RFC 3339), optional |
+| `replayed` | boolean |
+
 
 ## `artifact.put`
 
@@ -415,6 +524,8 @@ Any operation may answer with any of these.
 | `invalid_artifact` |
 | `artifact_conflict` |
 | `storage_capacity` |
+| `invalid_subject` |
+| `subject_conflict` |
 
 ## Liveness
 

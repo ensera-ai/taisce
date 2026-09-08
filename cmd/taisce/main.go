@@ -175,17 +175,18 @@ func run(ctx context.Context, log *slog.Logger) error {
 		log.Info("HTTP admission totals", "accepted", stats.Accepted, "refused", stats.Refused, "anonymous_audit_suppressed", stats.AuditSuppressed)
 	}()
 	server := api.NewServer(
-		credential.NewStore(registry, string(migrate.ControlSchema)),
-		pg.NewAuditStore(memory, schema),
-		pg.NewExporter(memory, schema),
-		pg.NewProjectStore(memory, schema),
-		pg.NewObservationStore(memory),
-		pg.NewEraser(memory),
-		recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()),
-		pg.NewCitationStore(memory, schema),
-		pg.NewRecordStore(memory, schema),
-		pg.NewArtifactStore(memory, schema),
-		schema,
+		credential.NewStore(registry, string(migrate.ControlSchema)), api.Stores{
+			Audit:        pg.NewAuditStore(memory, schema),
+			Exporter:     pg.NewExporter(memory, schema),
+			Projects:     pg.NewProjectStore(memory, schema),
+			Observations: pg.NewObservationStore(memory),
+			Eraser:       pg.NewEraser(memory),
+			Recaller:     recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()),
+			Citations:    pg.NewCitationStore(memory, schema),
+			Records:      pg.NewRecordStore(memory, schema),
+			Artifacts:    pg.NewArtifactStore(memory, schema),
+			Subjects:     pg.NewSubjectStore(memory, schema),
+		}, schema,
 		log,
 		admission,
 	)

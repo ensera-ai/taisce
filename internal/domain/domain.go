@@ -911,6 +911,10 @@ const (
 	AuditArtifactList      = "artifact.list"
 	AuditArtifactDelete    = "artifact.delete"
 	AuditArtifactConfigure = "artifact.configure"
+	AuditSubjectRegister   = "subject.register"
+	AuditSubjectGet        = "subject.get"
+	AuditSubjectList       = "subject.list"
+	AuditSubjectUpdate     = "subject.update"
 	// AuditAuthenticate records a credential being refused. A successful authentication is recorded
 	// as the operation it went on to perform, because a row for every accepted request twice over
 	// would double the ledger and say nothing the operation's own row does not.
@@ -929,7 +933,7 @@ func RecordableOperation(name string) bool {
 	switch name {
 	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
 		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,
-		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate, AuditFormationUnpark, AuditFormationRecover, AuditCitationResolve, AuditRecordList, AuditRecordHistory, AuditRecordRetract, AuditRecordCorrect, AuditRecordAssert, AuditArtifactPut, AuditArtifactGet, AuditArtifactList, AuditArtifactDelete, AuditArtifactConfigure:
+		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate, AuditFormationUnpark, AuditFormationRecover, AuditCitationResolve, AuditRecordList, AuditRecordHistory, AuditRecordRetract, AuditRecordCorrect, AuditRecordAssert, AuditArtifactPut, AuditArtifactGet, AuditArtifactList, AuditArtifactDelete, AuditArtifactConfigure, AuditSubjectRegister, AuditSubjectGet, AuditSubjectList, AuditSubjectUpdate:
 		return true
 	}
 	return false
@@ -1047,7 +1051,17 @@ type RetentionSweep struct {
 }
 
 // Empty reports whether the sweep found nothing to do, which is the ordinary case.
-func (s RetentionSweep) Empty() bool { return s.Observations == 0 }
+func (s RetentionSweep) Empty() bool {
+	if s.Observations != 0 {
+		return false
+	}
+	for _, count := range s.Deleted {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
+}
 
 // AuditSeal is a chained digest over a range of ledger entries.
 type AuditSeal struct {

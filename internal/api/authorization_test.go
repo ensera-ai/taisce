@@ -36,15 +36,23 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	subject, err := pg.NewSubjectStore(h.pool, h.schema).Register(ctx, "p1", reader.CredentialID, pg.SubjectRegistration{IdempotencyKey: uuid.NewString()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	bodies := map[string]map[string]any{
-		domain.AuditArtifactPut:    {"private": "unauthorized mutation"},
-		domain.AuditArtifactDelete: {"id": artifact.ID, "expected_version": artifact.Version},
-		domain.AuditArtifactGet:    {"id": artifact.ID},
-		domain.AuditArtifactList:   {},
-		domain.AuditObserve:        {"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "private unauthorized mutation"}}},
-		domain.AuditErase:          {"data_subject_id": "subject-1", "reason": "private unauthorized mutation"},
-		domain.AuditRecall:         {"question": "Where does the user live?", "data_subject_id": "subject-1"},
-		domain.AuditExport:         {"data_subject_id": "subject-1"}, domain.AuditCitationResolve: {"id": id}, domain.AuditFreshness: nil,
+		domain.AuditSubjectRegister: {"private": "unauthorized mutation"},
+		domain.AuditSubjectUpdate:   {"id": subject.ID, "expected_version": subject.Version},
+		domain.AuditSubjectGet:      {"id": subject.ID},
+		domain.AuditSubjectList:     {},
+		domain.AuditArtifactPut:     {"private": "unauthorized mutation"},
+		domain.AuditArtifactDelete:  {"id": artifact.ID, "expected_version": artifact.Version},
+		domain.AuditArtifactGet:     {"id": artifact.ID},
+		domain.AuditArtifactList:    {},
+		domain.AuditObserve:         {"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "private unauthorized mutation"}}},
+		domain.AuditErase:           {"data_subject_id": "subject-1", "reason": "private unauthorized mutation"},
+		domain.AuditRecall:          {"question": "Where does the user live?", "data_subject_id": "subject-1"},
+		domain.AuditExport:          {"data_subject_id": "subject-1"}, domain.AuditCitationResolve: {"id": id}, domain.AuditFreshness: nil,
 		domain.AuditRecordList: {}, domain.AuditRecordHistory: {"id": id},
 		domain.AuditRecordCorrect: {"records": []pg.RecordCorrection{{RecordMutation: pg.RecordMutation{ID: id, ExpectedVersion: id}, Object: "private unauthorized mutation", Statement: "private unauthorized mutation"}}},
 		domain.AuditRecordAssert:  {"records": []map[string]any{{"statement": "private unauthorized mutation"}}},
@@ -57,7 +65,7 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 		}
 		status, raw := h.raw(t, op.Method, op.Path, body, token)
 		want := 200
-		if op.Name == domain.AuditObserve || op.Name == domain.AuditErase || op.Name == domain.AuditRecordRetract || op.Name == domain.AuditRecordCorrect || op.Name == domain.AuditRecordAssert || op.Name == domain.AuditArtifactPut || op.Name == domain.AuditArtifactDelete {
+		if op.Name == domain.AuditObserve || op.Name == domain.AuditErase || op.Name == domain.AuditRecordRetract || op.Name == domain.AuditRecordCorrect || op.Name == domain.AuditRecordAssert || op.Name == domain.AuditArtifactPut || op.Name == domain.AuditArtifactDelete || op.Name == domain.AuditSubjectRegister || op.Name == domain.AuditSubjectUpdate {
 			want = 403
 		}
 		if status != want {
@@ -85,7 +93,7 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 			}
 		}
 	}
-	if refusals != 8 {
+	if refusals != 10 {
 		t.Fatalf("missing denied-operation audit: %d", refusals)
 	}
 	encoded, _ := json.Marshal(entries)

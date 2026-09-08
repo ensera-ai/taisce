@@ -455,17 +455,18 @@ func newHarness(t *testing.T, tenant string) *harness {
 	}
 
 	server := httptest.NewServer(api.NewServer(
-		credentials,
-		pg.NewAuditStore(pool, schema),
-		pg.NewExporter(pool, schema),
-		pg.NewProjectStore(pool, schema),
-		pg.NewObservationStore(pool),
-		pg.NewEraser(pool),
-		recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50}),
-		pg.NewCitationStore(pool, schema),
-		pg.NewRecordStore(pool, schema),
-		pg.NewArtifactStore(pool, schema),
-		schema,
+		credentials, api.Stores{
+			Audit:        pg.NewAuditStore(pool, schema),
+			Exporter:     pg.NewExporter(pool, schema),
+			Projects:     pg.NewProjectStore(pool, schema),
+			Observations: pg.NewObservationStore(pool),
+			Eraser:       pg.NewEraser(pool),
+			Recaller:     recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50}),
+			Citations:    pg.NewCitationStore(pool, schema),
+			Records:      pg.NewRecordStore(pool, schema),
+			Artifacts:    pg.NewArtifactStore(pool, schema),
+			Subjects:     pg.NewSubjectStore(pool, schema),
+		}, schema,
 		nil,
 	).Handler())
 	t.Cleanup(server.Close)
@@ -809,6 +810,10 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		body map[string]any
 		want int
 	}{
+		domain.AuditSubjectRegister: {map[string]any{"idempotency_key": "de8bf4fa-5b6b-4310-a781-a58c46cc5bbd", "external_reference": "ledger-account"}, http.StatusOK},
+		domain.AuditSubjectGet:      {map[string]any{"external_reference": "ledger-account"}, http.StatusOK},
+		domain.AuditSubjectList:     {map[string]any{}, http.StatusOK},
+		domain.AuditSubjectUpdate:   {map[string]any{}, http.StatusOK},
 		domain.AuditObserve: {map[string]any{
 			"data_subject_id": "subject-1",
 			"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
@@ -858,6 +863,17 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		}
 		t.Fatalf("%s is exercised here and the surface does not serve it", name)
 	}
+	run(domain.AuditSubjectRegister)
+	run(domain.AuditSubjectGet)
+	run(domain.AuditSubjectList)
+	subject, err := pg.NewSubjectStore(h.pool, h.schema).Get(ctx, "p1", "", "ledger-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exercise[domain.AuditSubjectUpdate].body["id"] = subject.ID
+	exercise[domain.AuditSubjectUpdate].body["expected_version"] = subject.Version
+	exercise[domain.AuditSubjectUpdate].body["label"] = "current label"
+	run(domain.AuditSubjectUpdate)
 	run(domain.AuditObserve)
 	run(domain.AuditFreshness)
 	h.form(t)

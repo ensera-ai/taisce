@@ -523,11 +523,14 @@ func (s *ObservationStore) ScopesWithBacklog(ctx context.Context, schema Schema)
 // ScopesWithRetention names projects with due stored deadlines. Current policy does not change
 // deadlines already stamped on a source, and artifacts can expire under an indefinite project
 // policy. One indexed existence check per project avoids rescanning a large expiry backlog merely
-// to discover its project on every bounded sweep pass.
+// to discover its project on every bounded sweep pass. Unused subject mappings also schedule expiry
+// without any observations; source-backed mappings remain available while attributed bytes survive.
 func (s *ObservationStore) ScopesWithRetention(ctx context.Context, schema Schema) ([]string, error) {
 	rows, err := s.pool.Query(ctx, schema.SQL(
 		`SELECT p.scope FROM {schema}.project p WHERE EXISTS(SELECT 1 FROM {schema}.observation o
-            WHERE o.scope=p.scope AND o.retention_until<=now()) ORDER BY p.scope`))
+            WHERE o.scope=p.scope AND o.retention_until<=now()) OR EXISTS(
+            SELECT 1 FROM {schema}.data_subject s WHERE s.scope=p.scope AND s.inactive_after<=now()
+              AND NOT EXISTS(SELECT 1 FROM {schema}.observation o WHERE o.scope=s.scope AND o.data_subject_id=s.subject_id)) ORDER BY p.scope`))
 	if err != nil {
 		return nil, fmt.Errorf("list scopes with retention: %w", err)
 	}

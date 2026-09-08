@@ -84,7 +84,7 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 			return err
 		}
 		if len(expired) == 0 {
-			return nil
+			return expireUnusedSubjects(ctx, tx, s.schema, scope, limit, out.Deleted)
 		}
 
 		kinds, err := declaredKinds(ctx, tx, s.schema)
@@ -133,7 +133,7 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 		}
 		out.Deleted["observation"] = int(tag.RowsAffected())
 		out.Observations = len(expired)
-		return nil
+		return expireUnusedSubjects(ctx, tx, s.schema, scope, limit, out.Deleted)
 	})
 	if err != nil {
 		return domain.RetentionSweep{}, err

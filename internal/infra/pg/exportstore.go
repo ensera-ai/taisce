@@ -77,6 +77,16 @@ func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubject
 			return err
 		}
 		out.Sections["message"] = messages
+		subjects, err := exportRows(ctx, tx, schema, `SELECT to_jsonb(s) FROM {schema}.data_subject s WHERE scope=$1 AND subject_id=$2`, scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Sections["data_subject"] = subjects
+		subjectRetries, err := exportRows(ctx, tx, schema, `SELECT to_jsonb(r) FROM {schema}.subject_retry r WHERE scope=$1 AND subject_id=$2 ORDER BY key_digest`, scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Sections["subject_retry"] = subjectRetries
 
 		withdrawals, err := exportRows(ctx, tx, schema, `SELECT to_jsonb(r) FROM {schema}.record_retraction r
             JOIN {schema}.observation o ON o.scope=r.scope AND o.observation_id=r.source_observation_id

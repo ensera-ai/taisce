@@ -3337,3 +3337,65 @@ every project performs deletion transactions even where no deadline is due.
 **Reversal.** Small before release: the discovery predicate, ordering and supporting index can change
 together. Any replacement must preserve already-stamped deadlines and schedule artifact expiry without
 requiring a project-wide retention policy. This fixes #122; broader capacity measurements remain #103.
+
+## D94 — Optional subject identities keep external mappings at the governance boundary
+
+**Decision.** A project can register a subject with a server-generated random UUID and optional
+external reference/label. Get resolves exactly one ID or reference; inventory is bounded immutable-ID
+pagination; versioned updates replace current metadata without rewriting attribution. References use
+exact case-sensitive bytes and are unique within a project. There is no automatic normalization,
+alias history or merge. Existing application-managed opaque IDs remain supported and are not
+implicitly copied into the registry. New integrations use the random ID for source attribution and
+person-filtered recall, export and erasure.
+
+**Boundary.** A credential supplies project and writer. Read-only credentials can inspect/export,
+not register/update. Unknown, foreign, erased and inactive unused identities share a 404. Metadata
+never enters inference, displayed claims, permanent audit or metric labels. Source bodies remain
+application input; the registry does not redact a reference the application put in a message/file.
+A random UUID is pseudonymous, not anonymous, and neither it nor a reference verifies a human or
+narrows project-wide authority. A stolen project credential retains project-wide access under D90.
+Mapping rotation must not be used to assign another person's account to existing memory.
+
+**Retries and mutation.** Registration requires a UUID retry key. Project-scoped key digests serialize
+retries, retain an original request fingerprint and return current metadata after later updates.
+Changed input or reuse after erasure/expiry conflicts. Only the immediate prior version and exact
+latest update fingerprint support overwrite retries; other stale writes conflict. Unique references,
+immutable identity/lifetime, retry ownership and payload clearing are database constraints/triggers.
+Mutations and content-free success audit commit atomically. Original registration fingerprints remain
+until the mapping is removed; hashing a predictable external reference is not represented as erasure
+or anonymization. Export includes the registry and linked retry metadata. Erasure counts the registry
+and residual even with no source observations, clears metadata and leaves only retry-key tombstones.
+
+**Lifetime and concurrency.** Registration stamps an inactive deadline from project retention.
+Null retains until erasure. Finite deadlines apply once no attributed observation survives; artifact
+sources count too. Metadata updates and current policy changes do not extend that deadline. The
+worker discovers registry-only expiry and deletes bounded pages. Source acceptance takes an optional
+registry row lock; cleanup locks candidates and rechecks absence of sources at a fresh statement
+snapshot. In-flight accepted sources therefore preserve their mapping. Explicit erasure serializes
+with registered metadata changes. A newly accepted source after completed erasure is new collection,
+not permanently prohibited; applications must stop sending deleted IDs and resolve/register for new
+collection. Existing per-operation retry tombstones still prevent old source operations from replaying.
+
+**Bounds and cost.** References are at most 1,024 UTF-8 bytes and labels 256; the shared request limits
+apply. Inventory defaults to 20, at most 100, with live cursor semantics. A registration writes one
+registry row, retry receipt and audit entry. Source writes add an indexed optional lookup/lock;
+ordinary recall gains no registry join or model call. Registry reads/expiry use the existing source
+attribution index. Long-lived sources can keep many expired mappings alive, so examined rows are not
+bounded by returned/deleted page size. Total metadata/tombstone capacity remains #93/#103. There is
+no production performance claim.
+
+**Alternatives rejected.** Repeating account/email references through every projection enlarges the
+identity handling boundary. Deterministic public hashes remain guessable and linkable. Automatic
+case folding or merging guesses at external account semantics and can combine different people.
+Treating identity metadata as extracted memory adds model work and implies it can be regenerated.
+Expiring a mapping before retained source bytes removes the lookup needed to govern those bytes.
+Retaining every finite-policy mapping indefinitely ignores the stated policy for unused accounts.
+Making the registry mandatory would rewrite existing attribution without a defined source history.
+
+**Reversal and proof.** Moderate before release; substantial once clients retain IDs. Registry rows
+are authoritative and must survive projection rebuilds and backups. Missing-fact recovery preserves
+source IDs and current rotated mappings; model reinterpretation must not invent external references.
+There is no implicit rekey/merge of existing IDs. HTTP/PostgreSQL tests cover two speakers, rotation,
+missing-fact recovery, project/read-only boundaries, exact references, races, counted erasure,
+source-aware expiry, quiet-project scheduling and rollback. This completes the subject contract in
+#95; full generations remain #58 and do not require inferring registry contents.

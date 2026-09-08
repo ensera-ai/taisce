@@ -77,6 +77,12 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 	}
 
 	err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+		// Serialize registered identity updates and source acceptance with this erasure. A later
+		// newly accepted source is new collection, not a retry of the erased source.
+		if _, err := tx.Exec(ctx, schema.SQL(`SELECT 1 FROM {schema}.data_subject WHERE scope=$1 AND subject_id=$2 FOR UPDATE`), scope, dataSubjectID); err != nil {
+			return err
+		}
+
 		kinds, err := declaredKinds(ctx, tx, schema)
 		if err != nil {
 			return err
@@ -158,6 +164,16 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 			return fmt.Errorf("delete observations: %w", err)
 		}
 		out.Deleted["observation"] = int(observations.RowsAffected())
+		subjects, err := tx.Exec(ctx, schema.SQL(`DELETE FROM {schema}.data_subject WHERE scope=$1 AND subject_id=$2`), scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Deleted["data_subject"] = int(subjects.RowsAffected())
+		var remainingSubjects int
+		if err := tx.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.data_subject WHERE scope=$1 AND subject_id=$2`), scope, dataSubjectID).Scan(&remainingSubjects); err != nil {
+			return err
+		}
+		out.Residual["data_subject"] = remainingSubjects
 
 		residual, err := json.Marshal(out.Residual)
 		if err != nil {

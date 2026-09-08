@@ -78,6 +78,27 @@ func Contract() string {
 		"text uses its stored message role. Source selection preserves project, subject, erasure and temporal " +
 		"filters. Hops are clamped to 1–2. Every successful response reports effective limits, roles and hops " +
 		"in `controls`, including empty bundles.\n")
+
+	b.WriteString("\nSubjects are optional project-authorized identity bookkeeping. Register with a required UUID " +
+		"`idempotency_key`, optional exact `external_reference` (at most 1024 UTF-8 bytes) and `label` " +
+		"(at most 256). Registration returns a random stable UUID to use as `data_subject_id`. Get accepts " +
+		"exactly one of `id` and `external_reference`; list defaults to 20 and permits 1–100 entries, " +
+		"with `after` taken from `next.id`. Unknown, foreign, erased and inactive unused subjects return " +
+		"`404 not_found`. Invalid fields return `400 invalid_subject`.\n")
+	b.WriteString("\nSubject updates require `id` and `expected_version` and replace the current reference and label; " +
+		"omitted/empty metadata clears it. References are exact and case-sensitive, unique within a project; " +
+		"there is no automatic normalization or merging. An immediate identical update retry is replayed; " +
+		"stale competing versions, conflicting references and changed/erased registration keys return " +
+		"`409 subject_conflict`. Original registration retries return current metadata. Use the stable UUID " +
+		"for memory operations; rotating metadata never rewrites attribution. Read-only keys can get/list " +
+		"but cannot register/update. Export/erasure include the registry and live retry metadata.\n")
+	b.WriteString("\nA subject's `inactive_after` is stamped from project retention at registration. A null value " +
+		"means retain until erasure. Once due, a mapping is unavailable and eligible for physical expiry " +
+		"only when no attributed observation remains, including artifact sources. Updates do not extend " +
+		"this deadline. Expiry/erasure clears mapping and retry payload metadata but retains a retry-key " +
+		"digest tombstone. New collection requires a new registration key and receives a new subject ID. " +
+		"Existing application-managed opaque IDs remain valid; the registry does not authenticate a human " +
+		"or grant subject-specific permissions. See docs/19-subject-registry.md.\n")
 	b.WriteString("\nRecord retraction accepts `records`, an atomic array of 1–20 objects with `id` and " +
 		"`expected_version`. Versions come from inventory, history or citation inspection. Invalid requests " +
 		"return `400 invalid_record_mutation`; any stale or already-withdrawn record returns `409 record_conflict`. " +

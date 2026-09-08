@@ -128,7 +128,7 @@ func TestServerRejectsAmbiguousAdmissionConfiguration(t *testing.T) {
 					t.Error("invalid configuration accepted")
 				}
 			}()
-			NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, options...)
+			NewServer(nil, Stores{}, "", nil, options...)
 		}()
 	}
 }

@@ -51,19 +51,29 @@ type Server struct {
 	citations    *pg.CitationStore
 	records      *pg.RecordStore
 	artifacts    *pg.ArtifactStore
+	subjects     *pg.SubjectStore
 	schema       pg.Schema
 	log          *slog.Logger
 	authAudits   refusedAuthBudget
 	admission    *Admission
 }
 
-// NewServer wires the surface over stores that already exist.
-//
-// The credential store is separate from every other argument because it is the only one that reaches
-// the registry connection. That separation is the point: a memory query cannot read a key.
-func NewServer(credentials *credential.Store, audit *pg.AuditStore, exporter *pg.Exporter,
-	projects *pg.ProjectStore, observations *pg.ObservationStore, eraser *pg.Eraser,
-	recaller *recall.Recaller, citations *pg.CitationStore, records *pg.RecordStore, artifacts *pg.ArtifactStore, schema pg.Schema, log *slog.Logger, admission ...*Admission) *Server {
+// Stores names the memory dependencies explicitly so adding a capability cannot shift positional wiring.
+type Stores struct {
+	Audit        *pg.AuditStore
+	Exporter     *pg.Exporter
+	Projects     *pg.ProjectStore
+	Observations *pg.ObservationStore
+	Eraser       *pg.Eraser
+	Recaller     *recall.Recaller
+	Citations    *pg.CitationStore
+	Records      *pg.RecordStore
+	Artifacts    *pg.ArtifactStore
+	Subjects     *pg.SubjectStore
+}
+
+// NewServer keeps the credential store separate because it uses the protected registry connection.
+func NewServer(credentials *credential.Store, stores Stores, schema pg.Schema, log *slog.Logger, admission ...*Admission) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -78,9 +88,10 @@ func NewServer(credentials *credential.Store, audit *pg.AuditStore, exporter *pg
 		gate = admission[0]
 	}
 	return &Server{
-		credentials: credentials, audit: audit, exporter: exporter, projects: projects,
-		observations: observations,
-		eraser:       eraser, recaller: recaller, citations: citations, records: records, artifacts: artifacts, schema: schema, log: log, admission: gate,
+		credentials: credentials, audit: stores.Audit, exporter: stores.Exporter, projects: stores.Projects,
+		observations: stores.Observations, eraser: stores.Eraser, recaller: stores.Recaller,
+		citations: stores.Citations, records: stores.Records, artifacts: stores.Artifacts, subjects: stores.Subjects,
+		schema: schema, log: log, admission: gate,
 	}
 }
 
@@ -151,6 +162,10 @@ type route struct {
 }
 
 var operations = []route{
+	{Operation{domain.AuditSubjectRegister, http.MethodPost, "/subjects/register", http.StatusOK}, func(s *Server) grantedHandler { return s.registerSubject }, pg.SubjectRegistration{}, pg.SubjectWrite{}},
+	{Operation{domain.AuditSubjectGet, http.MethodPost, "/subjects/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getSubject }, subjectGetRequest{}, pg.ManagedSubject{}},
+	{Operation{domain.AuditSubjectList, http.MethodPost, "/subjects/list", http.StatusOK}, func(s *Server) grantedHandler { return s.listSubjects }, subjectListRequest{}, pg.SubjectPage{}},
+	{Operation{domain.AuditSubjectUpdate, http.MethodPost, "/subjects/update", http.StatusOK}, func(s *Server) grantedHandler { return s.updateSubject }, pg.SubjectUpdate{}, pg.SubjectWrite{}},
 	{Operation{domain.AuditArtifactPut, http.MethodPost, "/artifacts/put", http.StatusOK},
 		func(s *Server) grantedHandler { return s.putArtifact }, pg.ArtifactPut{}, pg.ArtifactWrite{}},
 	{Operation{domain.AuditArtifactGet, http.MethodPost, "/artifacts/get", http.StatusOK},
@@ -878,6 +893,8 @@ const (
 	codeRecordConflict        errorCode = "record_conflict"
 	codeRecordMutationLimit   errorCode = "record_mutation_limit"
 	codeInvalidArtifact       errorCode = "invalid_artifact"
+	codeInvalidSubject        errorCode = "invalid_subject"
+	codeSubjectConflict       errorCode = "subject_conflict"
 	codeArtifactConflict      errorCode = "artifact_conflict"
 	codeStorageCapacity       errorCode = "storage_capacity"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
@@ -897,7 +914,7 @@ const (
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
-	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity,
+	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity, codeInvalidSubject, codeSubjectConflict,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.
