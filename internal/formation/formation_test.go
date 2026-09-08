@@ -1,6 +1,7 @@
 package formation_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -917,10 +918,16 @@ func TestTheDriverSweepsRetention(t *testing.T) {
 	)); err != nil {
 		t.Fatalf("append: %v", err)
 	}
+	// This asserts the driver's sweep, not a race against a one-microsecond policy deadline.
+	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.observation SET retention_until=now()-interval '1 hour'`)); err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&diagnostics, nil))
 
 	driver := formation.NewDriver(
 		workerWith(t, pool, schema, scriptedModel{}, impatient()),
-		observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, impatient(), quietLogger())
+		observations, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, impatient(), logger)
 
 	if err := driver.SweepRetention(ctx); err != nil {
 		t.Fatalf("sweep: %v", err)
@@ -930,7 +937,10 @@ func TestTheDriverSweepsRetention(t *testing.T) {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
-		t.Fatalf("%d expired observations survived the driver's sweep", n)
+		t.Fatalf("%d expired observations survived the driver's sweep; diagnostics: %s", n, diagnostics.String())
+	}
+	if strings.Contains(diagnostics.String(), "level=ERROR") {
+		t.Fatalf("sweep logged a failure: %s", diagnostics.String())
 	}
 }
 
