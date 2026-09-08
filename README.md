@@ -146,6 +146,11 @@ role, application-object ownership, and writable policy catalogs. If validation 
 reported role's grants/ownership and correct them before restarting; see
 [D70](docs/01-decisions.md#d70--runtime-connections-prove-their-effective-database-privilege-boundary).
 
+Project names use a lowercase letter followed by lowercase letters, digits or underscores, up to
+63 characters. Creation commits the project row, partition and index together; conflicting existing
+storage is refused. Migration 0024 validates existing project names without renaming them. Correct
+legacy storage is reused; see [D71](docs/01-decisions.md#d71--project-provisioning-is-atomic-and-physical-names-are-validated).
+
 Migration 0023 validates project-consistent database relationships and refuses inconsistent existing
 rows atomically. It also invalidates previously generated community reports because their source
 registrations may be incomplete; the worker regenerates them from retained facts. Observations,

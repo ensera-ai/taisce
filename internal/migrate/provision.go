@@ -5,8 +5,12 @@ package migrate
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base32"
+	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,7 +21,7 @@ import (
 // A partition's name is built from it and cannot be parameterised, so this is the only thing between
 // a project name and an injection. A strict allowlist rather than an escape routine: an allowlist
 // fails closed on what it did not anticipate, an escape routine fails open.
-var scopePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+var scopePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 
 // ProvisionMemorySchema creates and upgrades an instance's memory namespace. Production binds one
 // namespace for its lifetime; parameterization supports existing names and isolated test fixtures.
@@ -36,14 +40,13 @@ func ProvisionMemorySchema(ctx context.Context, pool *pgxpool.Pool, name string)
 	return grantMemoryToDataPlane(ctx, pool, schema)
 }
 
-// ProvisionScope creates a project's chunk partition and its ANN index, inside the instance memory namespace.
-//
-// Called once when a project is created. Until it runs, writes for that project land in the default
-// partition — visible, erasable, and slow to search, which is the right failure: losing a customer's
-// memory because provisioning missed a step is worse than an unindexed project.
-//
-// IF NOT EXISTS throughout, so re-provisioning is a no-op. This is the kind of step an operator
-// retries when unsure whether it ran.
+// ErrProjectStorageConflict refuses an existing relation that cannot serve this project's storage.
+var ErrProjectStorageConflict = errors.New("project storage conflicts with an existing relation")
+
+// ProvisionScope atomically creates a project's row, chunk partition and cosine HNSW index.
+// Repeated/concurrent calls validate existing storage instead of trusting its name. A failed
+// statement rolls back all newly created storage. Unprovisioned writes remain in the default
+// partition; moving existing default-partition data is a separate maintenance operation.
 func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, namespace, scope string) error {
 	schema, err := NewSchema(namespace)
 	if err != nil {
@@ -52,38 +55,85 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, namespace, scope st
 	if !scopePattern.MatchString(scope) {
 		return fmt.Errorf("project %q is not a valid identifier: %s", scope, scopePattern)
 	}
-	partition := pgx.Identifier{schema.String(), "chunk_" + scope}.Sanitize()
-	index := pgx.Identifier{"chunk_" + scope + "_ann_idx"}.Sanitize()
-
-	// The partition, then the index INSIDE it.
-	//
-	// An index on the partitioned parent would be built across every project in the instance, and a
-	// single graph behind a scope predicate is unreachable: the planner prefers an exact sort, and
-	// post-filtering an approximate result loses recall in proportion to how little of the corpus
-	// belongs to the caller. Per partition, pruning happens first and the walk covers only that
-	// project's vectors.
-	for _, statement := range []string{
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s PARTITION OF %s.chunk FOR VALUES IN ('%s')`,
-			partition, schema, scope),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (embedding vector_cosine_ops)`,
-			index, partition),
-	} {
-		if _, err := pool.Exec(ctx, statement); err != nil {
-			return fmt.Errorf("provision project %q in memory namespace %q: %w", scope, namespace, err)
+	tableName, indexName := projectStorageNames(scope)
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, namespace+":project:"+scope); err != nil {
+			return err
 		}
-	}
-
-	// The row last, after the storage it describes exists. A project that is listed and has no
-	// partition is one a write would land in the default partition of — visible, erasable and slow,
-	// which is the safety net rather than the intent.
-	//
-	// Surfaces and retention are not set here. Provisioning creates the place; deciding what a
-	// project keeps is a separate act with its own arguments, and defaulting it would mean every
-	// project silently acquiring whatever this function happened to choose.
-	if _, err := pool.Exec(ctx, fmt.Sprintf(
-		`INSERT INTO %s.project (scope, label) VALUES ($1, $1) ON CONFLICT (scope) DO NOTHING`,
-		schema), scope); err != nil {
-		return fmt.Errorf("record project %q in memory namespace %q: %w", scope, namespace, err)
-	}
-	return nil
+		// Find an actual matching attachment first. Legacy names, including previously truncated
+		// names, are retained when their bound is correct. No data is renamed or moved here.
+		var attachedName string
+		err := tx.QueryRow(ctx, findProjectPartitionSQL, namespace, scope).Scan(&attachedName)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("inspect project partition: %w", err)
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			partition := pgx.Identifier{namespace, tableName}.Sanitize()
+			if _, err := tx.Exec(ctx, fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s PARTITION OF %s.chunk FOR VALUES IN ('%s')`, partition, schema, scope)); err != nil {
+				return fmt.Errorf("create project partition: %w", err)
+			}
+			if err := tx.QueryRow(ctx, findProjectPartitionSQL, namespace, scope).Scan(&attachedName); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrProjectStorageConflict
+				}
+				return fmt.Errorf("validate project partition: %w", err)
+			}
+		}
+		partition := pgx.Identifier{namespace, attachedName}.Sanitize()
+		var indexed bool
+		if err := tx.QueryRow(ctx, validProjectIndexSQL, partition).Scan(&indexed); err != nil {
+			return fmt.Errorf("inspect project index: %w", err)
+		}
+		if !indexed {
+			// A partitioned-parent index is virtual: each child owns its actual index. We currently
+			// provision HNSW on demand on the child; alternative strategies remain measured under #101.
+			if _, err := tx.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (embedding vector_cosine_ops)`, pgx.Identifier{indexName}.Sanitize(), partition)); err != nil {
+				return fmt.Errorf("create project index: %w", err)
+			}
+			if err := tx.QueryRow(ctx, validProjectIndexSQL, partition).Scan(&indexed); err != nil {
+				return err
+			}
+			if !indexed {
+				return ErrProjectStorageConflict
+			}
+		}
+		if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.project(scope,label) VALUES($1,$1) ON CONFLICT(scope) DO NOTHING`), scope); err != nil {
+			return fmt.Errorf("record project %q: %w", scope, err)
+		}
+		return nil
+	})
 }
+
+// Keep short legacy table names and reuse any valid existing index. New index names always
+// use a digest, so a project such as foo_ann_idx cannot collide with foo's index. The complete
+// SHA-256 digest encodes into 52 bytes; generated table/index lengths are distinct and fit the
+// 63-byte limit. Catalog validation refuses any pre-existing or hypothetical digest collision.
+func projectStorageNames(scope string) (string, string) {
+	digest := sha256.Sum256([]byte(scope))
+	encoded := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(digest[:]))
+	table := "chunk_" + scope
+	if len(scope) > 49 {
+		table = "chunk_" + encoded
+	}
+	return table, "chunk_ann_" + encoded
+}
+
+const findProjectPartitionSQL = `
+SELECT child.relname FROM pg_inherits inheritance
+JOIN pg_class parent ON parent.oid=inheritance.inhparent
+JOIN pg_namespace pn ON pn.oid=parent.relnamespace
+JOIN pg_class child ON child.oid=inheritance.inhrelid
+JOIN pg_namespace cn ON cn.oid=child.relnamespace
+WHERE pn.nspname=$1 AND parent.relname='chunk' AND cn.nspname=$1
+ AND child.relispartition AND child.relkind='r'
+ AND pg_get_expr(child.relpartbound,child.oid)=format('FOR VALUES IN (%L)',$2::text)`
+
+const validProjectIndexSQL = `
+SELECT EXISTS(
+ SELECT 1 FROM pg_index i JOIN pg_class idx ON idx.oid=i.indexrelid
+ JOIN pg_am am ON am.oid=idx.relam
+ JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=i.indkey[0]
+ JOIN pg_opclass op ON op.oid=i.indclass[0]
+ WHERE i.indrelid=$1::regclass AND i.indisvalid AND i.indisready
+   AND i.indnkeyatts=1 AND i.indnatts=1 AND i.indpred IS NULL AND i.indexprs IS NULL
+   AND am.amname='hnsw' AND a.attname='embedding' AND op.opcname='vector_cosine_ops')`

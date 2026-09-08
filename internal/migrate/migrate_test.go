@@ -140,7 +140,13 @@ func TestTheVectorSearchPrunesToOnePartitionAndUsesItsIndex(t *testing.T) {
 		t.Fatalf("the query touched another project's partition — pruning did not happen:\n%s", plan)
 	}
 	// And the surviving partition's ANN index must be what answers it.
-	if !strings.Contains(plan, "chunk_projecta_ann_idx") {
+	var indexName string
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT idx.relname FROM pg_index i
+       JOIN pg_class idx ON idx.oid=i.indexrelid JOIN pg_am am ON am.oid=idx.relam
+       WHERE i.indrelid='{schema}.chunk_projecta'::regclass AND am.amname='hnsw'`)).Scan(&indexName); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, indexName) {
 		t.Fatalf("the partition's HNSW index was not used, which is the whole point of #1:\n%s", plan)
 	}
 }

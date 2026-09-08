@@ -1503,6 +1503,49 @@ served with an admin login now fail startup and must supply the intended non-own
 Undoing the guard is a code change that restores that unsafe configuration; registry runtime writes
 would also require a deliberate grant change and a new consumer contract.
 
+### D71 — Project provisioning is atomic and physical names are validated
+
+The provisioner and project table accept the same ASCII identifier contract: a lowercase letter,
+then lowercase letters, digits or underscores, up to 63 bytes. Migration 0024 validates existing
+project rows against that bound. Invalid historical rows refuse the migration atomically; project
+names are never truncated or silently changed under credentials that already reference them.
+
+Project storage and its registry row are one transaction, serialized per namespace/project for
+repeat and concurrent calls. A failure while creating the partition, index or row rolls back newly
+created storage. Catalog inspection checks the actual parent, partition bound and a valid full
+cosine HNSW index on the embedding column. A relation with the expected name is not sufficient.
+An incompatible existing relation is refused and preserved for operator investigation.
+
+Short table names retain the existing `chunk_<project>` convention. Long table names and every new
+index name use the complete SHA-256 digest encoded in base32. The generated table/index names have
+different lengths, fit PostgreSQL's identifier bound, and avoid the previous table-versus-index
+collision between projects such as `alpha` and `alpha_ann_idx`. Catalog validation also fails closed
+on a pre-existing relation or a hypothetical digest collision. Existing correct attachments and
+indexes are found by their actual properties and reused regardless of legacy names, including
+previously truncated names. No retained data is moved or renamed.
+
+The partitioned-parent index explanation is corrected: a parent index is virtual, with physical
+indexes on its child partitions. Current provisioning creates a child HNSW index on demand. The
+choice between that approach, parent-managed indexes or other partition strategies remains the
+measurement work in #101; this correctness change does not settle their scaling tradeoffs.
+
+**Evidence.** Real PostgreSQL tests cover rejected names without storage side effects, concurrent
+long-name provisioning, shared prefixes, table/index name collisions, wrong bounds/parents/indexes,
+legacy reuse, injected row failure and successful retry, migration refusal and project pruning.
+The existing vector fixture verifies that the actual child HNSW index appears in the query plan.
+
+**Rejected:** separate commits for DDL and the project row; trusting IF NOT EXISTS as validation;
+letting PostgreSQL truncate derived identifiers; silently attaching or replacing a conflicting
+relation; rebuilding every correctly attached legacy partition/index simply to rename it.
+
+**Impact and undo cost.** Fresh project index creation is transactional and empty. Repairing a
+missing index on populated existing storage is an operator maintenance operation with database
+locking/build cost, not an online-build guarantee. Existing rows in the default partition that
+prevent a new attachment require separate data maintenance; provisioning fails without losing them.
+No partition-count, latency or approximate-recall quality claim follows from these tests. Reversing
+the atomic write needs code changes; widening the project-name contract requires matching database
+and API changes, while existing physical names can remain opaque implementation details.
+
 ### D1 — PostgreSQL is the only required dependency
 
 Not a vector database, graph engine, message broker, cache or object store.
