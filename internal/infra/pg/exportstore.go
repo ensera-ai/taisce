@@ -103,6 +103,14 @@ func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubject
 		}
 		out.Sections["curated_claim"] = curated
 
+		pins, err := exportRows(ctx, tx, schema, `SELECT to_jsonb(r) FROM {schema}.source_extraction r
+            JOIN {schema}.observation o ON o.scope=r.scope AND o.observation_id=r.source_observation_id
+            WHERE o.scope=$1 AND o.data_subject_id=$2 ORDER BY r.source_observation_id`, scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Sections["source_extraction"] = pins
+
 		for _, table := range []string{"fact_receipt", "fact_receipt_history"} {
 			records, err := exportRows(ctx, tx, schema, "SELECT to_jsonb(r) FROM {schema}."+table+" r WHERE "+receiptOwnershipSQL(table)+" ORDER BY r.fact_id", scope, dataSubjectID)
 			if err != nil {

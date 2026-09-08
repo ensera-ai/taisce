@@ -98,6 +98,10 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 	if err != nil {
 		return report, err
 	}
+	version := f.extractor.PipelineVersion()
+	if err := f.facts.PinExtraction(ctx, schema, observation.Scope, observation.ID, version); err != nil {
+		return report, err
+	}
 	report.MessagesRead = len(messages)
 
 	for _, message := range messages {
@@ -110,8 +114,8 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 		}
 
 		for _, claim := range result.Claims {
-			_, err := f.facts.Assert(ctx, schema, observation.Scope, observation.ID,
-				message.Role, observation.DataSubjectID, claim)
+			_, err := f.facts.AssertVersioned(ctx, schema, observation.Scope, observation.ID,
+				message.Role, observation.DataSubjectID, claim, version)
 			switch {
 			case err == nil:
 				report.FactsAsserted++
@@ -130,8 +134,8 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 		}
 
 		for _, rejected := range result.Rejected {
-			if err := f.facts.Reject(ctx, schema, observation.Scope, observation.ID,
-				observation.DataSubjectID, rejected); err != nil {
+			if err := f.facts.RejectVersioned(ctx, schema, observation.Scope, observation.ID,
+				observation.DataSubjectID, rejected, version); err != nil {
 				return report, fmt.Errorf("record rejection from message %d: %w", message.Ordinal, err)
 			}
 			report.ClaimsRejected++

@@ -15,11 +15,11 @@ import (
 // Exact diagnostic text is identity: different rejected interpretations remain inspectable, while
 // replay of the same proposal cannot inflate the corpus. The hash is not anonymization; source
 // registration owns its erasure. No identity mapping outlives the rejected projection.
-func rejectedIdentity(scope, observationID string, rejected domain.RejectedClaim) (uuid.UUID, error) {
+func rejectedIdentity(scope, observationID string, rejected domain.RejectedClaim, version string) (uuid.UUID, error) {
 	source, err := uuid.Parse(observationID)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	encoded, _ := json.Marshal([9]string{"rejected/v1", scope, source.String(), strconv.Itoa(rejected.SourceOrdinal), rejected.Predicate, rejected.Statement, rejected.Quote, rejected.Reason, ExtractorVersion})
+	encoded, _ := json.Marshal([9]string{"rejected/v1", scope, source.String(), strconv.Itoa(rejected.SourceOrdinal), rejected.Predicate, rejected.Statement, rejected.Quote, rejected.Reason, version})
 	return uuid.NewHash(sha256.New(), uuid.NameSpaceOID, encoded, 8), nil
 }

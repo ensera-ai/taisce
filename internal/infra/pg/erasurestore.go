@@ -156,6 +156,19 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 			out.Residual[table] = remaining
 		}
 
+		pins, err := tx.Exec(ctx, schema.SQL(`DELETE FROM {schema}.source_extraction r USING {schema}.observation o
+            WHERE o.scope=r.scope AND o.observation_id=r.source_observation_id AND o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Deleted["source_extraction"] = int(pins.RowsAffected())
+		var pinsResidual int
+		if err := tx.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.source_extraction r JOIN {schema}.observation o
+            ON o.scope=r.scope AND o.observation_id=r.source_observation_id WHERE o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID).Scan(&pinsResidual); err != nil {
+			return err
+		}
+		out.Residual["source_extraction"] = pinsResidual
+
 		// Last, because the cascade takes the registrations with it and the count above needs them.
 		// The observation is the root: after this, the turn's messages are gone too, and a rebuild
 		// derives only from what survived rather than repairing what did not.

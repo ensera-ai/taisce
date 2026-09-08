@@ -3433,3 +3433,54 @@ conflicting support, atomic storage/audit failure, and races with human withdraw
 This advances #58; unrecorded additional support, full projection generations and changed-model
 reinterpretation remain open. Source receipts and authoritative artifact/subject storage still need
 backups; model-based rebuild must preserve those governance roots.
+
+
+## D96 — Extraction attempts pin a content-free configuration identity
+
+**Decision.** The shipped HTTP extraction path stamps evidence and rejected proposals with
+`extract/v2:<sha256>`. The digest covers configured model name and endpoint origin; embedded request,
+parser, prompt-composition and admission source; embedded extraction YAML; the ordered relation
+vocabulary; and the sorted unresolvable-term set. Credentials, URL userinfo/path/query/fragment,
+message content, random prompt fences and embedding configuration are excluded. Citations and export
+already expose evidence stamps; missing-fact and support recovery preserve those original stamps.
+Unidentified in-process proposers retain the `extract/v1` code label, which does not identify a model
+and must not be treated as proof of model equivalence. The runtime HTTP proposer always identifies
+its configuration. Curated sources remain `curated/v1` and bypass inference.
+
+A source-owned `source_extraction` row pins the first attempted configuration before any inference,
+including failed attempts and empty results. It is not a formation-completion marker. New fact and
+rejection writes check the pin in their transaction under the existing source lock. A conflicting
+retry refuses before inference in the normal worker, or before writes in a direct versioned call.
+A missing pin can be restored only if surviving evidence, rejections and fact receipts agree.
+Pins cannot be updated, are project-consistent by foreign key, are exported with their source, and
+are deleted by erasure or source expiry. An erased source cannot regain a pin. A newly collected
+independent source may use another configuration.
+
+**Trust and limits.** This protects accepted source outcomes from an accidentally changed worker
+configuration; the operator still controls the deployment and model service. A digest is a matching
+identifier, not attestation or anonymization. An unchanged model alias can point at different weights,
+and routing may change behind the same origin. URL paths are deliberately excluded because they may
+carry credentials. Therefore this is a configuration identity, never a promise of identical output.
+Database entity-resolution/speaker policy, graph/community algorithms, embedding/report generations
+and the dependency registry's `v1` implementation stamp are separate concerns. They are not claimed
+to be covered by this extraction fingerprint.
+
+**Cost and alternatives.** One small control row per attempted source, one transaction before a
+model attempt, and an indexed pin check per admitted/rejected write are added off the recall path.
+First pin creation also checks source-indexed surviving outputs. Digests are computed from bounded
+compiled code and vocabulary, not the growing corpus. There is no production latency claim.
+A fixed version hides model and prompt changes. Including the whole binary or Git commit makes
+unrelated components invalidate every attempt. Hashing only a model name misses local rules and
+vocabulary. Hashing endpoint paths or credentials retains secret-derived material without proving
+weights. The chosen source hashing is conservative: even a comment edit in a covered source changes
+the identity. Reusing the original binary/configuration is the supported retry after such a change.
+Silently appending new interpretations to partial old output is rejected.
+
+**Reversal and proof.** Moderate before release: remove the pin/checks in one migration and keep
+historical evidence stamps. Removing stamps would destroy provenance. This is a dependency of #58,
+not a completed changed-model rebuild. Until explicit generation cutover is implemented, an affected
+unfinished source must finish with its original configuration; deleting its pin is not a recovery
+procedure. PostgreSQL/HTTP tests cover real configuration propagation, key rotation invariance,
+changed configuration refusal before inference, failed/empty attempts, concurrent first pins,
+project/missing-source refusal, immutable pins, storage failure rollback, exact citation recovery,
+export, counted erasure and expiry. Existing correction/replay tests retain human-authored provenance.

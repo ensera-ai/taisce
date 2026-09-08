@@ -43,3 +43,15 @@ restore a lost receipt, regenerate summaries or embeddings, restore unrecorded a
 entity-only loss, or recover unsupported direct SQL inserts. Back up observations, authored input,
 withdrawal instructions and formation receipts together. D88 records the source-receipt boundary and
 D95 adds retained-record support repair; #58 tracks the remaining generation workflows.
+
+
+Extraction configuration and retries
+------------------------------------
+
+Runtime extraction evidence uses a configuration fingerprint (`extract/v2:<sha256>`). Recovery
+preserves this stamp; it does not stamp the operator's current model onto old evidence. The
+`source_extraction` control row is authoritative source metadata and must be backed up with the
+observation/receipts, not dropped as a projection. Failed and empty extraction attempts also pin a
+configuration. A changed retry is refused; restore the original binary/configuration to finish an
+unfinished source. Deleting a pin is not a supported reset. Changed-model generation cutover remains
+tracked in #58. D96 defines the fingerprint inputs and the limits of model aliases and routing.

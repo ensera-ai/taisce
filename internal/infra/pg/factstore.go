@@ -28,9 +28,8 @@ const (
 	ProjectionEntity = "entity"
 )
 
-// ExtractorVersion is stamped on every piece of evidence, so a corpus extracted under changed rules
-// is distinguishable from one extracted under these. It migrates nothing; it makes the difference
-// visible when somebody asks why two facts that look alike disagree.
+// ExtractorVersion is the code label for direct callers with no configured model identity. Runtime
+// formation supplies a configuration fingerprint instead; this label does not identify model weights.
 const ExtractorVersion = "extract/v1"
 
 // ErrNotSpokenByPrincipal is returned when a claim would become a fact about the principal but the
@@ -54,10 +53,18 @@ var ErrUnboundSpeaker = errors.New("speaker reference needs the observation's at
 func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observationID string,
 	speaker domain.Role, dataSubjectID string, claim domain.Claim) (string, error) {
 
+	return s.AssertVersioned(ctx, schema, scope, observationID, speaker, dataSubjectID, claim, ExtractorVersion)
+}
+
+// AssertVersioned preserves the configured extraction identity on new evidence. Retained records
+// and source receipts keep their original stamps; changing a source's pinned identity is refused.
+func (s *FactStore) AssertVersioned(ctx context.Context, schema Schema, scope, observationID string,
+	speaker domain.Role, dataSubjectID string, claim domain.Claim, version string) (string, error) {
+
 	var factID string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		factID, err = assertFactTx(ctx, tx, schema, scope, observationID, speaker, dataSubjectID, claim, ExtractorVersion, time.Time{})
+		factID, err = assertFactTx(ctx, tx, schema, scope, observationID, speaker, dataSubjectID, claim, version, time.Time{})
 		return err
 	})
 	return factID, err
@@ -86,6 +93,9 @@ func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observat
 		}
 		subjectSpeaker, objectSpeaker, err := bindSpeaker(ctx, tx, schema, scope, observationID, speaker, dataSubjectID, claim)
 		if err != nil {
+			return err
+		}
+		if err := pinLockedExtractionTx(ctx, tx, schema, scope, observationID, extractorVersion); err != nil {
 			return err
 		}
 		if err := refuseRetractedClaim(ctx, tx, schema, scope, observationID, dataSubjectID, claim, subjectSpeaker, objectSpeaker); err != nil {
@@ -348,14 +358,24 @@ const ProjectionRejectedClaim = "rejected_claim"
 func (s *FactStore) Reject(ctx context.Context, schema Schema, scope, observationID, dataSubjectID string,
 	rejected domain.RejectedClaim) error {
 
-	id, err := rejectedIdentity(scope, observationID, rejected)
+	return s.RejectVersioned(ctx, schema, scope, observationID, dataSubjectID, rejected, ExtractorVersion)
+}
+
+// Rejected text belongs to the extraction configuration that proposed it, including stable retries.
+func (s *FactStore) RejectVersioned(ctx context.Context, schema Schema, scope, observationID, dataSubjectID string,
+	rejected domain.RejectedClaim, version string) error {
+
+	id, err := rejectedIdentity(scope, observationID, rejected, version)
 	if err != nil {
 		return fmt.Errorf("identify rejected source: %w", err)
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := pinExtractionTx(ctx, tx, schema, scope, observationID, version); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, schema.SQL(insertRejectedClaimSQL),
 			id, scope, observationID, rejected.SourceOrdinal, rejected.Predicate,
-			rejected.Statement, rejected.Quote, rejected.Reason, ExtractorVersion,
+			rejected.Statement, rejected.Quote, rejected.Reason, version,
 			nullIfEmpty(dataSubjectID)); err != nil {
 			return fmt.Errorf("record rejected claim: %w", err)
 		}
