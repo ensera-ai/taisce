@@ -3522,3 +3522,44 @@ retraction policy, human-correction protection, temporal boundaries, citation/ex
 subject erasure. The command has a content-free JSON progress result. Full-scope orchestration,
 other projection rebuilds and workload measurements remain #58/#103. Model-response caching is
 tracked separately in [ensera-ai/taisce#108](https://github.com/ensera-ai/taisce/issues/108).
+
+## D98 — Project fact rebuilds checkpoint a fixed log range
+
+**Decision.** `taisce rebuild project` runs a bounded page under one durable operation key and
+extraction identity. PostgreSQL captures the initial log upper bound, cursor and pending offset.
+Every source has a stable operation key derived from the job and its log offset, so a committed
+generation survives a lost acknowledgement without another inference call. Each source uses D97's
+atomic publication; the whole project does not switch in one transaction. Human-authored sources
+are excluded, and later appends belong to a later job. #124 tracks the implementation.
+
+One session advisory lock limits runners per project, and a persisted lease fences a replaced
+runner inside generation publication. One active job per project is a database constraint. No
+transaction remains open during inference. Each invocation admits at most 100 sources, with the
+existing five-minute per-source deadline; at least two pool connections are required and validated.
+
+**Cancellation and governance.** Reserving the pending offset is the admission boundary. A live
+runner may finish that source after cancellation is requested, but cannot reserve another. When
+the runner is gone, cancellation takes the free project lock, reconciles a committed pending
+generation if present, finishes its freshness bookkeeping, and settles the operation in one
+transaction without inference or its original configuration.
+Start and cancellation require an atomic audit write. The authority is the operator database
+connection; no public HTTP endpoint or human login authority is added.
+
+Job rows retain only log offsets, configuration hashes and aggregate progress. They contain no
+source IDs, subject attribution or memory text, so source erasure can remove a pending observation
+without a foreign-key coupling or a retained personal link. Reserved erased/cancelled sources count
+as skipped; sources erased before visiting are absent from the counters. Operational checkpoints
+remain after erasure, like watermarks. Provider errors and model responses are not stored in jobs.
+
+**Alternatives and reversal.** A single transaction over model work would hold source locks for
+provider latency and make restart cost the whole job. A shell loop has no durable boundary, identity
+pin or lost-acknowledgement protection. A broker adds an independent store without improving these
+guarantees. This adds one control table and an optional publication fence. Removing orchestration
+before release is moderate: preserve source-generation receipts and let active jobs settle before
+removing their control table. Entity/chunk/embedding/report rebuilds and response caching remain
+separate work under #58.
+
+**Proof.** PostgreSQL tests cover finite pages, later appends, empty projects, authoritative source
+exclusion, cancellation with live and disconnected runners, erasure before/during inference, lost
+progress after publication, stale-runner refusal, concurrent admission, configuration mismatch and
+audit/storage rollback. CLI tests prove status/cancellation remain available without a provider.

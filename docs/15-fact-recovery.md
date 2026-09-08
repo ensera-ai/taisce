@@ -55,6 +55,7 @@ observation/receipts, not dropped as a projection. Failed and empty extraction a
 configuration. A changed retry is refused; restore the original binary/configuration to finish an
 unfinished source. Deleting a pin is not a supported reset. Single-source changed-model generation
 cutover is available through `taisce rebuild facts`; it keeps the old interpretation historical and
-records lineage. Scope-wide orchestration remains #58; response caching is tracked in
+records lineage. Project fact orchestration is available through `taisce rebuild project` (D98/#124); other
+projection rebuilds remain #58. Response caching is tracked in
 [ensera-ai/taisce#108](https://github.com/ensera-ai/taisce/issues/108). D96
 defines the fingerprint inputs and the limits of model aliases and routing.

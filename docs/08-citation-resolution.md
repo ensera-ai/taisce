@@ -30,7 +30,7 @@ independently verified or is valid at every instant. Recorded supersession links
 `supersession_source_observation_id`. [Historical recall](09-temporal-history.md) selects preserved
 validity versions. Retraction relationships and generation-stable citation mappings are returned in
 `retraction`, `generation` and `reinterpreted_by`. A generation-retired fact has status
-`reinterpreted` unless it was explicitly retracted; scope-wide rebuild orchestration remains #58. Do
+`reinterpreted` unless it was explicitly retracted; project fact rebuilds preserve the same mappings (D98); other projection rebuilds remain #58. Do
 not infer a successor from similar text or matching predicates.
 
 Unknown, erased and other-project fact IDs all return the same `404 not_found`. Invalid identifiers

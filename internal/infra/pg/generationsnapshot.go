@@ -29,6 +29,7 @@ var ErrGenerationSource = errors.New("generation source is unavailable or is aut
 type GenerationSnapshot struct {
 	SourceID           string
 	Scope              string
+	LogOffset          int64
 	Owner              string
 	OccurredAt         time.Time
 	IngestedAt         time.Time
@@ -60,9 +61,9 @@ func readGenerationSourceTx(ctx context.Context, tx pgx.Tx, schema Schema, scope
 	}
 	var kind string
 	var curated bool
-	err := tx.QueryRow(ctx, schema.SQL(`SELECT coalesce(o.data_subject_id,''),o.occurred_at,o.ingested_at,o.fact_revision,o.kind,
+	err := tx.QueryRow(ctx, schema.SQL(`SELECT coalesce(o.data_subject_id,''),o.occurred_at,o.ingested_at,o.fact_revision,o.kind,o.log_offset,
         EXISTS(SELECT 1 FROM {schema}.curated_claim c WHERE c.scope=o.scope AND c.source_observation_id=o.observation_id)
-        FROM {schema}.observation o WHERE o.scope=$1 AND o.observation_id=$2::uuid`+lock), scope, source).Scan(&out.Owner, &out.OccurredAt, &out.IngestedAt, &out.Revision, &kind, &curated)
+        FROM {schema}.observation o WHERE o.scope=$1 AND o.observation_id=$2::uuid`+lock), scope, source).Scan(&out.Owner, &out.OccurredAt, &out.IngestedAt, &out.Revision, &kind, &out.LogOffset, &curated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return GenerationSnapshot{}, ErrGenerationSource
 	}

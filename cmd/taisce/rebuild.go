@@ -20,6 +20,9 @@ import (
 // The explicit operation key survives a broken output stream. Repeating it for this source and
 // configuration reads the committed outcome and finishes freshness without spending model calls.
 func rebuildCommand(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) > 0 && (args[0] == "project" || args[0] == "status" || args[0] == "cancel") {
+		return projectRebuildCommand(ctx, args, out)
+	}
 	if len(args) == 0 || args[0] != "facts" {
 		return fmt.Errorf("usage: taisce rebuild facts --project <name> --source <observation-uuid> --key <operation-uuid>")
 	}

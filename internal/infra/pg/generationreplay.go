@@ -81,18 +81,24 @@ func (s *FactStore) ReplayGeneration(ctx context.Context, schema Schema, scope, 
 // step without another model call if the process or its output stream fails after publication.
 func (s *FactStore) FinishGeneration(ctx context.Context, schema Schema, scope, source string) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, schema.SQL(`UPDATE {schema}.observation o SET formed_at=coalesce(o.formed_at,clock_timestamp()),parked_at=NULL
-            WHERE o.scope=$1 AND o.observation_id=$2::uuid AND EXISTS(SELECT 1 FROM {schema}.source_extraction p WHERE p.scope=o.scope AND p.source_observation_id=o.observation_id AND p.generation_id IS NOT NULL)`), scope, source)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() != 1 {
-			return ErrGenerationSource
-		}
-		if _, err := tx.Exec(ctx, schema.SQL(lockScopeWatermarkSQL), scope); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, schema.SQL(advanceFormedWatermarkSQL), scope)
-		return err
+		return finishGenerationTx(ctx, tx, schema, scope, source)
 	})
+}
+
+// Orphaned job cancellation uses the same bookkeeping in its control transaction. Its job row has
+// no erasure foreign key and this path holds no fact/source advisory lock across the watermark.
+func finishGenerationTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, source string) error {
+	tag, err := tx.Exec(ctx, schema.SQL(`UPDATE {schema}.observation o SET formed_at=coalesce(o.formed_at,clock_timestamp()),parked_at=NULL
+            WHERE o.scope=$1 AND o.observation_id=$2::uuid AND EXISTS(SELECT 1 FROM {schema}.source_extraction p WHERE p.scope=o.scope AND p.source_observation_id=o.observation_id AND p.generation_id IS NOT NULL)`), scope, source)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrGenerationSource
+	}
+	if _, err := tx.Exec(ctx, schema.SQL(lockScopeWatermarkSQL), scope); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, schema.SQL(advanceFormedWatermarkSQL), scope)
+	return err
 }

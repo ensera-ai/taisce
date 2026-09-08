@@ -45,6 +45,9 @@ const usage = `taisce — memory for agents
   taisce artifact limits           inspect or replace project artifact storage allowances
   taisce recover facts             restore a bounded page of missing facts (--project required)
   taisce rebuild facts             reinterpret one source atomically (--project, --source, --key required)
+  taisce rebuild project           run a resumable page of fact rebuilds (--project, --key required)
+  taisce rebuild status            inspect a project rebuild (--project, --key required)
+  taisce rebuild cancel            cancel a project rebuild (--project, --key required)
   taisce health                    show content-free operational aggregates using the operator connection
   taisce probe                     check local readiness (--live for liveness, --worker for worker probes)
   taisce version                   what this binary is

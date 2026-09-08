@@ -27,6 +27,10 @@ func NewRebuilder(facts *pg.FactStore, extractor *extract.Extractor) *Rebuilder 
 // An interrupted preparation can cost another model attempt; an interrupted published operation
 // reuses its recorded outcome. Provider bodies never enter the operator's error output.
 func (r *Rebuilder) Rebuild(ctx context.Context, schema pg.Schema, scope, source, key, principal string) (pg.GenerationResult, error) {
+	return r.rebuild(ctx, schema, scope, source, key, principal, nil)
+}
+
+func (r *Rebuilder) rebuild(ctx context.Context, schema pg.Schema, scope, source, key, principal string, guard *pg.GenerationJobGuard) (pg.GenerationResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultPolicy().TurnBudget)
 	defer cancel()
 	version := r.extractor.PipelineVersion()
@@ -41,7 +45,7 @@ func (r *Rebuilder) Rebuild(ctx context.Context, schema pg.Schema, scope, source
 	if err != nil {
 		return pg.GenerationResult{}, err
 	}
-	var plan pg.GenerationPlan
+	plan := pg.GenerationPlan{Job: guard}
 	for _, message := range snapshot.Messages {
 		message.OccurredAt = snapshot.MessageTime(message)
 		result, err := r.extractor.Extract(ctx, message)

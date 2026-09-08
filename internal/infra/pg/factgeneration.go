@@ -36,6 +36,7 @@ type GenerationResult struct {
 type GenerationPlan struct {
 	Claims   []domain.Claim
 	Rejected []domain.RejectedClaim
+	Job      *GenerationJobGuard `json:"-"`
 }
 
 func (s *FactStore) FindGeneration(ctx context.Context, schema Schema, scope, source, key, version string) (GenerationResult, bool, error) {
@@ -108,6 +109,11 @@ func (s *FactStore) ApplyGeneration(ctx context.Context, schema Schema, snapshot
 		return out, ErrGenerationLimit
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if plan.Job != nil {
+			if err := validateGenerationJobTx(ctx, tx, schema, snapshot, key, version, plan.Job); err != nil {
+				return err
+			}
+		}
 		if err := lockClaimSource(ctx, tx, schema, snapshot.Scope, snapshot.SourceID); err != nil {
 			return err
 		}
