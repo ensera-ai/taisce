@@ -2560,3 +2560,46 @@ probe contract, not a production availability guarantee. See docs/07-operational
 **Reversal cost.** Low for configuration and probes; one migration removes the aggregate table and
 age index. Removing the public readiness route requires updating deployment probes. No prompt,
 memory representation or credential scope changes. Tracked in #94.
+
+## D77 — Resolve saved citations from retained, verified sources
+
+**Decision.** An authenticated `POST /v1/citations/resolve` accepts a fact UUID and an optional
+keyset cursor. The credential determines the project. Unknown, foreign-project and erased records
+share the same not-found response. The request does not rerun retrieval or inference. Each request
+reads metadata and evidence in one read-only repeatable-read transaction.
+
+The response includes retained validity/knowledge intervals, current/validity-closed/knowledge-closed
+status, entity identifiers and extraction provenance. Every evidence row is joined to its exact
+message ordinal; its quote must equal the UTF-8 byte span in that message. Missing or inconsistent
+sources fail the request without returning partial content. Multiple supports and multiple spans
+in one message survive pagination, ordered by observation UUID, ordinal and byte start using the
+existing evidence primary key. Message role and occurrence time come from the message itself.
+
+**Bounds.** Default eight sources, maximum 32, with one lookahead row. A page contains at most
+256 KiB of decoded statement/quote/context/version text; JSON escaping adds bounded wire overhead.
+Statements and source messages are limited to 64 KiB, versions to 256 bytes. Oversized retained
+legacy records return `citation_limit` and direct the caller to subject export. SQL bounds text
+before transferring it to Go. The existing authenticated admission/deadline policy applies.
+
+**History and erasure.** Saved fact IDs remain resolvable after the present supersession writer
+closes validity. This is inspection of the retained row, not reconstruction of earlier knowledge.
+The in-place supersession defect is independently reproduced in #116. Successor/retraction links,
+versioned historical views and stable rebuild mappings remain unfinished under #90, #89 and #58.
+No links or history are inferred from coincident entity/predicate values. Pages are separate live
+snapshots: erasure or additional supports between pages can change later pages. Completed erasure
+removes access on subsequent requests; an already returned response cannot be revoked.
+
+**Audit.** `citation.resolve` records project, credential, outcome and returned source count;
+no fact identifier, source identifier, subject, quote or statement enters the audit entry. Database
+errors produce a generic response and a content-free project-scoped log message.
+
+**Alternatives rejected.** Repeating recall can omit a retained citation because of temporal or
+retrieval budgets. Selecting one arbitrary support loses provenance. Whole-message responses or
+unbounded evidence arrays permit avoidable resource exhaustion. Offset pagination becomes more
+expensive on later pages. Reconstructing unrecorded history would present guesses as evidence.
+
+**Evidence and reversal.** Real PostgreSQL and HTTP tests exercise exact Arabic bytes, message
+identity, independent temporal metadata, supersession, erasure, project privacy, count/text bounds,
+multiple spans, corrupt evidence and content-free audit. This establishes behavior, not production
+throughput (#103). Removing the route/store is low cost; migration 0028 adds only an audit operation.
+Persisted audit entries must remain valid even if the route is later retired.

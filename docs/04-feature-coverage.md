@@ -33,9 +33,10 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Exact anchor admission [#102](https://github.com/althunibat/taisce/issues/102) | Core implemented; `3b3a3bb`. Separate indexed name/alias arms, question/term/match limits, explicit refusal before traversal, real-database plan and attribution/erasure tests. | Alias-specific ownership and concurrent registration, normalized-relation comparison and controlled-host workload measurements. Issue remains open. |
 | Shared request admission [#93](https://github.com/althunibat/taisce/issues/93) | Request admission `cd6c76c`; durable backlog reservations `1b3b1fe`. Size and concurrency bounds, protected accounting across processes, atomic release on formation/erasure/retention, and retryable HTTP refusal. | Controlled-host workloads, deployment-wide request admission policy and live operational metrics remain open. |
 | Operator formation recovery [#113](https://github.com/althunibat/taisce/issues/113) | Closed; `fa844ba`. Bounded metadata pagination and project-scoped retry with atomic audit and watermark correction. | None in this issue. |
+| Saved citations [#90](https://github.com/althunibat/taisce/issues/90) | Independent project-scoped resolution, exact source-byte verification and bounded evidence pagination. D77 records scope and limits. | Historical knowledge (#116), supersession/retraction lineage and rebuild mappings remain open. |
 | Operational health [#94](https://github.com/althunibat/taisce/issues/94) | Bounded dependency readiness, actual worker progress, content-free operator aggregates and Compose probes. D76 records scope and limits. | Helm integration depends on #76; issue remains open. |
 
-The complete real-PostgreSQL suite and uncached repeat through operational health pass at
+The complete real-PostgreSQL suite and uncached repeat through saved-citation resolution pass at
 **90.8%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
@@ -47,7 +48,10 @@ Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist 
 
 Operator observability (#94) now includes bounded readiness, worker progress, local probes and
 content-free operator aggregates. Compose consumes the probe contract; Helm integration awaits #76.
-Next: remaining product journeys and rebuild.
+Next: historical knowledge preservation (#116), curated memory (#89), and rebuild (#58); citation lineage depends on these.
+A reproduced knowledge-time defect is tracked in #116: in-place validity changes do not preserve
+earlier knowledge views. Full historical reconstruction remains unimplemented and is not implied
+by returning a retained record and its evidence.
 Anchoring’s ownership and workload criteria stay in #102. The generation/rebuild lifecycle is
 required before closing #84 or #100. Product and adapter journeys retain their acceptance criteria
 and remain in the execution order below.
@@ -149,7 +153,7 @@ completion.
 | `recall` | Partial | POST /v1/recalls: anchored facts and temporal/hop controls; semantic/thematic reach and per-call controls incomplete. | [ensera-ai/taisce#105](https://github.com/ensera-ai/taisce/issues/105), [ensera-ai/taisce#106](https://github.com/ensera-ai/taisce/issues/106), [#92](https://github.com/althunibat/taisce/issues/92) |
 | `assert` | Missing | No public curated-record lifecycle. | [#89](https://github.com/althunibat/taisce/issues/89), [ensera-ai/taisce#91](https://github.com/ensera-ai/taisce/issues/91) |
 | `get_watermark` | Implemented | GET /v1/freshness exposes stored/formed offsets and parked count. | [ensera-ai/taisce#48](https://github.com/ensera-ai/taisce/issues/48), [#94](https://github.com/althunibat/taisce/issues/94) |
-| `resolve_citation` | Partial | Inline evidence/context exists; independent lookup is missing. | [#90](https://github.com/althunibat/taisce/issues/90) |
+| `resolve_citation` | Partial | Independent authorized lookup verifies exact message bytes with bounded multi-source pagination (D77). Historical knowledge, successor/retraction lineage and rebuild mappings remain incomplete. | [#90](https://github.com/althunibat/taisce/issues/90) |
 | `memory_create` | Missing | No public curated-record lifecycle. | [#89](https://github.com/althunibat/taisce/issues/89), [ensera-ai/taisce#91](https://github.com/ensera-ai/taisce/issues/91) |
 | `memory_get` | Missing | No public curated-record lifecycle. | [#89](https://github.com/althunibat/taisce/issues/89), [ensera-ai/taisce#91](https://github.com/ensera-ai/taisce/issues/91) |
 | `memory_list` | Missing | No public curated-record lifecycle. | [#89](https://github.com/althunibat/taisce/issues/89), [ensera-ai/taisce#91](https://github.com/ensera-ai/taisce/issues/91) |

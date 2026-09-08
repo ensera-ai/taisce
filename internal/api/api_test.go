@@ -462,6 +462,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 		pg.NewObservationStore(pool),
 		pg.NewEraser(pool),
 		recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50}),
+		pg.NewCitationStore(pool, schema),
 		schema,
 		nil,
 	).Handler())
@@ -810,9 +811,10 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 			"data_subject_id": "subject-1",
 			"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
 		}, http.StatusCreated},
-		domain.AuditFreshness: {nil, http.StatusOK},
-		domain.AuditRecall:    {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
-		domain.AuditExport:    {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
+		domain.AuditCitationResolve: {map[string]any{}, http.StatusOK},
+		domain.AuditFreshness:       {nil, http.StatusOK},
+		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
+		domain.AuditExport:          {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
 		domain.AuditErase: {map[string]any{
 			"data_subject_id": "subject-1", "reason": "the ledger test",
 		}, http.StatusOK},
@@ -849,6 +851,12 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	run(domain.AuditFreshness)
 	h.form(t)
 	run(domain.AuditRecall)
+	var citationID string
+	if err := h.pool.QueryRow(ctx, h.schema.SQL(`SELECT fact_id::text FROM {schema}.fact WHERE scope='p1' ORDER BY fact_id LIMIT 1`)).Scan(&citationID); err != nil {
+		t.Fatal(err)
+	}
+	exercise[domain.AuditCitationResolve].body["id"] = citationID
+	run(domain.AuditCitationResolve)
 	run(domain.AuditExport)
 	run(domain.AuditErase)
 	for _, o := range surface {

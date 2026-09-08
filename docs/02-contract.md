@@ -21,6 +21,7 @@ Observations admit at most 64 messages, 65536 UTF-8 content bytes per message an
 | `recall` | POST | `/v1/recalls` | 200 |
 | `erase` | POST | `/v1/erasures` | 200 |
 | `export` | POST | `/v1/exports` | 200 |
+| `citation.resolve` | POST | `/v1/citations/resolve` | 200 |
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
 
@@ -132,6 +133,38 @@ POST `/v1/exports` → 200
 | `rows` | object of integer |
 
 
+## `citation.resolve`
+
+POST `/v1/citations/resolve` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `after` | {source_observation_id: string, source_ordinal: integer, byte_start: integer}, optional |
+| `limit` | integer, optional |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `scope` | string |
+| `subject_entity_id` | string, optional |
+| `object_entity_id` | string, optional |
+| `predicate` | string |
+| `statement` | string |
+| `confidence` | number |
+| `source_role` | string |
+| `recorded_at` | timestamp (RFC 3339) |
+| `valid` | {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean} |
+| `known` | {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean} |
+| `status` | string |
+| `evidence` | array of {source_observation_id: string, source_ordinal: integer, log_offset: integer, role: string, occurred_at: timestamp (RFC 3339), quote: string, byte_start: integer, byte_end: integer, extractor_version: string, context: string, context_byte_start: integer, context_byte_end: integer, context_complete: boolean} |
+| `next` | {source_observation_id: string, source_ordinal: integer, byte_start: integer}, optional |
+
+
 ## Refusals
 
 A refusal is a JSON body of the shape `{"error": {"code": "…", "message": "…"}}`. Branch on the code; the message is for a person reading a log and may change.
@@ -148,6 +181,9 @@ Any operation may answer with any of these.
 | `internal` |
 | `idempotency_conflict` |
 | `rate_limited` |
+| `invalid_citation` |
+| `citation_limit` |
+| `not_found` |
 
 ## Liveness
 
