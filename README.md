@@ -32,6 +32,7 @@ Database erasure does not establish what an external provider retained. See the
 | [`docs/03-market.md`](docs/03-market.md) | What is shipped elsewhere, dated, and what it obliges here |
 | [`docs/04-feature-coverage.md`](docs/04-feature-coverage.md) | Verified feature coverage, gaps and execution order |
 | [docs/05-releases.md](docs/05-releases.md) | Preparing public snapshots and preserving private development history |
+| [`docs/21-production-postgresql.md`](docs/21-production-postgresql.md) | PostgreSQL production sizing, qualification and rollback |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How work is tracked |
 | [`CLAUDE.md`](CLAUDE.md) | The working rules, in full |
 | [development issues](https://github.com/althunibat/taisce/issues) | The private roadmap — the source of truth for scope |

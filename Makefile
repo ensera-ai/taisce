@@ -5,8 +5,17 @@
 
 SUBSTRATE_VERSION ?= 0.1.0
 TEST_DSN ?= postgres://postgres:taisce@localhost:55432/taisce?sslmode=disable
+PERF_PROJECT ?= taisce-perf
+PERF_PORT ?= 18080
+PERF_POSTGRES_PORT ?= 55433
+PERF_POSTGRES_PASSWORD ?= taisce-perf
+PERF_TEST_DSN ?= postgres://postgres:$(PERF_POSTGRES_PASSWORD)@localhost:$(PERF_POSTGRES_PORT)/taisce?sslmode=disable
+PERF_COMPOSE = TAISCE_PORT=$(PERF_PORT) TAISCE_PERF_POSTGRES_PORT=$(PERF_POSTGRES_PORT) \
+	TAISCE_PERF_POSTGRES_PASSWORD=$(PERF_POSTGRES_PASSWORD) \
+	docker compose --project-name $(PERF_PROJECT) -f compose.yaml -f compose.perf.yaml
 
-.PHONY: substrate db-up db-down test licence signoff version test-inference golden build contract
+.PHONY: substrate db-up db-down test licence signoff version test-inference golden build contract \
+	perf-config perf-up perf-down perf-reset-stats perf-workload perf-stats
 
 substrate:
 	docker build -t taisce-postgres:$(SUBSTRATE_VERSION) deploy/postgres
@@ -20,6 +29,39 @@ db-up: substrate
 
 db-down:
 	-docker rm -f taiscedb
+
+# An isolated, durable PostgreSQL qualification stack. `perf-down` preserves its volume so a warm
+# run can follow a cold one; the destructive volume-removal command is documented rather than hidden
+# behind an easy-to-mistype target.
+perf-config:
+	$(PERF_COMPOSE) config --quiet
+
+perf-up: perf-config
+	$(PERF_COMPOSE) up -d --build
+	@until $(PERF_COMPOSE) exec -T postgres pg_isready -U postgres -d taisce >/dev/null 2>&1; do sleep 1; done
+	@echo "qualification stack ready: api=$(PERF_PORT) postgres=$(PERF_POSTGRES_PORT)"
+
+perf-down:
+	$(PERF_COMPOSE) down
+
+perf-reset-stats:
+	$(PERF_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d taisce \
+		-c "SELECT pg_stat_reset_shared('io')" \
+		-c "SELECT pg_stat_reset_shared('wal')" \
+		-c "SELECT pg_stat_reset_shared('checkpointer')" \
+		-c "SELECT pg_stat_reset()" \
+		-c "SELECT pg_stat_statements_reset()"
+
+# This is a repeatable database regression workload, not a production capacity claim. Replace it
+# with the agreed HTTP workload and corpus before assigning throughput or latency targets.
+perf-workload:
+	/usr/bin/time -p env TAISCE_TEST_DSN="$(PERF_TEST_DSN)" go test -count=1 -timeout 15m \
+		./cmd/taisce ./internal/api ./internal/credential ./internal/formation \
+		./internal/infra/pg ./internal/migrate ./internal/recall
+
+perf-stats:
+	$(PERF_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d taisce \
+		-f - < scripts/postgres-profile.sql
 
 # No skip-when-absent arm. TAISCE_TEST_DSN unset makes the database tests skip, and a green run that
 # skipped everything is the failure mode this target exists to prevent.
