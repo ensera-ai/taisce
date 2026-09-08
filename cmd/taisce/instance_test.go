@@ -22,15 +22,25 @@ func TestDefaultInstanceBootstrapRestartAndProjectCreationUseOneMemoryNamespace(
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(owner.Close)
+	// Advisory locks are database-local, but these test roles are cluster-wide. Coordinate the
+	// child database's bootstrap with suites using the parent test database's bootstrap lock.
+	locked, err := owner.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locked.Release()
+	if _, err := locked.Exec(ctx, `SELECT pg_advisory_lock(hashtext('taisce:establish-planes')::bigint)`); err != nil {
+		t.Fatal(err)
+	}
+	defer locked.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext('taisce:establish-planes')::bigint)`)
 	name := "taisce_instance_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	quoted := pgx.Identifier{name}.Sanitize()
 	if _, err := owner.Exec(ctx, "CREATE DATABASE "+quoted); err != nil {
-		owner.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, err := owner.Exec(ctx, "DROP DATABASE "+quoted)
-		owner.Close()
 		if err != nil {
 			t.Errorf("remove isolated database: %v", err)
 		}
