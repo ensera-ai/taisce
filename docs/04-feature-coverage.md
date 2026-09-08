@@ -30,14 +30,13 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Single-tenant provisioning [#99](https://github.com/althunibat/taisce/issues/99) | Closed; `17ac077`. One default memory namespace, compatible instance-wide override, explicit provisioning names, fresh/restart/upgrade tests, reconciled service-role flags. | Effective privilege drift from existing grants/memberships/ownership is tracked in [#109](https://github.com/althunibat/taisce/issues/109). |
 | Effective runtime privileges [#109](https://github.com/althunibat/taisce/issues/109) | Closed; `bab1c0b`. Bootstrap and each new pool connection check direct/inherited privileges, SET ROLE, ownership and protected catalogs. Registry runtime is read-only. | No remaining scope in this issue. D70 documents remediation and connection-admission limits. |
 | Atomic project storage [#110](https://github.com/althunibat/taisce/issues/110) | Closed; `1309e72`. One name contract, transactional DDL/row creation, bounded collision-resistant physical names, catalog validation and legacy reuse. | None in this issue; vector strategy/scale measurements remain #101. |
-
 | Exact anchor admission [#102](https://github.com/althunibat/taisce/issues/102) | Core implemented; `3b3a3bb`. Separate indexed name/alias arms, question/term/match limits, explicit refusal before traversal, real-database plan and attribution/erasure tests. | Alias-specific ownership and concurrent registration, normalized-relation comparison and controlled-host workload measurements. Issue remains open. |
-
 | Shared request admission [#93](https://github.com/althunibat/taisce/issues/93) | Request admission `cd6c76c`; durable backlog reservations `1b3b1fe`. Size and concurrency bounds, protected accounting across processes, atomic release on formation/erasure/retention, and retryable HTTP refusal. | Controlled-host workloads, deployment-wide request admission policy and live operational metrics remain open. |
-| Operator formation recovery [#113](https://github.com/althunibat/taisce/issues/113) | Bounded metadata pagination and project-scoped retry with atomic audit and watermark correction. D75 and the ingestion runbook document authority, privacy and retry behavior. | Readiness/health metrics remain #94. |
+| Operator formation recovery [#113](https://github.com/althunibat/taisce/issues/113) | Closed; `fa844ba`. Bounded metadata pagination and project-scoped retry with atomic audit and watermark correction. | None in this issue. |
+| Operational health [#94](https://github.com/althunibat/taisce/issues/94) | Bounded dependency readiness, actual worker progress, content-free operator aggregates and Compose probes. D76 records scope and limits. | Helm integration depends on #76; issue remains open. |
 
-The complete real-PostgreSQL suite and uncached repeat through operator recovery pass at
-**90.6%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
+The complete real-PostgreSQL suite and uncached repeat through operational health pass at
+**90.8%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
 Inference profiles are tracked separately. The full local inference suite passed in 2140.657 seconds
@@ -46,7 +45,9 @@ against `17ac077` passed in 462.482 seconds. Known semantic separation limitatio
 in the tests. OpenRouter stopped on upstream HTTP 429; a later bounded retry was also rate-limited.
 Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist configuration.
 
-Next: operator observability (#94) and the remaining product journeys.
+Operator observability (#94) now includes bounded readiness, worker progress, local probes and
+content-free operator aggregates. Compose consumes the probe contract; Helm integration awaits #76.
+Next: remaining product journeys and rebuild.
 Anchoring’s ownership and workload criteria stay in #102. The generation/rebuild lifecycle is
 required before closing #84 or #100. Product and adapter journeys retain their acceptance criteria
 and remain in the execution order below.

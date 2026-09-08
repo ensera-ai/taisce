@@ -10,7 +10,7 @@ Requests must contain one complete UTF-8 JSON object followed only by whitespace
 
 Recall questions are limited to 8192 UTF-8 bytes, 512 distinct candidate names and 256 matching entity/name pairs. Exceeding a limit returns HTTP 400 and `invalid_question`, with no partial bundle. The match count includes the selected speaker. Fact-budget cuts remain successful responses with `truncated: true`.
 
-Observations admit at most 64 messages, 65536 UTF-8 content bytes per message and 262144 content bytes per turn. Exceeding these limits returns HTTP 400 and `invalid_turn` before storage. Busy authentication or project/credential capacity returns HTTP 429 and `rate_limited`, with `Retry-After: 1`. Retry with backoff and the same observation idempotency key; a refusal has no stored receipt. Limits are per API process; health checks remain outside admission.
+Observations admit at most 64 messages, 65536 UTF-8 content bytes per message and 262144 content bytes per turn. Exceeding these limits returns HTTP 400 and `invalid_turn` before storage. Busy authentication or project/credential capacity returns HTTP 429 and `rate_limited`, with `Retry-After: 1`. Retry with backoff and the same observation idempotency key; a refusal has no stored receipt. Request concurrency limits are per API process; durable unfinished-turn limits are shared by the instance and also return `rate_limited`. Existing keyed receipts can be replayed at backlog capacity. Health checks remain outside request admission.
 
 ## Operations
 
@@ -152,3 +152,5 @@ Any operation may answer with any of these.
 ## Liveness
 
 `GET /health` answers `200` with `{"status": "ok"}`. It takes no credential and reports nothing about the instance.
+
+`GET /ready` takes no credential and returns `200` with `{"status": "ready"}` or `503` with `{"status": "unavailable"}`. Dependency checks have a one-second total budget; only one runs at a time and results are cached for one second. No error, count or configuration is returned. Serving readiness checks memory and registry access. `TAISCE_REQUIRE_FORMATION=true` additionally requires a worker heartbeat within 330 seconds; the default permits intentionally API-only operation. This proves responsiveness, not inference quality or completion of every project. Worker loopback probes check their own processing progress and memory database access.

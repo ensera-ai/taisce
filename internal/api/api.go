@@ -215,7 +215,7 @@ func Operations() []Operation {
 // access log, a proxy log and a browser history if they travelled in a URL. This product's argument
 // is that it can say where personal data went, so it does not scatter it into places it cannot
 // account for.
-func (s *Server) Handler() http.Handler {
+func (s *Server) Handler(readiness ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 
 	// Unauthenticated, and it says nothing. A liveness probe that reports version, database state or
@@ -223,9 +223,14 @@ func (s *Server) Handler() http.Handler {
 	//
 	// Not in the operation table: it performs nothing, is reachable without a credential, and leaves
 	// no ledger row. Putting it there would make every property the table asserts have an exception.
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	if len(readiness) > 1 {
+		panic("one readiness handler is permitted")
+	}
+	var ready http.Handler
+	if len(readiness) == 1 {
+		ready = readiness[0]
+	}
+	registerHealth(mux, ready)
 
 	for _, o := range operations {
 		mux.Handle(o.Method+" /"+Version+o.Path, s.authenticated(o.handler(s)))

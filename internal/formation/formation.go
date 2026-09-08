@@ -171,6 +171,7 @@ type Worker struct {
 	observations *pg.ObservationStore
 	former       *Former
 	policy       Policy
+	health       func(context.Context, pg.HealthExecutor, int64, int64)
 }
 
 // NewWorker builds a worker over a pool, a store and a former.
@@ -258,6 +259,7 @@ func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]R
 				return reports, ctx.Err()
 			}
 			parked, perr := w.recordFailure(ctx, schema, observation, err)
+			w.heartbeat(ctx, conn, 0, 1)
 			if perr != nil {
 				return reports, perr
 			}
@@ -274,6 +276,7 @@ func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]R
 		if err := w.observations.MarkFormed(ctx, schema, observation.ID); err != nil {
 			return reports, err
 		}
+		w.heartbeat(ctx, conn, 1, 0)
 		reports = append(reports, report)
 	}
 }

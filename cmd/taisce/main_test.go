@@ -589,11 +589,12 @@ func TestTheAPIRoleServesWithoutForming(t *testing.T) {
 // No listener at all, deliberately: a worker holding a port is one an orchestrator can route traffic
 // to by accident, and a health check that passed would say the wrong thing about a process that
 // serves no reads.
-func TestTheWorkerRoleFormsAndBindsNothing(t *testing.T) {
+func TestTheWorkerRoleFormsWithoutServingMemory(t *testing.T) {
 	port := freePort(t)
 	env := runtimeConfiguration(t)
 	env[envAddr] = fmt.Sprintf("127.0.0.1:%d", port)
 	env[envRole] = "worker"
+	env[envHealthAddr] = fmt.Sprintf("127.0.0.1:%d", freePort(t))
 	withEnv(t, env)
 	t.Setenv("TAISCE_INFERENCE_ENDPOINT", "http://127.0.0.1:1/v1")
 	t.Setenv("TAISCE_INFERENCE_EXTRACTOR_MODEL", "unreachable-on-purpose")
@@ -603,10 +604,10 @@ func TestTheWorkerRoleFormsAndBindsNothing(t *testing.T) {
 	stopped := make(chan error, 1)
 	go func() { stopped <- run(ctx, quiet()) }()
 
-	// It must NOT answer. Given a moment to bind if it were going to.
+	// The API listener stays absent; health exists only on the separate loopback listener.
 	if reachable(fmt.Sprintf("http://127.0.0.1:%d/health", port), 2*time.Second) {
 		cancel()
-		t.Fatal("the worker role bound a port, which an orchestrator could route traffic to")
+		t.Fatal("the worker role bound the memory API port")
 	}
 	cancel()
 	select {

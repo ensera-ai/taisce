@@ -49,7 +49,9 @@ const (
 	// holds a connection that can run DDL.
 	envAdminDSN = "TAISCE_ADMIN_DSN"
 	// Which halves of the service this process runs: "all" (default), "api" or "worker".
-	envRole = "TAISCE_ROLE"
+	envRole             = "TAISCE_ROLE"
+	envRequireFormation = "TAISCE_REQUIRE_FORMATION"
+	envHealthAddr       = "TAISCE_HEALTH_ADDR"
 )
 
 // Roles.
@@ -103,6 +105,8 @@ func main() {
 // The context arrives as an argument rather than being built here, so a test can end the server the
 // same way a signal does. Signal handling stays in main, where the process boundary is.
 func run(ctx context.Context, log *slog.Logger) error {
+	ctx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
 	memoryDSN := strings.TrimSpace(os.Getenv(envMemoryDSN))
 	if memoryDSN == "" {
 		return fmt.Errorf("%s is not set", envMemoryDSN)
@@ -147,6 +151,17 @@ func run(ctx context.Context, log *slog.Logger) error {
 	if role != roleAll && role != roleAPI && role != roleWorker {
 		return fmt.Errorf("%s is %q; it is one of %q, %q or %q", envRole, role, roleAll, roleAPI, roleWorker)
 	}
+	requireFormation, err := formationRequired()
+	if err != nil {
+		return err
+	}
+	var workerAddr string
+	if role == roleWorker {
+		workerAddr, err = workerHealthAddress()
+		if err != nil {
+			return err
+		}
+	}
 
 	admission, _ := api.NewAdmission(4, 4)
 	if role != roleWorker {
@@ -183,6 +198,9 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// be reading.
 
 	driverStopped := make(chan struct{})
+	// Cancel a started driver before deferred pool closure, including listener-start failures.
+	defer cancelRun()
+	processHealth := &processFormationHealth{}
 	switch {
 	case role == roleAPI:
 		// Reads only. A deployment runs this when formation is being scaled separately, or paused
@@ -191,18 +209,9 @@ func run(ctx context.Context, log *slog.Logger) error {
 		log.Info("formation is not running in this process", "role", role)
 		close(driverStopped)
 	default:
-		if err := startDriver(ctx, log, memory, schema, driverStopped); err != nil {
+		if err := startDriver(ctx, log, memory, schema, driverStopped, processHealth.responsive); err != nil {
 			return err
 		}
-	}
-
-	if role == roleWorker {
-		// No listener at all. A worker that also bound a port would be one an orchestrator could
-		// route traffic to by accident, and a health check that passed would say the wrong thing.
-		log.Info("forming only; no HTTP listener", "role", role)
-		<-ctx.Done()
-		<-driverStopped
-		return nil
 	}
 
 	addr := os.Getenv(envAddr)
@@ -211,9 +220,24 @@ func run(ctx context.Context, log *slog.Logger) error {
 		// runs, and the boundary in front of it is the deployment's job rather than a default here.
 		addr = ":8080"
 	}
+	ready := api.NewReadiness(func(checkCtx context.Context) error {
+		if role == roleWorker {
+			if !processHealth.current() {
+				return fmt.Errorf("local formation is not responsive")
+			}
+			return pg.CheckServingHealth(checkCtx, memory, nil, schema, false)
+		}
+		return pg.CheckServingHealth(checkCtx, memory, registry, schema, requireFormation)
+	})
+	handler := server.Handler(ready)
+	if role == roleWorker {
+		// Only probes on loopback; no memory routes and no externally reachable worker service.
+		addr = workerAddr
+		handler = api.HealthHandler(ready)
+	}
 	httpServer := &http.Server{
 		Addr:    addr,
-		Handler: server.Handler(),
+		Handler: handler,
 		// A request that never finishes holds a connection forever. These are deliberately generous
 		// rather than tuned: no latency budget has been agreed, so a tight number here would be a
 		// guess enforced on every caller.
@@ -292,7 +316,7 @@ func bundleBudget() recall.Budget {
 //
 // What it must not do is look fine. So it says so, loudly, at the level an operator reads.
 func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, schema pg.Schema,
-	stopped chan struct{}) error {
+	stopped chan struct{}, responsive ...func()) error {
 
 	inferenceConfig, err := inference.ConfigFromEnv()
 	if err != nil {
@@ -315,7 +339,7 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 	driver := formation.NewDriver(
 		formation.NewWorkerWithPolicy(memory, observations, former, policy),
 		observations, pg.NewRetentionStore(memory, schema),
-		pg.NewAuditStore(memory, schema), schema, policy, log)
+		pg.NewAuditStore(memory, schema), schema, policy, log, responsive...)
 
 	go func() {
 		defer close(stopped)

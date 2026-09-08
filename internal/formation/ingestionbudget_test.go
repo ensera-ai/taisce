@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/formation"
 	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 )
@@ -41,6 +42,7 @@ func TestProviderOutageCannotGrowTheBacklogByParkingAndRecoveryRestoresAdmission
 	policy.MaxAttempts = 1
 	worker := workerWith(t, pool, schema, model, policy)
 	store := pg.NewObservationStore(pool)
+	driver := formation.NewDriver(worker, store, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, policy, quietLogger())
 	turn := turnOf(domain.Message{Role: domain.RoleUser, Content: "a short conversational message"})
 	var observations []domain.Observation
 	for i := 0; i < 2; i++ {
@@ -50,12 +52,16 @@ func TestProviderOutageCannotGrowTheBacklogByParkingAndRecoveryRestoresAdmission
 		}
 		observations = append(observations, o)
 	}
-	if _, err := worker.Drain(ctx, schema, "p1"); err != nil {
+	if _, err := driver.Once(ctx); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := store.Freshness(ctx, schema, "p1")
 	if err != nil || fresh.Parked != 2 {
 		t.Fatalf("outage did not reach parking: %+v %v", fresh, err)
+	}
+	health, err := pg.ReadOperationalHealth(ctx, pool, schema)
+	if err != nil || health.FailedAttempts != 2 || health.Parked != 2 || health.Pending != 2 || !health.WorkerResponsive {
+		t.Fatalf("outage diagnostics: %+v %v", health, err)
 	}
 	if _, err := store.Append(ctx, schema, turn); !errors.Is(err, pg.ErrIngestionCapacity) {
 		t.Fatalf("parking bypassed capacity: %v", err)
@@ -66,7 +72,7 @@ func TestProviderOutageCannotGrowTheBacklogByParkingAndRecoveryRestoresAdmission
 			t.Fatal(err)
 		}
 	}
-	if _, err := worker.Drain(ctx, schema, "p1"); err != nil {
+	if _, err := driver.Once(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var pending int
@@ -75,6 +81,10 @@ func TestProviderOutageCannotGrowTheBacklogByParkingAndRecoveryRestoresAdmission
 	}
 	if calls.Load() != 4 {
 		t.Fatalf("expected two failed and two recovered HTTP calls, got %d", calls.Load())
+	}
+	health, err = pg.ReadOperationalHealth(ctx, pool, schema)
+	if err != nil || health.FailedAttempts != 2 || health.FormedCount != 2 || health.Pending != 0 || health.LastProgressAt == nil {
+		t.Fatalf("recovery diagnostics: %+v %v", health, err)
 	}
 	if _, err := store.Append(ctx, schema, turn); err != nil {
 		t.Fatalf("recovered provider did not restore admission: %v", err)

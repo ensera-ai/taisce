@@ -2506,3 +2506,57 @@ argument refusal, metadata-only output and safe retry when output fails after co
 **Reversal cost.** Low for the CLI and index, one migration for the operation constraint. Existing
 audit rows must retain their operation vocabulary; removing command support must not invalidate or
 rewrite the ledger. No memory representation or inference prompt changes. Tracked in #113.
+
+## D76 — Readiness checks serving dependencies; formation progress is a separate signal
+
+**Decision.** Keep liveness independent of dependencies. Add content-free, unauthenticated readiness
+with one in-flight dependency check, a one-second total context budget and one-second result cache.
+Concurrent uncached probes refuse immediately. Probe cancellation cannot abort a shared check.
+Memory and registry access use their actual runtime identities. An explicit
+`TAISCE_REQUIRE_FORMATION=true` adds a recent fleet heartbeat; false permits API-only deployments.
+
+Formation reports at the start of a driver pass and after each completed attempt. A driver records
+one aggregate instance row, with no process/project/subject cardinality, using the already-held
+connection during a drain. A local atomic timestamp updates only when that report succeeds. The
+330-second responsiveness window accommodates a normal five-minute attempt plus overhead. There
+is no independent timer that can conceal a blocked processing path. A live heartbeat does not prove
+provider quality, completion of all projects or the health of every worker in the fleet.
+
+**Deployment and access.** Workers expose health routes only on a validated loopback address,
+defaulting to 127.0.0.1:8081. Their readiness requires their own progress and memory access; another
+worker cannot satisfy it. They expose no memory routes. The binary supplies local readiness/liveness
+probe commands with a two-second deadline, no proxy and no redirects, so the distroless image needs
+no shell or curl. Compose consumes readiness. Helm packaging and failover evidence remain #76;
+this change does not claim a chart exists or a failover target has been met.
+
+Detailed operational aggregates are exposed by an operator command requiring explicit admin DSN,
+not by unauthenticated or project-scoped HTTP. One snapshot reports backlog/parked count, oldest
+pending timestamp, recent processing times, attempt counters and database connection pressure.
+There are no content fields or unbounded labels. A partial unfinished-turn timestamp index supports
+the age query. The command deadline bounds diagnostic work; it is not polled by the public probe.
+
+**Tradeoffs and limits.** The aggregate health row adds one write per pass and completed attempt.
+It is best-effort telemetry: recording failure logs a content-free warning and does not undo formed
+memory. It is not an audit ledger, an inference-quality measure or a precise historical attempt
+count. Counters start at migration 0027, exclude direct workers without a driver and survive erasure
+because they contain no data identifiers. Idle workers continue reporting from their pass loop.
+One responsive worker can satisfy fleet readiness while another project is stalled. Per-worker
+loopback checks and backlog/freshness diagnostics provide the additional signals. Production cost
+and thresholds still need #103 workload evidence.
+
+**Alternatives rejected.** Calling a provider from readiness adds cost and can amplify an outage.
+Failing the entire API for a parked input gives one malformed turn control over other projects'
+availability. Public aggregate metrics disclose instance activity; project labels create both
+cardinality and privacy problems. An independent heartbeat goroutine proves only that the timer
+runs. Unbounded waiting probes consume the same scarce connections they are diagnosing. Worker
+health through another worker's fleet timestamp conceals a locally stalled process.
+
+**Evidence.** Real PostgreSQL tests lock a required relation and show readiness refusal within its
+budget, bounded concurrent probes, unaffected liveness and recovery. Tests distinguish absent/stale
+required formation from optional formation, track provider failure/recovery through the driver,
+check runtime-role wiring and validate metadata-only diagnostics. D76 concerns correctness and the
+probe contract, not a production availability guarantee. See docs/07-operational-health.md.
+
+**Reversal cost.** Low for configuration and probes; one migration removes the aggregate table and
+age index. Removing the public readiness route requires updating deployment probes. No prompt,
+memory representation or credential scope changes. Tracked in #94.

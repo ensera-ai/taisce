@@ -43,9 +43,26 @@ type Driver struct {
 
 // NewDriver builds the driver over a worker that already knows how to drain one scope.
 func NewDriver(worker *Worker, observations *pg.ObservationStore, retention *pg.RetentionStore,
-	audit *pg.AuditStore, schema pg.Schema, policy Policy, log *slog.Logger) *Driver {
+	audit *pg.AuditStore, schema pg.Schema, policy Policy, log *slog.Logger, responsive ...func()) *Driver {
 	if log == nil {
 		log = slog.Default()
+	}
+	if len(responsive) > 1 {
+		panic("one formation responsiveness callback is permitted")
+	}
+	worker.health = func(ctx context.Context, db pg.HealthExecutor, formed, failed int64) {
+		if ctx.Err() != nil {
+			return
+		}
+		bounded, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		if err := pg.RecordFormationHealth(bounded, db, schema, formed, failed); err != nil {
+			log.Warn("formation health could not be recorded")
+			return
+		}
+		if len(responsive) == 1 && responsive[0] != nil {
+			responsive[0]()
+		}
 	}
 	return &Driver{worker: worker, observations: observations, retention: retention,
 		audit: audit, schema: schema, policy: policy, log: log}
@@ -69,6 +86,7 @@ type Pass struct {
 // one project's bad turn holding up every other project's memory, which is the same mistake at a
 // larger scale than the one parking exists to fix.
 func (d *Driver) Once(ctx context.Context) (Pass, error) {
+	d.worker.heartbeat(ctx, d.worker.pool, 0, 0)
 	scopes, err := d.observations.ScopesWithBacklog(ctx, d.schema)
 	if err != nil {
 		return Pass{}, err

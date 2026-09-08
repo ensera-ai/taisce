@@ -152,6 +152,13 @@ services:
       <<: *service-env
       TAISCE_ROLE: api
       TAISCE_ADDR: ":8080"
+      TAISCE_REQUIRE_FORMATION: ${TAISCE_REQUIRE_FORMATION:-false}
+    healthcheck:
+      test: ["CMD", "/taisce", "probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
     ports:
       - "${TAISCE_PORT:-8080}:8080"
 
@@ -163,13 +170,19 @@ services:
   # construction rather than by configuration: formation takes a per-scope advisory lock, so a second
   # worker finds a busy scope and moves to the next one instead of forming the same turn twice.
   #
-  # No port, deliberately. A worker an orchestrator could route traffic to is one whose health check
-  # passes about reads it does not serve.
+  # Only a loopback health listener; no published port or memory routes.
   worker:
     <<: *service
     environment:
       <<: *service-env
       TAISCE_ROLE: worker
+      TAISCE_HEALTH_ADDR: "127.0.0.1:8081"
+    healthcheck:
+      test: ["CMD", "/taisce", "probe", "--worker"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
 
   # ── Why these are two services and not one ───────────────────────────────────────────────────
   #
