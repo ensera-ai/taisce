@@ -22,9 +22,10 @@ computed on your own substrate rather than asserted by somebody you have to trus
 | [`docs/01-decisions.md`](docs/01-decisions.md) | Every decision, closed, with what was rejected |
 | [`docs/02-contract.md`](docs/02-contract.md) | Every operation, field and refusal on the wire |
 | [`docs/03-market.md`](docs/03-market.md) | What is shipped elsewhere, dated, and what it obliges here |
+| [`docs/04-feature-coverage.md`](docs/04-feature-coverage.md) | Verified feature coverage, gaps and execution order |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How work is tracked |
 | [`CLAUDE.md`](CLAUDE.md) | The working rules, in full |
-| [issues](https://github.com/ensera-ai/taisce/issues) | The roadmap — the source of truth for scope |
+| [development issues](https://github.com/althunibat/taisce/issues) | The private roadmap — the source of truth for scope |
 
 ## Running it
 

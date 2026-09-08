@@ -511,6 +511,20 @@ whose data is in whichever state was chosen.
 Every commit on the working history has a version, `x.y.z`, where z counts commits since the last
 release. The published repository contains only `x.y.0`.
 
+**Repository roles.** Daily development, issues and pull requests belong in private
+`althunibat/taisce`. The eventual Apache-2.0 public repository is `ensera-ai/taisce`. Each public
+`x.y.0` is one reviewed source snapshot commit, descending only from the preceding public release.
+The private development ancestry is never merged, mirrored or pushed into that public history.
+The remote name `origin` does not establish which role a repository has.
+
+**Release traceability.** The private release record maps the source SHA and exported tree digest to
+the public commit, tag and artifact digests. Public builds carry the explicit public version and
+public source provenance; a snapshot commit count cannot stand in for the private patch count.
+Before publication, review the exported tree and all reachable public history for credentials, local
+configuration, internal drafts and private tracking links. Existing organization-repository history
+and issues also need review before the repository becomes public. Development issue #37 tracks the
+automation and evidence; recording this contract does not mean the publisher is implemented.
+
 **The patch number is computed, never stored.** A number kept in a file is a number somebody forgets
 to bump, and the failure is silent: two commits claiming the same version, discovered when a bug
 report names one of them. Counting commits since a tag cannot disagree with the history it describes.

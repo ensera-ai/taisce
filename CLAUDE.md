@@ -22,6 +22,13 @@ These are not preferences. Each one exists because ignoring it produced a defect
 
 ## 1. Everything is tracked on GitHub
 
+**Development lives in private `althunibat/taisce`.** Open development issues and pull requests there.
+`ensera-ai/taisce` is the eventual Apache-2.0 public release repository: one snapshot commit per
+`x.y.0` release. Private development retains the full `x.y.z` history. Resolve the repository by its
+owner and purpose, never by assuming the remote named `origin` is the development destination.
+Public snapshots have separate ancestry; publishing the private history is not part of a release.
+See D49 and the release issue in the development tracker.
+
 **Every piece of work has an issue, opened before the work starts, and closed when it is done.**
 No exceptions. Work that was already finished before anyone thought to file one gets an issue
 retroactively — an issue list that records only the work somebody remembered to file is not an

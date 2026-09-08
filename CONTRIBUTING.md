@@ -1,5 +1,11 @@
 # How work is tracked
 
+Daily development, issues and pull requests live in private `althunibat/taisce`, with versions
+`x.y.z`. The eventual Apache-2.0 public repository, `ensera-ai/taisce`, receives one reviewed source
+snapshot commit per public release `x.y.0`. Its history contains public releases only; development
+commits stay in the private history. D49 defines this contract, and development issue #37 tracks
+the release automation and public contribution workflow.
+
 **Every piece of work has an issue, and the issue is closed with evidence when the work is done.**
 No exceptions, including work that was already finished before anyone thought to open one — that
 gets an issue retroactively, because an issue list that only records the work someone remembered to
