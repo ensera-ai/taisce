@@ -203,13 +203,6 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	if len(scopes) == 0 {
 		return domain.Bundle{}, nil
 	}
-	if temporal, ok := r.store.(interface {
-		ValidateAsOf(context.Context, []string, domain.AsOf) error
-	}); ok {
-		if err := temporal.ValidateAsOf(ctx, scopes, at); err != nil {
-			return domain.Bundle{}, err
-		}
-	}
 	terms := Terms(question)
 	if err := domain.ValidateRecallTerms(terms); err != nil {
 		return domain.Bundle{}, err

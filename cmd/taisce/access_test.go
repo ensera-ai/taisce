@@ -35,7 +35,7 @@ func TestOperatorCanIssueAnExplicitReadOnlyCredential(t *testing.T) {
 	}
 	defer pool.Close()
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM control.credential WHERE project=$1 AND name='reader' AND access='read_only' AND token_prefix LIKE 'tsr_%' AND revoked_at IS NULL`, project).Scan(&count); err != nil || count != 1 {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM control.credential WHERE project=$1 AND name='reader' AND access='read_only' AND left(token_prefix,4)='tsk_' AND revoked_at IS NULL`, project).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("read-only issuance: %d %v", count, err)
 	}
 }

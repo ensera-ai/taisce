@@ -142,9 +142,6 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityIDs []string, limit int,
 	sources []string, at domain.AsOf, hops int, subject string) ([]domain.CitedFact, error) {
 
-	if err := s.ValidateAsOf(ctx, scopes, at); err != nil {
-		return nil, err
-	}
 	if len(sources) == 0 {
 		// An empty set returns nothing rather than everything. A caller that computed its source
 		// list and got nothing meant nothing; the alternative — treating empty as unrestricted — is
@@ -377,20 +374,4 @@ func historicalFactsSQL(knownParam int, predicate string) string {
 	query = strings.ReplaceAll(query, "FROM {schema}.fact f", join)
 	query = strings.ReplaceAll(query, "lower(f.valid)", "lower(state.valid)")
 	return strings.ReplaceAll(query, "upper(f.valid)", "upper(state.valid)")
-}
-
-// ValidateAsOf applies before anchor discovery as well as direct store reads, so an unanswerable
-// historical query cannot masquerade as an empty result. No query is added to the current path.
-func (s *RecallStore) ValidateAsOf(ctx context.Context, scopes []string, at domain.AsOf) error {
-	if !at.HasKnown() || len(scopes) == 0 {
-		return nil
-	}
-	var available bool
-	if err := s.pool.QueryRow(ctx, s.schema.SQL(`SELECT NOT EXISTS(SELECT 1 FROM {schema}.fact_history_boundary WHERE scope=ANY($1) AND $2::timestamptz<available_from)`), scopes, at.Known.UTC()).Scan(&available); err != nil {
-		return err
-	}
-	if !available {
-		return domain.ErrHistoryUnavailable
-	}
-	return nil
 }

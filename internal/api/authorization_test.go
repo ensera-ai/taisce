@@ -79,11 +79,11 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 	if strings.Contains(string(encoded), "private unauthorized mutation") || strings.Contains(string(encoded), token) {
 		t.Fatal("denied payload entered audit")
 	}
-	// Registry drift does not upgrade an already issued read-only token.
-	if _, err := h.pool.Exec(ctx, `UPDATE control.credential SET access='read_write' WHERE credential_id=$1`, reader.CredentialID); err != nil {
+	// Revocation removes read access as well as mutation authority.
+	if err := credentials.Revoke(ctx, reader.CredentialID); err != nil {
 		t.Fatal(err)
 	}
 	if status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, token); status != 401 {
-		t.Fatalf("read-only key elevated by metadata drift: %d", status)
+		t.Fatalf("revoked read-only key resolved: %d", status)
 	}
 }

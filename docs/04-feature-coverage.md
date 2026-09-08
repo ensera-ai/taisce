@@ -9,6 +9,18 @@ New development work is tracked in private `althunibat/taisce`. Fully qualified 
 organization issues preserve their original meaning; their numbers are not interchangeable with
 the development tracker.
 
+## Development assumption
+
+Taisce is **greenfield and nowhere deployed**, as confirmed by the project owner. Optimize the
+unreleased schema and contracts for correctness, performance, functional quality and security.
+Do not schedule hypothetical client migrations, backward-compatibility shims or mixed-version
+rollouts as prerequisites. Fresh provisioning and local tests remain required. D80 records this
+policy; D78/D79 remove the unnecessary history cutoff and older-binary token format.
+
+Recovery/rebuild remains product work for derived state and model changes. Before the first supported
+release, review the schema baseline and define actual upgrade/support guarantees. Development stays
+in private `althunibat/taisce`; public Apache-2.0 `x.y.0` snapshots remain a separate release action.
+
 ## Delivery progress — 2026-09-08
 
 Private implementation branch: `codex/backlog-hardening`. The assessment and capability table below
@@ -23,7 +35,7 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Observation retries [#85](https://github.com/althunibat/taisce/issues/85) | Server implemented; `2ad0a16`. Project-scoped UUID keys, stable receipt, conflict refusal, atomic persistence and erased-key tombstones. Twenty-four concurrent HTTP attempts produce one observation and one extraction call. | Stable keys in actual adapters and shared conformance. Issue remains open. |
 | Atomic message groups [#86](https://github.com/althunibat/taisce/issues/86) | Server implemented; `33b1d44`. Explicit contiguous groups, safe ordinary-message defaults, tool-group requirement and export identity. | Compaction and adapter conformance. Issue remains open. |
 | Public snapshot ancestry [#104](https://github.com/althunibat/taisce/issues/104) | Closed; `a18394a`. Separate preparation/publish phases, exact destinations, atomic compare-and-swap publication, independent private version markers. Disposable Git tests include a concurrent push race. | Signing, artifacts and release readiness remain [#37](https://github.com/althunibat/taisce/issues/37). No public release or visibility change was performed. |
-| Speaker binding [#84](https://github.com/althunibat/taisce/issues/84) | Core implemented; `651cf61`. Stored subject/user-role binding, separate named/speaker identities, subject-filtered recursive recall, multilingual formation, corrections, export and erasure. | Existing-data generation/rebuild workflow and complete nonlocal profile verification. Issue remains open. |
+| Speaker binding [#84](https://github.com/althunibat/taisce/issues/84) | Core implemented; `651cf61`. Stored subject/user-role binding, separate named/speaker identities, subject-filtered recursive recall, multilingual formation, corrections, export and erasure. | Derived-state generation/rebuild workflow and complete nonlocal profile verification. Issue remains open. |
 | Report input identity [#108](https://github.com/althunibat/taisce/issues/108) | Closed; `651cf61`. Opaque entity references distinguish equal speaker labels in model context and child substitution. | Generated prose quality remains subject to inference corpus evaluation. |
 | Quickstart contract [#107](https://github.com/althunibat/taisce/issues/107) | Closed; `651cf61`. Examples use credential-bound project and explicit subject attribution. | None in this issue. |
 | Database integrity [#100](https://github.com/althunibat/taisce/issues/100) | Core implemented; `d66537a`. Deferred project-consistent references, runtime catalog restrictions, exact report/child provenance, concurrent report retry fix, shared retention and source-evidence removal. | General rebuild/formation/erasure concurrency. No RLS confidentiality claim; D68 records the assessment. |
@@ -33,13 +45,13 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Exact anchor admission [#102](https://github.com/althunibat/taisce/issues/102) | Core implemented; `3b3a3bb`. Separate indexed name/alias arms, question/term/match limits, explicit refusal before traversal, real-database plan and attribution/erasure tests. | Alias-specific ownership and concurrent registration, normalized-relation comparison and controlled-host workload measurements. Issue remains open. |
 | Shared request admission [#93](https://github.com/althunibat/taisce/issues/93) | Request admission `cd6c76c`; durable backlog reservations `1b3b1fe`. Size and concurrency bounds, protected accounting across processes, atomic release on formation/erasure/retention, and retryable HTTP refusal. | Controlled-host workloads, deployment-wide request admission policy and live operational metrics remain open. |
 | Operator formation recovery [#113](https://github.com/althunibat/taisce/issues/113) | Closed; `fa844ba`. Bounded metadata pagination and project-scoped retry with atomic audit and watermark correction. | None in this issue. |
-| Read-only credentials [#89](https://github.com/althunibat/taisce/issues/89) | Explicit restricted issuance, shared permission gate, content-free denied-operation audit and safe refusal by older binaries (D79). | Curated record lifecycle, batches and fine-grained human authorization remain open. |
-| Temporal knowledge [#116](https://github.com/althunibat/taisce/issues/116) | Preserved validity versions, stable fact IDs, recorded supersession sources, causal erasure/retention and upgrade boundaries (D78). | Mixed-workload measurement and generation/rebuild integration remain open. |
+| Read-only credentials [#89](https://github.com/althunibat/taisce/issues/89) | Explicit restricted issuance, shared permission gate, content-free denied-operation audit with registry-authoritative access using one opaque token format (D79). | Curated record lifecycle, batches and fine-grained human authorization remain open. |
+| Temporal knowledge [#116](https://github.com/althunibat/taisce/issues/116) | Preserved validity versions, stable fact IDs, recorded supersession sources, causal erasure/retention and history from the first assertion (D78). | Mixed-workload measurement and generation/rebuild integration remain open. |
 | Saved citations [#90](https://github.com/althunibat/taisce/issues/90) | Independent project-scoped resolution, exact source-byte verification and bounded evidence pagination. D77 records scope and limits. | Supersession links and temporal preservation are added under D78; retraction and rebuild mappings remain open. |
 | Operational health [#94](https://github.com/althunibat/taisce/issues/94) | Bounded dependency readiness, actual worker progress, content-free operator aggregates and Compose probes. D76 records scope and limits. | Helm integration depends on #76; issue remains open. |
 
-The complete real-PostgreSQL suite and uncached repeat through temporal knowledge and read-only credentials pass at
-**90.9%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
+The complete uncached real-PostgreSQL suite through the greenfield cleanup passes at **90.9%**,
+matching the enforced floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
 Inference profiles are tracked separately. The full local inference suite passed in 2140.657 seconds
@@ -51,7 +63,7 @@ Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist 
 Operator observability (#94) now includes bounded readiness, worker progress, local probes and
 content-free operator aggregates. Compose consumes the probe contract; Helm integration awaits #76.
 Temporal preservation (#116) now archives validity under its original knowledge interval (D78),
-with stable fact IDs, causal erasure/retention and explicit upgrade boundaries. Production workload
+with stable fact IDs, causal erasure/retention and history from the first assertion. Controlled workload
 measurement and rebuild integration remain open. Next: curated memory (#89) and rebuild (#58).
 Anchoring’s ownership and workload criteria stay in #102. The generation/rebuild lifecycle is
 required before closing #84 or #100. Product and adapter journeys retain their acceptance criteria

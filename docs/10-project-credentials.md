@@ -3,16 +3,15 @@
 
 # Project credential access
 
-Credentials name one project and one memory access mode. Existing credentials and ordinary issuance
-remain read/write. To issue a reader, use the operator connection and put flags after the name:
+Credentials name one project and one memory access mode. Ordinary issuance defaults to read/write. To issue a reader, use the operator connection and put flags after the name:
 
 ```sh
 taisce credential issue reporting-reader --project research --read-only
 ```
 
-The command prints the token once. Store it as a secret. Read-only keys begin with `tsr_`; writable
-keys begin with `tsk_`. Clients must treat the whole value as opaque. Recognize both prefixes when
-configuring secret scanning and redaction.
+The command prints the token once. Store it as a secret. Both access modes use opaque `tsk_` tokens.
+The protected registry determines authority; token text does not encode permissions. Configure
+secret scanning and redaction for the `tsk_` prefix.
 
 | Operation | Read-only | Read/write |
 |---|---|---|
@@ -27,11 +26,11 @@ records the credential, project, operation, refused outcome and zero affected re
 still create operational and audit records. Read-only access does not restrict which subjects the
 credential can read within its project; it is not an end-user identity or an anonymization policy.
 
-Revoke and issue a new credential to change access. Editing the stored mode cannot elevate an issued
-key: its token marker must match the recorded mode. Revocation and project suspension retain their
-existing behavior for both modes.
+The operator commands support issuance and revocation; revoke and issue a new credential when a
+different access mode is needed. Revocation and project suspension apply to both modes. Only the
+operator connection can write registry metadata; the serving registry connection is read-only, and
+the data-plane connection cannot access it.
 
-Control migration 0004 must be applied for the new server. During a mixed-version rollout, older
-servers refuse read-only keys with 401 because they do not recognize the prefix; they cannot grant
-those keys write access. Existing writable keys continue to work. No data-plane connection gains
-registry write privileges. [D79](01-decisions.md) records the design and remaining authorization scope.
+Taisce is greenfield; there is no mixed-version server compatibility contract. Fresh bootstrap
+installs the access column and its constraints. [D79](01-decisions.md) records the design and
+remaining authorization scope.

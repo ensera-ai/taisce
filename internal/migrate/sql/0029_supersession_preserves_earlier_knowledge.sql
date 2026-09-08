@@ -1,15 +1,6 @@
 -- Copyright 2026 The Taisce Authors
 -- SPDX-License-Identifier: Apache-2.0
 
--- Existing overwritten versions cannot be recovered. A project with pre-migration facts has an
--- explicit historical boundary; an empty/new project has no lost-history interval.
-CREATE TABLE {schema}.fact_history_boundary (
-    scope text PRIMARY KEY,
-    available_from timestamptz NOT NULL
-);
-INSERT INTO {schema}.fact_history_boundary(scope,available_from)
-SELECT DISTINCT scope, statement_timestamp() FROM {schema}.fact;
-
 -- A retained claim keeps its identity. These are causal references for its current closed validity.
 -- Erasing the cause invalidates the derived record; reopening it would guess at remaining history.
 ALTER TABLE {schema}.fact
@@ -38,7 +29,6 @@ CREATE TABLE {schema}.fact_history (
 CREATE INDEX fact_history_source_idx ON {schema}.fact_history(scope,source_observation_id);
 INSERT INTO {schema}.projection_kind(kind,projection_table,id_column,survives_sharing,description)
 VALUES ('fact_history','fact_history','history_id',false,'Earlier validity and knowledge intervals with the source of their transition.');
-REVOKE ALL ON {schema}.fact_history_boundary FROM PUBLIC;
 
 ALTER TABLE {schema}.fact_history ADD CONSTRAINT fact_history_scope_id_uniq UNIQUE(scope,history_id);
 ALTER TABLE {schema}.projection_dependency

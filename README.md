@@ -142,14 +142,14 @@ erasure and export call nothing at all — so a slow or absent provider costs yo
 answer.
 
 Each deployment uses one memory namespace (`memory` by default) and the fixed `control` credential
-namespace. `TAISCE_SCHEMA` is an optional instance-wide override for an existing installation; keep
-its value during upgrades. Changing it selects different storage and does not migrate data. Project
+namespace. `TAISCE_SCHEMA` is an optional instance-wide namespace override. Changing it selects
+different storage and does not move data. Project
 creation adds a project row and partition inside the existing memory namespace. Database grants
 protect credential secrets; authenticated project filters control memory reads.
 
 Project credentials can be issued with `--read-only` for recall, citation inspection, freshness and
-export without memory mutation. Existing keys remain read/write. See [credential access](docs/10-project-credentials.md)
-for issuance and mixed-version behavior.
+export without memory mutation. Ordinary issuance defaults to read/write. See
+[credential access](docs/10-project-credentials.md) for issuance and permissions.
 
 Serving requires non-owner database logins: the memory role serves project data, and the registry
 role reads credentials. Administrative DSNs belong to bootstrap/operator commands. Startup and new

@@ -2626,14 +2626,10 @@ per-fact historical lookup. Saved citation IDs remain unchanged; current citatio
 the successor and causal observation, with project-consistent foreign keys. Historical recall and
 subject export expose preserved versions; a general version-list/correction API remains #89.
 
-**Migration.** Migration 0029 creates no fictional historical rows. Each project with existing
-facts receives an immutable-to-runtime `available_from` boundary at migration time. Its earlier
-knowledge queries return `422 history_unavailable`, including questions finding no anchors. New or
-empty projects have no lost-history boundary. Existing facts and ranges remain intact as the
-baseline. The first later archive starts no earlier than the trustworthy migration boundary.
-The catalog survives subject erasure because it describes project migration capability,
-not a subject. Reapplying migrations does not move the boundary. Runtime grants and new connection
-validation protect the catalog from writes and privilege drift.
+**Fresh installation.** Taisce has no deployed installations. Migration 0029 provisions the archive
+and causal references; preservation starts with the first assertion. Knowledge before that assertion
+returns no facts. No compatibility cutoff, availability catalog or special API refusal is needed.
+The greenfield development policy is recorded in D80.
 
 **Governance and causal invalidation.** History registers both the fact's retained source
 observations and the observation causing the transition. Its projection kind does not survive
@@ -2663,15 +2659,15 @@ boundary implement this change.
 
 **Evidence and reversal cost.** Tests distinguish earlier/current knowledge, valid time and exact
 transition boundaries, concurrent conflicts, late rollback, project boundaries, source erasure,
-retention, export and an existing-data upgrade. A 2,000-version fixture checks indexed historical
+retention, export and knowledge before the first assertion. A 2,000-version fixture checks indexed historical
 lookup. Production mixed-workload cost and rebuild integration remain #103/#58 and keep #116 open.
-Removing the archive after use discards acquired history and must not silently restore historical
-claims; retaining the migration boundary and refusing unavailable queries is mandatory on reversal.
+Removing the archive would lose acquired historical knowledge; history preservation remains a
+functional requirement even while unreleased schemas and contracts can be revised.
 
 ## D79 — Explicit read-only project credentials
 
-**Decision.** Registry credentials carry `read_only` or `read_write` access. Control migration 0004
-preserves existing keys as read/write; ordinary bootstrap and issuance retain that default.
+**Decision.** Registry credentials carry `read_only` or `read_write` access. Fresh bootstrap installs
+control migration 0004 with the access constraint; ordinary issuance defaults to read/write.
 `taisce credential issue <name> --project <project> --read-only` issues a restricted key. Unexpected
 positional arguments are rejected so a misplaced flag cannot silently produce a writable key.
 
@@ -2682,21 +2678,42 @@ content-free refused-operation audit row. New operations default to denied for r
 explicitly. Unknown access modes fail closed. This is memory authorization, not a commercial plan
 or a per-subject end-user identity. Readers can export project-authorized subject data.
 
-**Mixed-version safety.** Restricted tokens use `tsr_`; existing writable tokens keep `tsk_`.
-The marker is included in the stored digest. Earlier binaries reject the new prefix before lookup,
-so they cannot interpret a restricted key as a writer during rollout or rollback. Rewriting the
-marker changes the digest and does not elevate the key. New binaries cross-check the marker against
-registry access; changing an existing row's mode makes its token unusable. Revoke and reissue to
-change authority. Clients treat both token forms as opaque; scanners should recognize both markers.
+**Token and authority.** Both modes use one opaque `tsk_` token format. The stored digest identifies
+the credential; the protected registry determines its access. Altering token text changes the digest
+and cannot acquire another grant. The API cannot update registry metadata, and the serving registry
+connection is read-only. Operator commands expose issuance and revocation; changing authority through
+those commands requires revocation and reissuance. Taisce is greenfield, so no earlier-binary token
+format or mixed-version rollout behavior is promised.
 
-**Alternatives and limits.** An access column alone is unsafe when an earlier process ignores it.
-Changing every existing key to read-only breaks established clients without an operator decision.
-Fine-grained capabilities, human roles and per-subject grants remain separate work. This closes the
-permission prerequisite for curated memory under #89, not its record lifecycle or batch semantics.
-The gate prevents caller-requested memory mutation; reads still create audit/operational records.
+**Alternatives and limits.** Encoding authority in a token prefix duplicates registry state and adds
+an unnecessary format distinction. Fine-grained capabilities, human roles and per-subject grants
+remain separate work. This closes the permission prerequisite for curated memory under #89, not its
+record lifecycle or batch semantics. The gate prevents caller-requested memory mutation; reads still
+create audit/operational records.
 
-**Evidence and reversal cost.** Tests enumerate every served operation for a restricted key, verify
-no denied mutation changes memory, test audit privacy, malformed writes, token rewriting, revocation,
-registry drift, existing-key upgrade and CLI issuance. Retiring the feature can revoke restricted
-keys; removing the database column while new binaries run breaks resolution. Rolling back binaries
-refuses restricted keys and preserves existing writable ones, avoiding silent privilege expansion.
+**Evidence.** Tests enumerate every served operation for a restricted key, verify no denied mutation
+changes memory, test audit privacy, malformed writes, token tampering, revocation, fresh registry
+constraints and CLI issuance. Database-role tests verify that serving connections cannot change
+credential authority. Coverage and contract gates apply to the simplified implementation.
+
+## D80 — Greenfield development until the first supported release
+
+**Context and decision.** The project owner confirmed that Taisce is greenfield and nowhere deployed.
+Local containers, test fixtures and development version numbers are not evidence of deployed clients
+or a supported upgrade path. Unreleased database schemas, APIs and internal representations may be
+revised to establish the best functional, performance and security design.
+
+Do not add legacy-data repair, compatibility shims, mixed-binary safeguards or zero-downtime upgrade
+work solely for hypothetical earlier deployments. D78 and D79 reflect this policy. Existing migration
+files remain a reproducible way to provision and test the schema; retaining that mechanism does not
+promise compatibility between unreleased commits. Before the first supported release, review the
+schema baseline and define version support, upgrades and rollback against an actual release policy.
+
+**Still required.** Atomic writes, project boundaries, least privilege, provenance, erasure, temporal
+correctness, recovery/rebuild and measured workload bounds remain product requirements. Rebuild is
+needed for derived-state recovery and model changes, independently of legacy-data migration. Tests
+use isolated fixtures; this policy does not authorize deleting unrelated local development data.
+
+**Distribution.** Daily development remains private in `althunibat/taisce` with `x.y.z` versions. The
+planned Apache-2.0 public repository on `ensera-ai` receives separate `x.y.0` release snapshots.
+Greenfield status does not change that release topology or publish anything automatically.

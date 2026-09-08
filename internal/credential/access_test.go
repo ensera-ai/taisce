@@ -23,13 +23,13 @@ func TestReadOnlyCredentialResolvesWithoutAcquiringWriteAuthority(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != issued || got.Access != credential.ReadOnly || !strings.HasPrefix(token, credential.ReadOnlyPrefix) || strings.HasPrefix(token, credential.Prefix) {
-		t.Fatal("read-only identity or legacy refusal changed")
+	if got != issued || got.Access != credential.ReadOnly || !strings.HasPrefix(token, credential.Prefix) {
+		t.Fatal("read-only identity or authority changed")
 	}
-	// A holder cannot change the token's marker to bypass either old or new servers.
-	rewritten := credential.Prefix + strings.TrimPrefix(token, credential.ReadOnlyPrefix)
+	// A holder cannot change an opaque token to acquire another grant.
+	rewritten := token + "a"
 	if _, err := s.Resolve(ctx, rewritten); !errors.Is(err, credential.ErrUnknown) {
-		t.Fatal("prefix rewriting elevated a key")
+		t.Fatal("tampered token resolved")
 	}
 	writer, grant, err := s.Issue(ctx, "default-writer", "alpha")
 	if err != nil {

@@ -250,7 +250,7 @@ WITH previous AS MATERIALIZED (
 ), saved AS (
  INSERT INTO {schema}.fact_history(history_id,scope,fact_id,valid,known,source_observation_id)
  SELECT gen_random_uuid(),p.scope,p.fact_id,p.valid,
-   tstzrange(greatest(lower(p.known),(SELECT available_from FROM {schema}.fact_history_boundary b WHERE b.scope=p.scope)),$5),$6::uuid FROM previous p
+   tstzrange(lower(p.known),$5),$6::uuid FROM previous p
  RETURNING history_id,fact_id
 ), registered AS (
  INSERT INTO {schema}.projection_dependency(source_observation_id,scope,projection_kind,projection_id,data_subject_id)

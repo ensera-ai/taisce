@@ -133,28 +133,6 @@ func TestErasingOnlyTheSupersessionCauseInvalidatesDerivedValidity(t *testing.T)
 	}
 }
 
-func TestHistoryBoundaryIsProjectScopedAndFailsClosed(t *testing.T) {
-	ctx := context.Background()
-	pool := testPool(t)
-	schema := tenant(t, pool, "history_boundary")
-	if _, err := pool.Exec(ctx, schema.SQL(`INSERT INTO {schema}.fact_history_boundary VALUES('p1',now())`)); err != nil {
-		t.Fatal(err)
-	}
-	store := pg.NewRecallStore(pool, schema)
-	past := domain.AsOf{Known: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)}
-	if err := store.ValidateAsOf(ctx, []string{"p1"}, past); !errors.Is(err, domain.ErrHistoryUnavailable) {
-		t.Fatal(err)
-	}
-	for _, scopes := range [][]string{nil, {"p2"}} {
-		if err := store.ValidateAsOf(ctx, scopes, past); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := store.ValidateAsOf(ctx, []string{"p1"}, domain.AsOf{}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestHistoricalLookupUsesFactRangeIndex(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
@@ -263,7 +241,7 @@ func TestRetentionRemovesTemporalStateDerivedFromExpiredCause(t *testing.T) {
 	}
 }
 
-func TestCitationReportsRecordedSuccessorAndUpgradeBoundary(t *testing.T) {
+func TestCitationReportsRecordedSuccessorAndCause(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
 	schema := tenant(t, pool, "history_citation")
@@ -280,15 +258,8 @@ func TestCitationReportsRecordedSuccessorAndUpgradeBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if citation.SupersededBy == nil || *citation.SupersededBy != second || citation.SupersessionSource == nil || *citation.SupersessionSource != source || citation.HistoryAvailableFrom != nil {
+	if citation.SupersededBy == nil || *citation.SupersededBy != second || citation.SupersessionSource == nil || *citation.SupersessionSource != source {
 		t.Fatalf("missing or guessed lineage: %+v", citation)
-	}
-	if _, err := pool.Exec(ctx, schema.SQL(`INSERT INTO {schema}.fact_history_boundary VALUES('p1',$1)`), march); err != nil {
-		t.Fatal(err)
-	}
-	citation, err = resolver.Resolve(ctx, "p1", first, nil, 8)
-	if err != nil || citation.HistoryAvailableFrom == nil || !citation.HistoryAvailableFrom.Equal(march) {
-		t.Fatalf("missing upgrade boundary: %+v %v", citation, err)
 	}
 }
 
@@ -332,27 +303,5 @@ func TestSupersessionRacingCauseErasureCannotRetainItsClosingDate(t *testing.T) 
  (SELECT count(*) FROM {schema}.fact_history)+
  (SELECT count(*) FROM {schema}.observation WHERE data_subject_id='subject-2')`), first).Scan(&bad); err != nil || bad != 0 {
 		t.Fatalf("erased cause resurfaced: %d %v", bad, err)
-	}
-}
-
-func TestFirstPostUpgradeArchiveStartsAtTheTrustworthyBoundary(t *testing.T) {
-	ctx := context.Background()
-	pool := testPool(t)
-	schema := tenant(t, pool, "history_archive_boundary")
-	obs, facts := pg.NewObservationStore(pool), pg.NewFactStore(pool)
-	march := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	first := statedAt(t, ctx, obs, facts, schema, march, "I live in Dublin", domain.Claim{Subject: "user", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: "Dublin", Statement: "Dublin resident", ValidFrom: march})
-	// Simulate a retained open baseline present at upgrade, with earlier history unavailable.
-	var boundary time.Time
-	if err := pool.QueryRow(ctx, schema.SQL(`INSERT INTO {schema}.fact_history_boundary VALUES('p1',clock_timestamp()) RETURNING available_from`)).Scan(&boundary); err != nil {
-		t.Fatal(err)
-	}
-	statedAt(t, ctx, obs, facts, schema, march.AddDate(0, 1, 0), "I live in Oslo", domain.Claim{Subject: "user", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: "Oslo", Statement: "Oslo resident", ValidFrom: march.AddDate(0, 1, 0)})
-	var start time.Time
-	if err := pool.QueryRow(ctx, schema.SQL(`SELECT lower(known) FROM {schema}.fact_history WHERE fact_id=$1`), first).Scan(&start); err != nil {
-		t.Fatal(err)
-	}
-	if !start.Equal(boundary) {
-		t.Fatalf("archive claims knowledge before boundary: %s vs %s", start, boundary)
 	}
 }

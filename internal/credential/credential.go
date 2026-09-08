@@ -28,9 +28,6 @@ import (
 // clear alongside the digest so a person can tell two credentials apart in a list.
 const Prefix = "tsk_"
 
-// ReadOnlyPrefix makes older binaries refuse restricted keys instead of treating them as writers.
-const ReadOnlyPrefix = "tsr_"
-
 // ErrUnknown is returned for a credential that does not resolve — absent, malformed, unknown or
 // revoked, deliberately without distinguishing them.
 //
@@ -89,7 +86,7 @@ func Digest(token string) []byte {
 // Resolve turns a presented token into a grant.
 func (s *Store) Resolve(ctx context.Context, token string) (Grant, error) {
 	token = strings.TrimSpace(token)
-	if token == "" || (!strings.HasPrefix(token, Prefix) && !strings.HasPrefix(token, ReadOnlyPrefix)) {
+	if token == "" || !strings.HasPrefix(token, Prefix) {
 		// Refused without a query. A malformed token is not a database question, and answering it
 		// with one is a free way for a stranger to make us work.
 		return Grant{}, ErrUnknown
@@ -108,9 +105,8 @@ func (s *Store) Resolve(ctx context.Context, token string) (Grant, error) {
 	if err != nil {
 		return Grant{}, fmt.Errorf("resolve credential: %w", err)
 	}
-	// Access is immutable for an issued token. Revoke and issue a new key to change authority;
-	// registry drift must not elevate a restricted token or bypass old-binary refusal.
-	if (g.Access != ReadOnly && g.Access != ReadWrite) || (g.Access == ReadOnly) != strings.HasPrefix(token, ReadOnlyPrefix) {
+	// Authority comes from the protected registry, never from the token format or request body.
+	if g.Access != ReadOnly && g.Access != ReadWrite {
 		return Grant{}, ErrUnknown
 	}
 	return g, nil
@@ -146,11 +142,7 @@ func (s *Store) IssueWithAccess(ctx context.Context, name, project string, acces
 		// randomness would produce a credential that looks identical and is not.
 		return "", Grant{}, fmt.Errorf("no randomness available to mint a credential: %w", err)
 	}
-	prefix := Prefix
-	if access == ReadOnly {
-		prefix = ReadOnlyPrefix
-	}
-	token := prefix + base64.RawURLEncoding.EncodeToString(raw[:])
+	token := Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
 
 	g := Grant{CredentialID: uuid.New().String(), Name: name, Project: project, Access: access}
 	if _, err := s.registry.Exec(ctx, fmt.Sprintf(`
