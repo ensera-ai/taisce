@@ -65,9 +65,19 @@ Two things that will otherwise cost you an hour, both of them mechanisms working
   empty is one forgotten variable from not being one — so the symptom of getting it wrong is an
   instance that starts, stores turns and never forms memory.
 - **Model choice is not cosmetic.** Extraction asks for strict JSON against a closed vocabulary of 39
-  relations. Measured here: `qwen3.6:35b-a3b-mxfp8` holds the contract; `qwen3.8:27b-mxfp8` returns
-  valid JSON of the wrong shape and every turn is refused. `make test-inference` runs a fixed corpus
-  so the difference is measured rather than guessed at.
+  relations, and models differ on whether they can hold that. Measured here with `make test-inference`,
+  which is nineteen fixtures run three times each:
+
+  | model | result |
+  |---|---|
+  | `qwen3.6:35b-a3b-mxfp8`, local | holds the contract |
+  | `qwen/qwen3.8-flash`, hosted | holds the contract, and found one relation the local model missed |
+  | `qwen3.8:27b-mxfp8`, local | returns valid JSON of the wrong shape; every turn refused |
+
+  The two that hold it agreed on **every case both measured**: the same relation from the drift
+  fixture, the same four refusals for negation and hedging, the same three answers on tense, and the
+  same refusal of a tool result that instructs the extractor. `scripts/compare-corpus.sh` renders two
+  runs side by side so a difference is visible without reading either log.
 
 **Without a model it still runs.** Turns are stored, whatever is already formed is recalled, erasure
 works — and it says so loudly at startup, because a system that silently stores and never extracts
