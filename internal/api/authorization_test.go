@@ -36,6 +36,7 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 		domain.AuditErase:   {"data_subject_id": "subject-1", "reason": "private unauthorized mutation"},
 		domain.AuditRecall:  {"question": "Where does the user live?", "data_subject_id": "subject-1"},
 		domain.AuditExport:  {"data_subject_id": "subject-1"}, domain.AuditCitationResolve: {"id": id}, domain.AuditFreshness: nil,
+		domain.AuditRecordList: {}, domain.AuditRecordHistory: {"id": id},
 	}
 	for _, op := range api.Operations() {
 		body, ok := bodies[op.Name]

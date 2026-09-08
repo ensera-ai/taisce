@@ -2717,3 +2717,58 @@ use isolated fixtures; this policy does not authorize deleting unrelated local d
 **Distribution.** Daily development remains private in `althunibat/taisce` with `x.y.z` versions. The
 planned Apache-2.0 public repository on `ensera-ai` receives separate `x.y.0` release snapshots.
 Greenfield status does not change that release topology or publish anything automatically.
+
+## D81 — Bounded record inventory and temporal inspection
+
+**Status:** Accepted. **Date:** 2026-09-08. Tracked under curated memory #89.
+
+**Context and decision.** Applications need to find a retained claim before resolving its evidence
+or asking about its history. `POST /v1/records/list` lists retained facts within the authenticated
+project, optionally restricted by their registered data-subject provenance. The same fact appears
+once when several observations support it. Inventory includes closed validity/knowledge records;
+`POST /v1/citations/resolve` remains the reader for complete, byte-verified evidence.
+
+`POST /v1/records/history` returns the current validity/knowledge intervals and a page of earlier
+intervals with the observation that ended each earlier knowledge version. It does not pretend that
+entity labels, evidence or mutable claim content were versioned: D78 preserves intervals around
+immutable claims. The original assertion's sources remain available through citation resolution.
+
+**Bounds and ordering.** Default pages contain 20 records or archived versions, with an explicit
+limit from 1 through 100. A record preview contains at most 512 Unicode characters (at most 2,048
+UTF-8 bytes); the full statement's byte count and truncation flag tell the client when to resolve
+the citation for more. Serialization may expand escaped text. SQL selects the page before fetching
+previews. Subject input is bounded to 1 MiB, consistent with the outer request-body ceiling; this
+is not a new subject normalization/identity policy (#95).
+
+Record order is ascending immutable UUID. History order is descending knowledge end and history UUID.
+Cursors describe positions, not capabilities, and never relax project or subject predicates. The
+first and subsequent record queries have separate indexed comparison shapes. The project path uses
+its existing composite fact key; migration 0030 adds subject/provenance and history-page indexes.
+
+Every page uses a consistent database snapshot; history's current/archive reads share a repeatable-read
+transaction. A multi-page sequence is live. Deleting its cursor row does not break continuation or
+shift already returned records. Concurrent insertion behind a cursor requires restarting to see that
+record. Erasure can remove records between pages. Clients retain filters when continuing a browse.
+There is no claim of an exhaustive point-in-time export across pages.
+
+**Security and cost.** Project authority comes from the credential, with ordinary admission controls
+and read-only grants admitted to both operations. Unknown, foreign and erased history IDs receive
+identical not-found responses. Request values travel in POST bodies. Audit records contain operation,
+credential, project, outcome and row count; no record IDs, subjects, statements or source content enter
+the ledger or database-failure diagnostics. Reading a preview does not verify its evidence or make it
+true. A registry-authorized reader has project-wide access; subject filtering is an inspection choice.
+
+**Alternatives.** OFFSET requires rescanning and shifts under deletion. Returning full citation
+objects for every list entry multiplies source reads and response size. A server-held pagination
+snapshot pins connections and retained row versions across client think time. The chosen bounded,
+live pages avoid those costs while making their concurrency limits explicit. At greater scale,
+provenance duplication for one subject/fact is the first cost to measure: DISTINCT still visits
+matching support rows, even though it avoids scanning unrelated subjects.
+
+**Evidence and reversal cost.** Real PostgreSQL/HTTP tests cover shared attribution, erasure,
+concurrent writes, deleted cursor rows, Unicode previews, temporal cause links, read-only access,
+audit privacy and storage failures. Controlled fixtures inspect deep-page plans with 10,000 facts
+and 2,000 historical intervals. These establish access paths, not production latency targets.
+The endpoints add no new source-of-truth rows. Removing their indexes only changes performance;
+removing endpoints after the first supported release would require a versioned contract change.
+Corrections, retractions, batches, entity purge and rebuild preservation remain #89/#58.

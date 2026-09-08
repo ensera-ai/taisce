@@ -3,6 +3,8 @@
 
 # Inspecting a saved citation
 
+Use [record inventory](11-record-inspection.md) to find retained record IDs without repeating a recall.
+
 Send `POST /v1/citations/resolve` with the same project credential used for recall:
 
 ```json

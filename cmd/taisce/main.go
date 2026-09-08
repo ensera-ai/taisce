@@ -183,6 +183,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 		pg.NewEraser(memory),
 		recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()),
 		pg.NewCitationStore(memory, schema),
+		pg.NewRecordStore(memory, schema),
 		schema,
 		log,
 		admission,

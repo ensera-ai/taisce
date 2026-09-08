@@ -147,9 +147,11 @@ different storage and does not move data. Project
 creation adds a project row and partition inside the existing memory namespace. Database grants
 protect credential secrets; authenticated project filters control memory reads.
 
-Project credentials can be issued with `--read-only` for recall, citation inspection, freshness and
-export without memory mutation. Ordinary issuance defaults to read/write. See
+Project credentials can be issued with `--read-only` for recall, record and citation inspection,
+freshness and export without memory mutation. Ordinary issuance defaults to read/write. See
 [credential access](docs/10-project-credentials.md) for issuance and permissions.
+[Record inspection](docs/11-record-inspection.md) supports bounded browsing and temporal history;
+[citation resolution](docs/08-citation-resolution.md) provides the supporting source bytes.
 
 Serving requires non-owner database logins: the memory role serves project data, and the registry
 role reads credentials. Administrative DSNs belong to bootstrap/operator commands. Startup and new

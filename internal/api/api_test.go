@@ -463,6 +463,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 		pg.NewEraser(pool),
 		recall.NewWithBudget(pg.NewRecallStore(pool, schema), recall.Budget{Characters: 100000, MaxRows: 50}),
 		pg.NewCitationStore(pool, schema),
+		pg.NewRecordStore(pool, schema),
 		schema,
 		nil,
 	).Handler())
@@ -812,6 +813,8 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 			"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
 		}, http.StatusCreated},
 		domain.AuditCitationResolve: {map[string]any{}, http.StatusOK},
+		domain.AuditRecordList:      {map[string]any{}, http.StatusOK},
+		domain.AuditRecordHistory:   {map[string]any{}, http.StatusOK},
 		domain.AuditFreshness:       {nil, http.StatusOK},
 		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
 		domain.AuditExport:          {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
@@ -857,6 +860,9 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	}
 	exercise[domain.AuditCitationResolve].body["id"] = citationID
 	run(domain.AuditCitationResolve)
+	run(domain.AuditRecordList)
+	exercise[domain.AuditRecordHistory].body["id"] = citationID
+	run(domain.AuditRecordHistory)
 	run(domain.AuditExport)
 	run(domain.AuditErase)
 	for _, o := range surface {

@@ -49,6 +49,7 @@ type Server struct {
 	eraser       *pg.Eraser
 	recaller     *recall.Recaller
 	citations    *pg.CitationStore
+	records      *pg.RecordStore
 	schema       pg.Schema
 	log          *slog.Logger
 	authAudits   refusedAuthBudget
@@ -61,7 +62,7 @@ type Server struct {
 // the registry connection. That separation is the point: a memory query cannot read a key.
 func NewServer(credentials *credential.Store, audit *pg.AuditStore, exporter *pg.Exporter,
 	projects *pg.ProjectStore, observations *pg.ObservationStore, eraser *pg.Eraser,
-	recaller *recall.Recaller, citations *pg.CitationStore, schema pg.Schema, log *slog.Logger, admission ...*Admission) *Server {
+	recaller *recall.Recaller, citations *pg.CitationStore, records *pg.RecordStore, schema pg.Schema, log *slog.Logger, admission ...*Admission) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -78,7 +79,7 @@ func NewServer(credentials *credential.Store, audit *pg.AuditStore, exporter *pg
 	return &Server{
 		credentials: credentials, audit: audit, exporter: exporter, projects: projects,
 		observations: observations,
-		eraser:       eraser, recaller: recaller, citations: citations, schema: schema, log: log, admission: gate,
+		eraser:       eraser, recaller: recaller, citations: citations, records: records, schema: schema, log: log, admission: gate,
 	}
 }
 
@@ -161,6 +162,10 @@ var operations = []route{
 		func(s *Server) grantedHandler { return s.export }, exportRequest{}, exportResponse{}},
 	{Operation{domain.AuditCitationResolve, http.MethodPost, "/citations/resolve", http.StatusOK},
 		func(s *Server) grantedHandler { return s.resolveCitation }, citationRequest{}, pg.Citation{}},
+	{Operation{domain.AuditRecordList, http.MethodPost, "/records/list", http.StatusOK},
+		func(s *Server) grantedHandler { return s.listRecords }, recordListRequest{}, pg.RecordPage{}},
+	{Operation{domain.AuditRecordHistory, http.MethodPost, "/records/history", http.StatusOK},
+		func(s *Server) grantedHandler { return s.recordHistory }, recordHistoryRequest{}, pg.RecordHistoryPage{}},
 }
 
 // The declaration is checked before anything can serve it, and a bad one stops the binary.
@@ -838,12 +843,13 @@ const (
 	// A key identifies one logical write, including after its content has been erased.
 	codeIdempotencyConflict errorCode = "idempotency_conflict"
 	// codeInvalidQuestion is a recall with nothing to answer.
-	codeInvalidQuestion errorCode = "invalid_question"
-	codeRateLimited     errorCode = "rate_limited"
-	codeInvalidCitation errorCode = "invalid_citation"
-	codeCitationLimit   errorCode = "citation_limit"
-	codeNotFound        errorCode = "not_found"
-	codeForbidden       errorCode = "forbidden"
+	codeInvalidQuestion   errorCode = "invalid_question"
+	codeRateLimited       errorCode = "rate_limited"
+	codeInvalidCitation   errorCode = "invalid_citation"
+	codeCitationLimit     errorCode = "citation_limit"
+	codeNotFound          errorCode = "not_found"
+	codeForbidden         errorCode = "forbidden"
+	codeInvalidRecordPage errorCode = "invalid_record_page"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -861,7 +867,7 @@ const (
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
-	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden,
+	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

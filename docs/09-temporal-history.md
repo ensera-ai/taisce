@@ -29,7 +29,7 @@ There is no deployment-era cutoff or compatibility error in the recall contract.
 Fact UUIDs survive supported supersession. Citation inspection returns `superseded_by` and
 `supersession_source_observation_id` where retained. Subject export includes `fact_history` rows and
 their temporal boundaries. Citation inspection returns the current retained record, while the
-recall timestamps select a historical view. A separate record-history API remains planned.
+recall timestamps select a historical view. [Record history](11-record-inspection.md) lists retained intervals and their transition sources.
 
 Erasure and retention remove historical derivatives too. If the source that established a closing
 date is erased, the affected fact can become unavailable even when its original observation remains.

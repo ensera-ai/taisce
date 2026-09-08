@@ -16,6 +16,7 @@ secret scanning and redaction for the `tsk_` prefix.
 | Operation | Read-only | Read/write |
 |---|---|---|
 | Recall and historical recall | Allowed | Allowed |
+| Record inventory and history | Allowed | Allowed |
 | Citation inspection and freshness | Allowed | Allowed |
 | Subject export within the project | Allowed | Allowed |
 | Observation ingestion | Forbidden | Allowed |

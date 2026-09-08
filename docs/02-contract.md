@@ -22,6 +22,8 @@ Observations admit at most 64 messages, 65536 UTF-8 content bytes per message an
 | `erase` | POST | `/v1/erasures` | 200 |
 | `export` | POST | `/v1/exports` | 200 |
 | `citation.resolve` | POST | `/v1/citations/resolve` | 200 |
+| `record.list` | POST | `/v1/records/list` | 200 |
+| `record.history` | POST | `/v1/records/history` | 200 |
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
 
@@ -167,6 +169,48 @@ POST `/v1/citations/resolve` → 200
 | `next` | {source_observation_id: string, source_ordinal: integer, byte_start: integer}, optional |
 
 
+## `record.list`
+
+POST `/v1/records/list` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `data_subject_id` | string |
+| `after` | {id: string}, optional |
+| `limit` | integer, optional |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `records` | array of {id: string, subject_entity_id: string, optional, object_entity_id: string, optional, predicate: string, statement_preview: string, statement_bytes: integer, preview_truncated: boolean, source_role: string, recorded_at: timestamp (RFC 3339), status: string} |
+| `next` | {id: string}, optional |
+
+
+## `record.history`
+
+POST `/v1/records/history` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `before` | {known_until: timestamp (RFC 3339), history_id: string}, optional |
+| `limit` | integer, optional |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `current` | {valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}} |
+| `previous` | array of {history_id: string, valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, ended_by_observation_id: string} |
+| `next` | {known_until: timestamp (RFC 3339), history_id: string}, optional |
+
+
 ## Refusals
 
 A refusal is a JSON body of the shape `{"error": {"code": "…", "message": "…"}}`. Branch on the code; the message is for a person reading a log and may change.
@@ -187,6 +231,7 @@ Any operation may answer with any of these.
 | `citation_limit` |
 | `not_found` |
 | `forbidden` |
+| `invalid_record_page` |
 
 ## Liveness
 
