@@ -1201,6 +1201,32 @@ The bounded token pass adds one linear scan before typed decoding, without anoth
 **How hard to undo.** Transport-only, with no schema migration. Relaxing it would reintroduce multiple
 interpretations of the same request. Tracked in development issue #87.
 
+### D63 — Unresolved authentication is sampled without caller content
+
+An unresolved credential records the fixed principal `unresolved`. Neither the bearer value, its
+prefix, its digest, an address nor a request path is stored to identify an unknown caller. Successful
+resolved operations retain their credential attribution independently of this sampling budget.
+
+Each server admits at most 16 anonymous audit entries per fixed one-minute window. Further refusals
+increment one saturating in-memory counter; the next admitted entry includes them in its magnitude.
+The first suppressed attempt emits one content-free warning. A varying token cannot create new
+counter keys, additional rows or one log message per attempt. Tests exercise concurrent admission
+and an HTTP refusal burst against PostgreSQL, then seal and verify the resulting ledger.
+
+This bounds anonymous audit storage rate per server, not lifetime storage, fleet-wide request volume
+or credential-lookup work. Pending counts are best effort: they are recorded on the next sample and
+can be lost at process exit or when the audit store is unavailable. Counts saturate at the PostgreSQL
+integer limit. The ledger retains committed samples under its existing append-only policy. The change
+prevents future input copying; it does not rewrite historical ledger entries.
+
+**Rejected:** retaining token prefixes (arbitrary permanent content); unkeyed token hashes (an
+unnecessary durable correlation identifier); an unbounded row per refusal (anonymous storage
+amplification); a counter per token or IP (unbounded cardinality and additional personal identifiers).
+
+**How hard to undo.** No schema change. Sampling policy can change independently of the wire refusal,
+which remains identical for missing, malformed, unknown and revoked credentials. Authentication
+admission and fleet-wide resource limits remain development issue #93; this resolves #88.
+
 ---
 
 ## Substrate

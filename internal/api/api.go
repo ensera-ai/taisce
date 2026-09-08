@@ -49,6 +49,7 @@ type Server struct {
 	recaller     *recall.Recaller
 	schema       pg.Schema
 	log          *slog.Logger
+	authAudits   refusedAuthBudget
 }
 
 // NewServer wires the surface over stores that already exist.
@@ -91,28 +92,6 @@ func (s *Server) record(r *http.Request, operation string, grant credential.Gran
 	}); err != nil {
 		s.log.Error("the audit ledger did not record an operation",
 			"operation", operation, "principal", grant.CredentialID, "error", err)
-	}
-}
-
-// recordRefusedAuth records a credential that did not resolve.
-//
-// The principal is the token's prefix rather than the token, because the token is a secret and the
-// prefix is enough to recognise repeated attempts with one value. A stranger guessing produces a row
-// per attempt, which is what makes a burst of them visible.
-func (s *Server) recordRefusedAuth(r *http.Request, presented string) {
-	principal := "unpresented"
-	if len(presented) >= 12 {
-		principal = presented[:12]
-	} else if presented != "" {
-		principal = "malformed"
-	}
-	if err := s.audit.Append(r.Context(), domain.AuditEntry{
-		Operation:     domain.AuditAuthenticate,
-		Principal:     principal,
-		PrincipalKind: domain.PrincipalSystem,
-		Outcome:       domain.OutcomeRefused,
-	}); err != nil {
-		s.log.Error("the audit ledger did not record a refused authentication", "error", err)
 	}
 }
 
@@ -253,13 +232,13 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := bearer(r.Header.Get("Authorization"))
 		if !ok {
-			s.recordRefusedAuth(r, "")
+			s.recordRefusedAuth(r)
 			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 			return
 		}
 		grant, err := s.credentials.Resolve(r.Context(), token)
 		if errors.Is(err, credential.ErrUnknown) {
-			s.recordRefusedAuth(r, token)
+			s.recordRefusedAuth(r)
 			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 			return
 		}
