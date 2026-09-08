@@ -944,11 +944,9 @@ func TestTheDriverSweepsRetention(t *testing.T) {
 	}
 }
 
-// A project with no retention policy is not swept at all.
-//
-// Asked rather than assumed: sweeping a project with no policy is a scan that can only find nothing,
-// and in an instance where most projects keep indefinitely that is most of the work.
-func TestOnlyProjectsWithAPolicyAreSwept(t *testing.T) {
+// Stored deadlines determine whether a project has due work, including after its current policy
+// becomes indefinite. A future deadline does not schedule an early sweep.
+func TestOnlyProjectsWithDueStoredDeadlinesAreSwept(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
 	schema := tenant(t, pool, "fm_noretention")
@@ -964,12 +962,23 @@ func TestOnlyProjectsWithAPolicyAreSwept(t *testing.T) {
 		t.Fatalf("set retention: %v", err)
 	}
 
+	for _, scope := range []string{"kept", "expiring"} {
+		turn := turnOf(domain.Message{Role: domain.RoleUser, Content: "A retained source"})
+		turn.Scope = scope
+		if _, err := observations.Append(ctx, schema, turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.observation SET retention_until=CASE WHEN scope='expiring' THEN now()-interval '1 hour' ELSE now()+interval '1 hour' END; UPDATE {schema}.project SET retention=NULL`)); err != nil {
+		t.Fatal(err)
+	}
+
 	scopes, err := observations.ScopesWithRetention(ctx, schema)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(scopes) != 1 || scopes[0] != "expiring" {
-		t.Fatalf("scopes with a policy: %v", scopes)
+		t.Fatalf("scopes with due deadlines: %v", scopes)
 	}
 }
 

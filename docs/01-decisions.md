@@ -3310,3 +3310,30 @@ all previous byte versions would enlarge both retention and erasure without a re
 session ownership or adding multiple owners needs an explicit migration and erasure policy. Moving
 bytes to another substrate requires preserving registration, expiry, versions and counted erasure.
 Retiring the endpoint cannot forget outstanding retry tombstones while clients may replay them.
+
+## D93 — Retention scheduling follows stored deadlines
+
+**Decision.** The worker discovers a project when an observation has a due stamped deadline,
+independently of the project's current retention setting. A partial index on project, expiry and
+log offset supports an existence probe and bounded expiry-ordered deletion. Sources with future
+or absent deadlines are retained. Artifact deadlines therefore run under the default indefinite
+project policy, and changing a project's policy to indefinite does not cancel earlier deadlines.
+The existing registry walk still deletes projections and source bytes in one transaction; artifact
+quota is released by the same database accounting mechanism as explicit erasure.
+
+**Evidence.** `TestRetentionDriverFindsArtifactDeadlinesWithoutAProjectRetentionPolicy` reproduced
+retained expired bytes before this change and now verifies driver-level removal and quota release,
+while another project's future artifact survives. `TestOnlyProjectsWithDueStoredDeadlinesAreSwept`
+checks stored deadlines after a policy becomes indefinite. The existing retention tests exercise
+bounded pages, source sharing and registered projection removal.
+
+**Cost and alternatives.** Discovery performs a project inventory with indexed existence checks;
+expiry-bearing sources add an index entry and its write/storage cost. This changes worker scheduling,
+not ordinary recall, and makes no production throughput claim. Looking only at current project policy
+misses artifacts and previously stamped deadlines. Repeatedly enumerating every due source merely
+to deduplicate projects can rescan a large backlog on every bounded sweep pass. Unconditionally sweeping
+every project performs deletion transactions even where no deadline is due.
+
+**Reversal.** Small before release: the discovery predicate, ordering and supporting index can change
+together. Any replacement must preserve already-stamped deadlines and schedule artifact expiry without
+requiring a project-wide retention policy. This fixes #122; broader capacity measurements remain #103.

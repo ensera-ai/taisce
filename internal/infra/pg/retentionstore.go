@@ -64,7 +64,7 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 		rows, err := tx.Query(ctx, s.schema.SQL(`
 			SELECT observation_id::text FROM {schema}.observation
 			 WHERE scope = $1 AND retention_until IS NOT NULL AND retention_until <= now()
-			 ORDER BY log_offset
+			 ORDER BY retention_until,log_offset
 			 LIMIT $2
 			 FOR UPDATE SKIP LOCKED`), scope, limit)
 		if err != nil {
