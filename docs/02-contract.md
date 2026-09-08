@@ -28,6 +28,7 @@ POST `/v1/observations` → 201
 
 | Field | Type |
 |---|---|
+| `idempotency_key` | string |
 | `data_subject_id` | string |
 | `occurred_at` | timestamp (RFC 3339), optional |
 | `messages` | array of {group_ordinal: integer, optional, role: string, content: string, occurred_at: timestamp (RFC 3339), optional} |
@@ -140,6 +141,7 @@ Any operation may answer with any of these.
 | `invalid_question` |
 | `no_subject` |
 | `internal` |
+| `idempotency_conflict` |
 
 ## Liveness
 

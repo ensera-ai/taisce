@@ -49,83 +49,81 @@ const ProjectionChunk = "chunk"
 // spanning a whole turn would need spans into a concatenation that exists nowhere, so a citation
 // would resolve to the wrong words while looking correct.
 func (s *ObservationStore) Append(ctx context.Context, schema Schema, turn domain.Turn) (domain.Observation, error) {
-	if err := turn.Validate(); err != nil {
-		return domain.Observation{}, err
+	out, _, err := s.AppendIdempotent(ctx, schema, turn, "")
+	return out, err
+}
+
+// appendTurnTx writes one new observation inside the transaction that also owns its retry receipt.
+func appendTurnTx(ctx context.Context, tx pgx.Tx, schema Schema, turn domain.Turn) (domain.Observation, error) {
+	// The lock is on the scope's watermark row, which every append to this scope contends for
+	// and no append to another scope touches. Taken by upserting it, so the first append to a
+	// new scope does not need the row to exist already.
+	var offset int64
+	if err := tx.QueryRow(ctx, schema.SQL(claimOffsetSQL), turn.Scope, turn.OccurredAt).Scan(&offset); err != nil {
+		return domain.Observation{}, fmt.Errorf("claim log offset: %w", err)
 	}
 
-	var out domain.Observation
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// The lock is on the scope's watermark row, which every append to this scope contends for
-		// and no append to another scope touches. Taken by upserting it, so the first append to a
-		// new scope does not need the row to exist already.
-		var offset int64
-		if err := tx.QueryRow(ctx, schema.SQL(claimOffsetSQL), turn.Scope, turn.OccurredAt).Scan(&offset); err != nil {
-			return fmt.Errorf("claim log offset: %w", err)
+	id := uuid.New()
+	ingested := time.Now().UTC()
+	// The turn's own role, for the observation row: the speaker of its first message. A turn
+	// has several, and the per-message roles are what the policy reads; this exists so an
+	// operator scanning the log sees who started it without joining.
+	lead := turn.Messages[0].Role
+	if _, err := tx.Exec(ctx, schema.SQL(insertObservationSQL),
+		id, turn.Scope, offset, KindTurn, turn.OccurredAt, ingested,
+		string(lead), nullIfEmpty(turn.DataSubjectID)); err != nil {
+		return domain.Observation{}, fmt.Errorf("insert observation: %w", err)
+	}
+
+	for _, m := range turn.Messages {
+		occurred := m.OccurredAt
+		if occurred.IsZero() {
+			occurred = turn.OccurredAt
+		}
+		if _, err := tx.Exec(ctx, schema.SQL(insertMessageSQL),
+			id, m.Ordinal, string(m.Role), m.Content, m.GroupOrdinal, occurred); err != nil {
+			return domain.Observation{}, fmt.Errorf("insert message %d: %w", m.Ordinal, err)
 		}
 
-		id := uuid.New()
-		ingested := time.Now().UTC()
-		// The turn's own role, for the observation row: the speaker of its first message. A turn
-		// has several, and the per-message roles are what the policy reads; this exists so an
-		// operator scanning the log sees who started it without joining.
-		lead := turn.Messages[0].Role
-		if _, err := tx.Exec(ctx, schema.SQL(insertObservationSQL),
-			id, turn.Scope, offset, KindTurn, turn.OccurredAt, ingested,
-			string(lead), nullIfEmpty(turn.DataSubjectID)); err != nil {
-			return fmt.Errorf("insert observation: %w", err)
+		chunkID := uuid.New()
+		if _, err := tx.Exec(ctx, schema.SQL(insertChunkSQL),
+			chunkID, turn.Scope, id, m.Ordinal, m.Content, occurred,
+			string(m.Role), nullIfEmpty(turn.DataSubjectID)); err != nil {
+			return domain.Observation{}, fmt.Errorf("insert chunk for message %d: %w", m.Ordinal, err)
 		}
-
-		for _, m := range turn.Messages {
-			occurred := m.OccurredAt
-			if occurred.IsZero() {
-				occurred = turn.OccurredAt
-			}
-			if _, err := tx.Exec(ctx, schema.SQL(insertMessageSQL),
-				id, m.Ordinal, string(m.Role), m.Content, m.GroupOrdinal, occurred); err != nil {
-				return fmt.Errorf("insert message %d: %w", m.Ordinal, err)
-			}
-
-			chunkID := uuid.New()
-			if _, err := tx.Exec(ctx, schema.SQL(insertChunkSQL),
-				chunkID, turn.Scope, id, m.Ordinal, m.Content, occurred,
-				string(m.Role), nullIfEmpty(turn.DataSubjectID)); err != nil {
-				return fmt.Errorf("insert chunk for message %d: %w", m.Ordinal, err)
-			}
-			// Registered in the SAME transaction as the row it describes. A projection written now
-			// and registered afterwards is a projection erasure cannot see for as long as the gap
-			// lasts, and the gap is exactly the window in which a process dies.
-			if _, err := tx.Exec(ctx, schema.SQL(registerProjectionSQL),
-				id, turn.Scope, ProjectionChunk, chunkID.String(),
-				nullIfEmpty(turn.DataSubjectID)); err != nil {
-				return fmt.Errorf("register chunk projection: %w", err)
-			}
+		// Registered in the SAME transaction as the row it describes. A projection written now
+		// and registered afterwards is a projection erasure cannot see for as long as the gap
+		// lasts, and the gap is exactly the window in which a process dies.
+		if _, err := tx.Exec(ctx, schema.SQL(registerProjectionSQL),
+			id, turn.Scope, ProjectionChunk, chunkID.String(),
+			nullIfEmpty(turn.DataSubjectID)); err != nil {
+			return domain.Observation{}, fmt.Errorf("register chunk projection: %w", err)
 		}
+	}
 
-		// The expiry, from the project's own policy, stamped in the same transaction as the write.
-		//
-		// Stamped rather than computed at sweep time so that the policy which applied when a turn
-		// arrived is the policy that governs it, and so an operator can see when a row will go
-		// rather than deriving it. Shortening a policy therefore applies to what arrives next;
-		// removing what is already held is an erasure with a receipt, not a configuration change
-		// that destroys things quietly.
-		//
-		// A project with no policy leaves this NULL, which means keep — a decision rather than an
-		// absence of one, and the sweep reads it as such.
-		if _, err := tx.Exec(ctx, schema.SQL(stampRetentionSQL), id, turn.Scope); err != nil {
-			return fmt.Errorf("stamp retention: %w", err)
-		}
+	// The expiry, from the project's own policy, stamped in the same transaction as the write.
+	//
+	// Stamped rather than computed at sweep time so that the policy which applied when a turn
+	// arrived is the policy that governs it, and so an operator can see when a row will go
+	// rather than deriving it. Shortening a policy therefore applies to what arrives next;
+	// removing what is already held is an erasure with a receipt, not a configuration change
+	// that destroys things quietly.
+	//
+	// A project with no policy leaves this NULL, which means keep — a decision rather than an
+	// absence of one, and the sweep reads it as such.
+	if _, err := tx.Exec(ctx, schema.SQL(stampRetentionSQL), id, turn.Scope); err != nil {
+		return domain.Observation{}, fmt.Errorf("stamp retention: %w", err)
+	}
 
-		out = domain.Observation{
-			ID:            id.String(),
-			LogOffset:     offset,
-			Scope:         turn.Scope,
-			DataSubjectID: turn.DataSubjectID,
-			OccurredAt:    turn.OccurredAt,
-			IngestedAt:    ingested,
-		}
-		return nil
-	})
-	return out, err
+	out := domain.Observation{
+		ID:            id.String(),
+		LogOffset:     offset,
+		Scope:         turn.Scope,
+		DataSubjectID: turn.DataSubjectID,
+		OccurredAt:    turn.OccurredAt,
+		IngestedAt:    ingested,
+	}
+	return out, nil
 }
 
 // The project may not exist — a write to an unprovisioned scope still lands, deliberately, because

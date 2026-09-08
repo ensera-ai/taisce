@@ -1261,6 +1261,38 @@ ambiguous tool turns and adds the optional wire field. Existing stored group-zer
 original conservative boundaries. Development issue #86 covers the wire journey; compaction safety
 and cross-adapter replay remain acceptance obligations under #22 and #26.
 
+### D65 — Observation retries retain identity after their content is erased
+
+An optional `idempotency_key` is a UUID generated once for a logical turn and reused on transport
+retries. The authorized project scopes it. Matching normalized input returns the original observation
+ID and offset with HTTP 201; a different payload or an erased source returns HTTP 409 and
+`idempotency_conflict`. No key means an intentional new observation, even when the content repeats.
+
+A key-specific transaction lock precedes the receipt lookup. Only a new write allocates the scope
+offset, and its receipt, observation, messages and chunk registrations commit together. Retry
+fingerprints use an explicit versioned representation, independent of domain struct layout. Omitted
+timestamps are fingerprinted before the first accepted write supplies its clock value; explicit
+zones and UUID casing normalize. The hash format has a compatibility regression test.
+
+Erasure and retention clear both the payload fingerprint and observation reference in the same
+transaction as deleting the observation. The remaining project/key digest is a permanent operation
+tombstone: that key cannot be reused in that project. It contains no source ID, subject reference,
+message text or content fingerprint. Clients must use a fresh random UUID per logical write, not an
+identifier derived from a person. The tombstone is retained correlation metadata, not a claim of
+anonymity. This costs one small row per keyed write after payload retention has expired; capacity
+planning must include it.
+
+**Rejected:** deduplicating by content (suppresses intentional repetition); an in-memory key cache
+(lost on restart); recording a receipt after append (a crash duplicates the write); deleting or
+expiring retry identity with the source (an old queued retry can restore erased content); keeping the
+payload hash after erasure (retains content-derived correlation unnecessarily).
+
+**How hard to undo.** Migration 21 adds retry metadata and an erasure trigger. Existing observations
+remain unkeyed. Removing tombstones weakens the guarantee against stale retries and is an explicit
+operator decision. The HTTP/PostgreSQL tests cover concurrent retries, conflicts, project separation,
+one formation call, transaction rollback, erasure and retention. Development issue #85 remains open
+for adapter use of stable keys and conformance under #26.
+
 ---
 
 ## Substrate

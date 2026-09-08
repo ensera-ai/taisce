@@ -23,6 +23,7 @@ computed on your own substrate rather than asserted by somebody you have to trus
 | [`docs/02-contract.md`](docs/02-contract.md) | Every operation, field and refusal on the wire |
 | [`docs/03-market.md`](docs/03-market.md) | What is shipped elsewhere, dated, and what it obliges here |
 | [`docs/04-feature-coverage.md`](docs/04-feature-coverage.md) | Verified feature coverage, gaps and execution order |
+| [docs/05-releases.md](docs/05-releases.md) | Preparing public snapshots and preserving private development history |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How work is tracked |
 | [`CLAUDE.md`](CLAUDE.md) | The working rules, in full |
 | [development issues](https://github.com/althunibat/taisce/issues) | The private roadmap — the source of truth for scope |
@@ -112,6 +113,12 @@ somebody's words — generation sends a message, embedding sends text written fr
 **A hosted provider means conversation text leaves your machine.** The allowlist is where you decide
 that, and it cannot be arrived at by default: it is closed when unset and it names every host, so
 permitting one is always somebody writing the host down.
+
+For retry-safe writes, send an `idempotency_key` UUID generated once per logical turn and reuse it
+with the same payload when retrying. A matching retry returns the original `id` and `log_offset`.
+Reusing the key for different input, or after its observation was erased or expired, returns HTTP 409
+with `idempotency_conflict`. Keys are scoped to the credential's project and remain reserved there;
+use a new UUID for a new logical write. Omit the key only when each call should create a new turn.
 
 Observation messages may carry `group_ordinal`: use the same number for an assistant tool call and
 its results, starting at zero and increasing by one between groups. Supply it on every message or

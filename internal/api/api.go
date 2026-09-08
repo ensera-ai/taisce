@@ -289,6 +289,7 @@ func bearer(header string) (string, bool) {
 // ── Observe ───────────────────────────────────────────────────────────────────────────────────
 
 type observeRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
 	// No project. The credential decides it (D47) — a caller cannot name one, so there is nothing
 	// to check and nothing to get wrong.
 	DataSubjectID string           `json:"data_subject_id"`
@@ -326,8 +327,6 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 	turn := domain.Turn{Scope: grant.Project, DataSubjectID: req.DataSubjectID}
 	if req.OccurredAt != nil {
 		turn.OccurredAt = req.OccurredAt.UTC()
-	} else {
-		turn.OccurredAt = time.Now().UTC()
 	}
 	explicitGroups := len(req.Messages) > 0 && req.Messages[0].GroupOrdinal != nil
 	for i, m := range req.Messages {
@@ -358,13 +357,25 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 		return
 	}
 
-	stored, err := s.observations.Append(r.Context(), s.schema, turn)
+	stored, replayed, err := s.observations.AppendIdempotent(r.Context(), s.schema, turn, req.IdempotencyKey)
+	if errors.Is(err, pg.ErrInvalidIdempotencyKey) {
+		writeError(w, http.StatusBadRequest, codeInvalidTurn, "idempotency_key must be a UUID")
+		return
+	}
+	if errors.Is(err, pg.ErrIdempotencyConflict) {
+		writeError(w, http.StatusConflict, codeIdempotencyConflict, "idempotency key was already used for a different or erased observation")
+		return
+	}
 	if err != nil {
 		s.log.Error("append observation", "error", err, "project", grant.Project)
 		writeError(w, http.StatusInternalServerError, codeInternal, "the turn could not be stored")
 		return
 	}
-	s.record(r, domain.AuditObserve, grant, domain.OutcomeAllowed, len(turn.Messages))
+	magnitude := len(turn.Messages)
+	if replayed {
+		magnitude = 0
+	}
+	s.record(r, domain.AuditObserve, grant, domain.OutcomeAllowed, magnitude)
 	writeJSON(w, http.StatusCreated, observeResponse{
 		ID: stored.ID, Scope: stored.Scope, LogOffset: stored.LogOffset,
 	})
@@ -771,6 +782,8 @@ const (
 	// codeInvalidTurn is a turn the domain refuses. The message carries the domain's own reason,
 	// because a caller can fix it and a generic refusal would send them reading source.
 	codeInvalidTurn errorCode = "invalid_turn"
+	// A key identifies one logical write, including after its content has been erased.
+	codeIdempotencyConflict errorCode = "idempotency_conflict"
 	// codeInvalidQuestion is a recall with nothing to answer.
 	codeInvalidQuestion errorCode = "invalid_question"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
@@ -789,7 +802,7 @@ const (
 // return any of these, and that is what the contract says.
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
-	codeInvalidQuestion, codeNoSubject, codeInternal,
+	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.
