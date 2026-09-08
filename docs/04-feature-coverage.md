@@ -56,6 +56,22 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Saved citations [#90](https://github.com/althunibat/taisce/issues/90) | Independent project-scoped resolution, exact source-byte verification and bounded evidence pagination. D77 records scope and limits. | Supersession links and temporal preservation are added under D78; D84 adds attributable retraction status; complete rebuild mappings remain open. |
 | Operational health [#94](https://github.com/althunibat/taisce/issues/94) | Bounded dependency readiness, actual worker progress, content-free operator aggregates and Compose probes. D76 records scope and limits. | Helm integration depends on #76; issue remains open. |
 
+Older issue reconciliation at `ff0a851` separates completed work from superseded proposals:
+
+| Issue | Verified resolution | Work still tracked separately |
+|---|---|---|
+| #6 | Bounded recursive traversal returns ordered chains; both depth and second-hop authorization tests pass. D56. | Controlled graph workloads: #7/#16/#103. |
+| #8 | Valid/known ranges, original knowledge history and current/past reads pass the PostgreSQL temporal suite. D3/D54/D78. | Complete generations and workload measurements: #58/#116/#103. |
+| #13 | Structured report validation, pure context construction and child substitution pass. | Broader live-model quality and complete regeneration: #15/#58. |
+| #14 | D57 decides stored, source-registered reports, deleted and counted when any contributor is erased. | Operational generation and measurements remain separate. |
+| #35 | D36/D41/D44/D45 settle license, naming, repository layout and contribution policy; D49 specifies private/public version histories. | Legal review of contribution documents and release enforcement: #37. |
+| #70 | Required/forbidden live extraction corpus and run comparison exist; the earlier local run passed 19 fixtures. D89 records its existing variance policy. | OpenRouter/GPU verification and corpus-wide quality remain incomplete. |
+| #12 | The randomized clustering proposal is superseded by D58's deterministic density/refinement implementation. Connectedness, input-order independence and parent-subset tests pass. This is not a claim of algorithm parity. | Quality comparisons and scaling remain #15/#16/#103. |
+| #66 | The client checkpoint protocol is superseded by D50's operator-held seal/verification contract for a self-hosted instance. | Release and operational procedures remain #37/#76. |
+
+Issue #18 is a standing obligation for the life of the repository, not a finite feature awaiting
+implementation. Parent issues #83/#98 stay open while their actual child acceptance remains unfinished.
+
 The complete uncached real-PostgreSQL suite through receipt-backed fact recovery passes at **91.3%**,
 meeting the enforced **91.3%** floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.

@@ -3110,3 +3110,34 @@ restoring missing records with already recorded meaning.
 **Reversal.** Moderate. Stop writing receipts, retire the recovery reader and drop two source-owned
 tables after choosing another supported recovery contract. Their historical contents cannot be
 recreated from messages after deletion; backups and the release support policy must reflect that.
+
+## D89 — Extraction changes use required and forbidden relation sets
+
+**Decision.** The extraction regression corpus records relations that must appear, relations that
+must never appear, and the observed extras. Each fixture runs several attempts against a live model.
+A required relation missing from every attempt fails; a forbidden relation appearing even once fails.
+Pending cases identify an unresolved issue and report their observations without pretending to prove
+that issue fixed. `scripts/compare-corpus.sh` presents case-level outcomes and differences between two
+recorded runs, explicitly identifying cases that only one run reached.
+
+The corpus stays behind the `inference` build tag and runs with the configured local, OpenRouter or
+GPU profile. Prompt changes require this regression run. Ordinary deterministic tests validate parsing,
+source binding and refusals without making their success depend on an external provider. Provider
+failures are incomplete verification, not passes. The local run recorded for this review passed all
+19 extraction fixtures; nonlocal profile verification remains incomplete as recorded in the roadmap.
+
+**Alternatives rejected.** Exact output matching rejects harmless provider wording changes. An
+aggregate success-rate floor can conceal a false assertion. One attempt cannot distinguish a stable
+omission from sampling variance. Requiring every positive relation in every attempt would obscure
+systematic regressions with intermittent misses; requiring no forbidden output is deliberately stricter.
+A live provider in every ordinary test run would make substrate correctness depend on availability and
+billing. Automatically clearing pending cases after one success would mistake variance for a fix.
+
+**Cost and limits.** Repeated live calls cost time and inference capacity. Required relations appearing
+once may still have poor recall across attempts; the corpus is a change detector, not a corpus-wide
+quality score or proof that a model cannot produce a false fact. Unmapped rates and retrieval quality
+remain #43/#15, and controlled workload measurements remain separate.
+
+**Reversal.** Easy in code, consequential for interpretation. Changing required/forbidden sets or the
+attempt policy changes what a pass means; version the fixtures and retain both run outputs when
+comparing policies. This decision records the existing test policy; it changes no prompt or threshold.
