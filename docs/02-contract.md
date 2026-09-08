@@ -10,6 +10,8 @@ Requests must contain one complete UTF-8 JSON object followed only by whitespace
 
 Recall questions are limited to 8192 UTF-8 bytes, 512 distinct candidate names and 256 matching entity/name pairs. Exceeding a limit returns HTTP 400 and `invalid_question`, with no partial bundle. The match count includes the selected speaker. Fact-budget cuts remain successful responses with `truncated: true`.
 
+Observations admit at most 64 messages, 65536 UTF-8 content bytes per message and 262144 content bytes per turn. Exceeding these limits returns HTTP 400 and `invalid_turn` before storage. Busy authentication or project/credential capacity returns HTTP 429 and `rate_limited`, with `Retry-After: 1`. Retry with backoff and the same observation idempotency key; a refusal has no stored receipt. Limits are per API process; health checks remain outside admission.
+
 ## Operations
 
 | Operation | Method | Path | On success |
@@ -145,6 +147,7 @@ Any operation may answer with any of these.
 | `no_subject` |
 | `internal` |
 | `idempotency_conflict` |
+| `rate_limited` |
 
 ## Liveness
 

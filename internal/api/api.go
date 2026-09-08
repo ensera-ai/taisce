@@ -16,6 +16,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +51,7 @@ type Server struct {
 	schema       pg.Schema
 	log          *slog.Logger
 	authAudits   refusedAuthBudget
+	admission    *Admission
 }
 
 // NewServer wires the surface over stores that already exist.
@@ -58,14 +60,24 @@ type Server struct {
 // the registry connection. That separation is the point: a memory query cannot read a key.
 func NewServer(credentials *credential.Store, audit *pg.AuditStore, exporter *pg.Exporter,
 	projects *pg.ProjectStore, observations *pg.ObservationStore, eraser *pg.Eraser,
-	recaller *recall.Recaller, schema pg.Schema, log *slog.Logger) *Server {
+	recaller *recall.Recaller, schema pg.Schema, log *slog.Logger, admission ...*Admission) *Server {
 	if log == nil {
 		log = slog.Default()
+	}
+	gate, _ := NewAdmission(4, 4)
+	if len(admission) > 1 {
+		panic("api: only one admission gate may be supplied")
+	}
+	if len(admission) == 1 {
+		if admission[0] == nil {
+			panic("api: admission gate is nil")
+		}
+		gate = admission[0]
 	}
 	return &Server{
 		credentials: credentials, audit: audit, exporter: exporter, projects: projects,
 		observations: observations,
-		eraser:       eraser, recaller: recaller, schema: schema, log: log,
+		eraser:       eraser, recaller: recaller, schema: schema, log: log, admission: gate,
 	}
 }
 
@@ -230,13 +242,24 @@ type grantedHandler func(http.ResponseWriter, *http.Request, credential.Grant)
 // whether a token they hold is real, which is the single fact they cannot obtain any other way.
 func (s *Server) authenticated(next grantedHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCtx, cancelRequest := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancelRequest()
+		r = r.WithContext(requestCtx)
+		releaseAuth, ok := s.admission.authenticate(time.Now())
+		if !ok {
+			writeAdmissionRefusal(w)
+			return
+		}
+		defer releaseAuth()
 		token, ok := bearer(r.Header.Get("Authorization"))
 		if !ok {
 			s.recordRefusedAuth(r)
 			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 			return
 		}
-		grant, err := s.credentials.Resolve(r.Context(), token)
+		authCtx, cancelAuth := context.WithTimeout(r.Context(), 2*time.Second)
+		grant, err := s.credentials.Resolve(authCtx, token)
+		cancelAuth()
 		if errors.Is(err, credential.ErrUnknown) {
 			s.recordRefusedAuth(r)
 			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
@@ -247,6 +270,13 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 			writeError(w, http.StatusInternalServerError, codeInternal, "the request could not be served")
 			return
 		}
+		releaseAuth()
+		releaseWork, ok := s.admission.acquire(grant.Project, grant.CredentialID)
+		if !ok {
+			writeAdmissionRefusal(w)
+			return
+		}
+		defer releaseWork()
 
 		// The credential resolved. Whether the project it names still exists is a different
 		// question, and it is asked here because no constraint can ask it: the credential is in the
@@ -321,6 +351,10 @@ type observeResponse struct {
 func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credential.Grant) {
 	var req observeRequest
 	if !decode(w, r, &req) {
+		return
+	}
+	if err := domain.ValidateMessageCount(len(req.Messages)); err != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidTurn, err.Error())
 		return
 	}
 
@@ -792,6 +826,7 @@ const (
 	codeIdempotencyConflict errorCode = "idempotency_conflict"
 	// codeInvalidQuestion is a recall with nothing to answer.
 	codeInvalidQuestion errorCode = "invalid_question"
+	codeRateLimited     errorCode = "rate_limited"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -808,7 +843,7 @@ const (
 // return any of these, and that is what the contract says.
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
-	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict,
+	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

@@ -98,6 +98,9 @@ type Turn struct {
 // Called before anything is written, so a rejected turn leaves nothing behind. Scalar fields also
 // have database constraints; group ordering spans rows and is checked here for every append path.
 func (t Turn) Validate() error {
+	if err := ValidateMessageCount(len(t.Messages)); err != nil {
+		return err
+	}
 	if strings.TrimSpace(t.Scope) == "" {
 		return fmt.Errorf("turn has no scope")
 	}
@@ -105,7 +108,15 @@ func (t Turn) Validate() error {
 		return fmt.Errorf("turn has no messages")
 	}
 	seen := make(map[int]bool, len(t.Messages))
+	contentBytes := 0
 	for i, m := range t.Messages {
+		if len(m.Content) > MaxMessageBytes {
+			return ErrMessageSize
+		}
+		if len(m.Content) > MaxObservationBytes-contentBytes {
+			return ErrObservationSize
+		}
+		contentBytes += len(m.Content)
 		if !m.Role.Valid() {
 			return fmt.Errorf("message %d has role %q, which is not one of user, assistant, system, tool", i, m.Role)
 		}

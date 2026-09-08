@@ -58,6 +58,12 @@ func Contract() string {
 		"and %d matching entity/name pairs. Exceeding a limit returns HTTP 400 and `invalid_question`, "+
 		"with no partial bundle. The match count includes the selected speaker. Fact-budget cuts "+
 		"remain successful responses with `truncated: true`.\n", domain.MaxRecallQuestionBytes, domain.MaxRecallTerms, domain.MaxRecallMatches)
+	fmt.Fprintf(&b, "\nObservations admit at most %d messages, %d UTF-8 content bytes per message and %d "+
+		"content bytes per turn. Exceeding these limits returns HTTP 400 and `invalid_turn` before storage. "+
+		"Busy authentication or project/credential capacity returns HTTP 429 and `rate_limited`, with "+
+		"`Retry-After: 1`. Retry with backoff and the same observation idempotency key; a refusal has no "+
+		"stored receipt. Limits are per API process; health checks remain outside admission.\n",
+		domain.MaxObservationMessages, domain.MaxMessageBytes, domain.MaxObservationBytes)
 
 	b.WriteString("\n## Operations\n\n")
 	b.WriteString("| Operation | Method | Path | On success |\n|---|---|---|---|\n")

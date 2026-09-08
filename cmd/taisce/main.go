@@ -140,6 +140,25 @@ func run(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("registry database unreachable: %w", err)
 	}
 
+	role := strings.TrimSpace(os.Getenv(envRole))
+	if role == "" {
+		role = roleAll
+	}
+	if role != roleAll && role != roleAPI && role != roleWorker {
+		return fmt.Errorf("%s is %q; it is one of %q, %q or %q", envRole, role, roleAll, roleAPI, roleWorker)
+	}
+
+	admission, _ := api.NewAdmission(4, 4)
+	if role != roleWorker {
+		admission, err = api.NewAdmission(memory.Config().MaxConns, registry.Config().MaxConns)
+		if err != nil {
+			return err
+		}
+	}
+	defer func() {
+		stats := admission.Stats()
+		log.Info("HTTP admission totals", "accepted", stats.Accepted, "refused", stats.Refused, "anonymous_audit_suppressed", stats.AuditSuppressed)
+	}()
 	server := api.NewServer(
 		credential.NewStore(registry, string(migrate.ControlSchema)),
 		pg.NewAuditStore(memory, schema),
@@ -150,6 +169,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 		recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()),
 		schema,
 		log,
+		admission,
 	)
 
 	// The driver forms the backlog behind the append. Without it, turns are stored, freshness never
@@ -161,13 +181,6 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// work without one, and refusing to start would turn a five-minute install into a failure in
 	// minute one. What it must not do is look fine, so it says so at every level an operator might
 	// be reading.
-	role := strings.TrimSpace(os.Getenv(envRole))
-	if role == "" {
-		role = roleAll
-	}
-	if role != roleAll && role != roleAPI && role != roleWorker {
-		return fmt.Errorf("%s is %q; it is one of %q, %q or %q", envRole, role, roleAll, roleAPI, roleWorker)
-	}
 
 	driverStopped := make(chan struct{})
 	switch {

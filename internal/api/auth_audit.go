@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -48,6 +49,11 @@ func (b *refusedAuthBudget) take(now time.Time) (magnitude int, firstSuppressed 
 // and copying it would let an unauthenticated caller put personal content into permanent storage.
 // A fixed principal records the failed boundary without claiming to identify an unknown person.
 func (s *Server) recordRefusedAuth(r *http.Request) {
+	release, ok := s.admission.acquireAudit()
+	if !ok {
+		return
+	}
+	defer release()
 	magnitude, firstSuppressed := s.authAudits.take(time.Now())
 	if magnitude == 0 {
 		if firstSuppressed {
@@ -56,7 +62,9 @@ func (s *Server) recordRefusedAuth(r *http.Request) {
 		}
 		return
 	}
-	if err := s.audit.Append(r.Context(), domain.AuditEntry{
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if err := s.audit.Append(ctx, domain.AuditEntry{
 		Operation:     domain.AuditAuthenticate,
 		Principal:     "unresolved",
 		PrincipalKind: domain.PrincipalSystem,

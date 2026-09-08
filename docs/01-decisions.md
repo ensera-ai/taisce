@@ -2334,3 +2334,68 @@ latency and availability to each read.
 migration. Limits are documented client-visible refusals; raising them requires resource evidence,
 and lowering them requires a compatibility review. Alias ownership, concurrent registration,
 normalized-relation comparison and controlled-host measurements remain open under #102.
+
+
+## D73 — HTTP work is admitted before database use and observations have explicit size ceilings
+
+**Date:** 2026-09-08. **Tracking:** [#93](https://github.com/althunibat/taisce/issues/93).
+
+**Decision.** The serving command derives a process-local admission gate from the actual connection
+pools. Memory work admits at most `min(64, memory_pool_max - 1)` simultaneous requests, at most half
+that capacity per project (rounded down, minimum one), and at most half the project capacity per
+credential (minimum one). API/all roles require at least three memory connections; worker-only
+mode has no HTTP capacity requirement. Authentication admits at most two concurrent registry
+lookups (one when the registry pool has one connection), with a 256-request burst and refill of
+128 requests per second. These rate and absolute concurrency ceilings are conservative protection,
+not measured optimum settings; workload tuning remains part of #93.
+
+Excess work is refused immediately with `429 rate_limited` and `Retry-After: 1`. It is never queued
+in an application slice or goroutine waiting for capacity. Authentication completes before a
+project/credential slot is acquired, and project existence checks happen inside that memory slot.
+Each slot is released on return, cancellation or panic. Counter maps retain only active trusted
+project/credential identifiers, with a count bounded by admitted work; raw tokens and client
+addresses are not keys. Aggregate counters are readable without per-principal metric labels and
+the serving command logs totals at shutdown. They are not a substitute for the live observability
+work in #94.
+
+Anonymous audit writes also consume the shared memory-work budget, with at most one simultaneous
+write. A busy audit path is suppressed and counted separately. The existing 16-samples-per-minute
+audit budget remains. Audit writes have a one-second context deadline; credential lookup has two
+seconds; protected requests carry a 30-second context deadline through database calls. Health
+checks stay outside the gate and perform no database work.
+
+An observation admits at most 64 messages, 65536 UTF-8 content bytes per message and 262144 content
+bytes in total. Domain validation applies before copying/sorting/fingerprinting a new turn or
+starting its transaction. HTTP checks message count before constructing a second message slice.
+Over-limit turns return `400 invalid_turn` with no storage writes; stored history is not rewritten.
+The limits also apply when a caller submits a retry payload. Clients must retain the same
+idempotency key when retrying a capacity refusal.
+
+**Security and availability.** The assets are memory connections, registry connections, request
+memory and downstream extraction work. The attacker may hold a project credential, rotate among
+credentials for that project, or send anonymous headers. The gate prevents one admitted project
+from occupying every memory connection in the serving process, and bounds concurrent/aggregate
+authentication work. A real HTTP test holds one project's append on a database lock while the
+second project observes and recalls through a four-connection memory pool. A separate test holds
+a registry table lock and verifies only two queries wait while excess anonymous requests receive
+429; cancellation and lookup timeout release capacity. Credential rotation, global exhaustion,
+audit capacity, key cleanup and retry identity have dedicated tests.
+
+**Limits.** This is per process. Several API replicas have separate gates. Authentication is a
+shared step before identity is known; the mechanism does not guarantee admission fairness during
+an adversarial authentication flood. Upstream traffic protection and deployment-wide workloads
+remain necessary. Size-bounded writes still accumulate indefinitely during a provider outage until
+durable backlog admission is implemented. This batch therefore does not close #93. The 30-second
+context propagates cancellation; it does not prove every extension or future query promptly
+honors cancellation.
+
+**Rejected alternatives.** Queuing requests hides saturation while retaining memory and sockets.
+A credential-only bound is defeated by credential rotation. A global-only bound lets one project
+occupy every admitted memory operation. A rate limit without concurrency limits does not stop
+slow requests from accumulating. A shared distributed limiter was deferred until its availability
+and deployment-wide cost are measured; no cluster-wide guarantee is claimed from local counters.
+
+**Undo cost.** There is no persisted format change. Removing the gate or increasing ceilings
+changes overload behavior and requires new resource evidence. Lowering observation limits affects
+client compatibility, including retries of previously accepted larger payloads. Durable backlog
+accounting and live metrics need their own storage/operational contracts.

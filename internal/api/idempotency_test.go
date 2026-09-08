@@ -54,12 +54,28 @@ func TestConcurrentObservationRetriesShareOneReceiptAndOneFormation(t *testing.T
 		go func() {
 			defer wg.Done()
 			var result result
-			req, err := http.NewRequest(http.MethodPost, h.server.URL+"/v1/observations", bytes.NewReader(wire))
-			if err == nil {
+			var err error
+			for attempt := 0; attempt < 20; attempt++ {
+				req, requestErr := http.NewRequest(http.MethodPost, h.server.URL+"/v1/observations", bytes.NewReader(wire))
+				if requestErr != nil {
+					err = requestErr
+					break
+				}
 				req.Header.Set("Authorization", "Bearer "+h.token)
 				resp, requestErr := h.server.Client().Do(req)
 				err = requestErr
 				if err == nil {
+					if resp.StatusCode == http.StatusTooManyRequests {
+						retryAfter := resp.Header.Get("Retry-After")
+						resp.Body.Close()
+						if retryAfter != "1" {
+							err = fmt.Errorf("missing retry contract: %q", retryAfter)
+							break
+						}
+						err = fmt.Errorf("admission retries exhausted")
+						time.Sleep(time.Second + time.Duration(i*7+attempt*11)*time.Millisecond)
+						continue
+					}
 					if resp.StatusCode != http.StatusCreated {
 						err = fmt.Errorf("retry returned %d", resp.StatusCode)
 					} else {
@@ -67,6 +83,7 @@ func TestConcurrentObservationRetriesShareOneReceiptAndOneFormation(t *testing.T
 					}
 					resp.Body.Close()
 				}
+				break
 			}
 			result.err = err
 			receipts <- result

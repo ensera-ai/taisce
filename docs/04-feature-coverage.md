@@ -31,10 +31,12 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Effective runtime privileges [#109](https://github.com/althunibat/taisce/issues/109) | Closed; `bab1c0b`. Bootstrap and each new pool connection check direct/inherited privileges, SET ROLE, ownership and protected catalogs. Registry runtime is read-only. | No remaining scope in this issue. D70 documents remediation and connection-admission limits. |
 | Atomic project storage [#110](https://github.com/althunibat/taisce/issues/110) | Closed; `1309e72`. One name contract, transactional DDL/row creation, bounded collision-resistant physical names, catalog validation and legacy reuse. | None in this issue; vector strategy/scale measurements remain #101. |
 
-| Exact anchor admission [#102](https://github.com/althunibat/taisce/issues/102) | Core implemented in this batch. Separate indexed name/alias arms, question/term/match limits, explicit refusal before traversal, real-database plan and attribution/erasure tests. | Alias-specific ownership and concurrent registration, normalized-relation comparison and controlled-host workload measurements. Issue remains open. |
+| Exact anchor admission [#102](https://github.com/althunibat/taisce/issues/102) | Core implemented; `3b3a3bb`. Separate indexed name/alias arms, question/term/match limits, explicit refusal before traversal, real-database plan and attribution/erasure tests. | Alias-specific ownership and concurrent registration, normalized-relation comparison and controlled-host workload measurements. Issue remains open. |
 
-The complete real-PostgreSQL suite and uncached repeat through anchor admission pass at
-**89.2%**, now the enforced floor. Integrity's targeted race checks and `go vet ./...` pass. These
+| Shared request admission [#93](https://github.com/althunibat/taisce/issues/93) | Core implemented in this batch. Message count/byte bounds, pool-derived project/credential concurrency, bounded authentication/audit work and retryable HTTP refusal. Two-project progress and registry-lock tests use real PostgreSQL. | Durable backlog admission, deployment-wide workload measurements and live operational metrics. Issue remains open. |
+
+The complete real-PostgreSQL suite and uncached repeat through shared request admission pass at
+**89.8%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
 Inference profiles are tracked separately. The full local inference suite passed in 2140.657 seconds
@@ -43,7 +45,7 @@ against `17ac077` passed in 462.482 seconds. Known semantic separation limitatio
 in the tests. OpenRouter stopped on upstream HTTP 429; a later bounded retry was also rate-limited.
 Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist configuration.
 
-Next: shared admission/backlog controls (#93) and operational measurements under their existing
+Next: durable backlog admission (#93) and operational measurements under their existing
 issues. Anchoring’s remaining ownership and workload criteria stay in #102. The generation/rebuild lifecycle is required before closing #84 or #100. Product and adapter
 journeys retain their acceptance criteria and remain in the execution order below.
 

@@ -191,6 +191,13 @@ curl -X POST localhost:8080/v1/erasures -H "Authorization: Bearer $TOKEN" \
 # "residual": {"fact":0,"entity":0,"chunk":0,"rejected_claim":0}, "clean": true
 ```
 
+**Resource limits are explicit.** Observations admit at most 64 messages, 64 KiB of UTF-8 content per
+message and 256 KiB per turn. Busy request capacity returns `429 rate_limited` with `Retry-After: 1`;
+retry with backoff and the same observation idempotency key. The server derives project and
+credential concurrency from its memory pool, which needs at least three connections for API mode.
+See the [contract](docs/02-contract.md) and D73 for request, authentication and audit limits. Durable
+backlog admission remains under development; a provider outage can still accumulate stored turns.
+
 **Personal recall names the data subject explicitly.** For example:
 
 ```bash
