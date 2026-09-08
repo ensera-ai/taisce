@@ -3141,3 +3141,48 @@ remain #43/#15, and controlled workload measurements remain separate.
 **Reversal.** Easy in code, consequential for interpretation. Changing required/forbidden sets or the
 attempt policy changes what a pass means; version the fixtures and retain both run outputs when
 comparing policies. This decision records the existing test policy; it changes no prompt or threshold.
+
+## D90 — Different content access requires different projects
+
+**Decision.** A credential grants access to the content of one project. Read-only credentials limit
+mutations; they do not conceal a subset of that project's content. Applications with different
+sensitivity domains provision separate projects and give each caller only the credentials it needs.
+There are no per-record sensitivity labels or credential clearances. Migration 0035 removes the
+unused `classification` columns from observations and projection registrations, so exports no longer
+present an inert field that could be mistaken for an enforced access rule.
+
+**Boundary.** The protected assets include statements, source context, entity identities, derived
+reports, citations and export material. A lower-trust application must not obtain another domain's
+content by naming its entity, subject, record ID, project or invented clearance. The HTTP server
+selects the project from the authenticated registry grant; queries and project-consistent references
+apply that scope throughout the memory lifecycle. Unknown label/project request fields are refused.
+Project names express no authority themselves. A caller given both credentials can access both
+projects; a data-plane SQL identity or database administrator is outside this HTTP confidentiality
+boundary. D68/D70 document that distinction.
+
+`TestSeparateProjectsEnforceContentAccessAcrossTheMemoryLifecycle` provisions two projects with
+identical entity names and subject identifiers. It verifies content separation across HTTP recall,
+inventory, citations, history, export and mutations; foreign and absent record lookups are identical,
+read-only mutations fail, and erasing one project leaves the other's content intact. The test also
+checks that the unused columns are gone. Existing report provenance and graph tests cover the shared
+project predicates and cross-project relationships below those routes.
+
+**Alternatives rejected.** Per-record labels and clearance levels would require a defined order,
+authority for relabeling, label propagation through entity sharing, temporal changes, summaries and
+every read/export path. An omitted propagation check could reveal protected material through derived
+content. No concrete requirement here justifies that additional security model. Filtering only the
+final response would leave graph paths, summaries and metadata as disclosure paths. Keeping unused
+labels would imply a control that does not exist. A separate PostgreSQL instance per sensitivity domain
+is available when operators need that stronger infrastructure boundary, but is not a required
+application deployment.
+
+**Cost and limits.** Project separation can duplicate common context and prevents automatic graph
+traversal across domains. An application authorized for several domains must query each explicitly
+and govern its combined result. Erasure/export are per project, so the application must account for
+all projects in which it stored a person's data. This choice adds no label joins or clearance checks
+to ordinary recall, and makes no production performance claim.
+
+**Reversal.** Moderate before release, substantial afterward. Adding in-project sensitivity would
+require a complete authority/propagation contract, data classification, new tests and migration of
+existing records. It must never reinterpret missing labels as broader access. The project-only
+contract remains the supported behavior unless that work is explicitly adopted.

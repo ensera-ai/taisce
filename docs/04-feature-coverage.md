@@ -48,6 +48,7 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Curated record lifecycle [#89](https://github.com/althunibat/taisce/issues/89) | Explicit restricted issuance, shared permission gate, content-free denied-operation audit with registry-authoritative access using one opaque token format (D79). | Bounded inventory/history inspection is implemented under D81. D84 adds source-backed retractions, versions and atomic batches; D85 adds current-record corrections with independent authored sources and no-model replay. Independent assertions, feedback, entity purge, finer human authorization and complete rebuild remain open. |
 | Temporal knowledge [#116](https://github.com/althunibat/taisce/issues/116) | Preserved validity versions, stable fact IDs, recorded supersession sources, causal erasure/retention and history from the first assertion (D78). | Mixed-workload measurement and generation/rebuild integration remain open. |
 | Report freshness [#117](https://github.com/althunibat/taisce/issues/117) | Source fact revisions, atomic stale-write refusal and invalidation of direct/parent summaries (D83). Database concurrency, rollback and prompt-metadata regressions cover the boundary. | None in this issue; curated retractions/rebuild remain #89/#58. |
+| Content access [#96](https://github.com/althunibat/taisce/issues/96) | D90 selects separate projects for different content access. Unused classification fields are removed; an HTTP/PostgreSQL lifecycle test proves the deployment pattern. | No in-project clearance model is claimed or required. |
 | Faithful fact recovery [#121](https://github.com/althunibat/taisce/issues/121) | Source-owned admitted outcomes and temporal receipts, exact byte validation, bounded atomic operator pages and original provenance (D88). | Full model/rule reinterpretation, other projection generations and controlled-host workloads remain #58/#101/#103. |
 | Rejected proposal replay [#120](https://github.com/althunibat/taisce/issues/120) | Stable exact-diagnostic identity, transactional registration and concurrent replay (D87). Recovery retains the identifier; distinct proposals and source ownership are preserved. | None in this issue; resumable source recovery remains #58. |
 | Ordered knowledge transitions [#119](https://github.com/althunibat/taisce/issues/119) | Automatic supersession selects a strictly later logical boundary after wall-clock rollback (D86). A deterministic PostgreSQL fixture checks retained history and aligned archive/prior/successor intervals. | None in this issue; full generation integration remains #58/#116. |
@@ -72,7 +73,7 @@ Older issue reconciliation at `ff0a851` separates completed work from superseded
 Issue #18 is a standing obligation for the life of the repository, not a finite feature awaiting
 implementation. Parent issues #83/#98 stay open while their actual child acceptance remains unfinished.
 
-The complete uncached real-PostgreSQL suite through receipt-backed fact recovery passes at **91.3%**,
+The complete uncached real-PostgreSQL suite through fact recovery and project content-access verification passes at **91.3%**,
 meeting the enforced **91.3%** floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
@@ -135,7 +136,7 @@ register; route counts alone are not a functional equivalence test.
    [ensera-ai/taisce#43](https://github.com/ensera-ai/taisce/issues/43)/[ensera-ai/taisce#45](https://github.com/ensera-ai/taisce/issues/45) extraction quality; [ensera-ai/taisce#11](https://github.com/ensera-ai/taisce/issues/11)/[ensera-ai/taisce#15](https://github.com/ensera-ai/taisce/issues/15)/[ensera-ai/taisce#16](https://github.com/ensera-ai/taisce/issues/16)/[ensera-ai/taisce#7](https://github.com/ensera-ai/taisce/issues/7) measured resolution, answer quality and scaling.
 5. **Usable product:** [#89](https://github.com/althunibat/taisce/issues/89) curated memory, [#90](https://github.com/althunibat/taisce/issues/90) citation inspection, [#91](https://github.com/althunibat/taisce/issues/91) ingestion, [#92](https://github.com/althunibat/taisce/issues/92) recall
    controls, [#95](https://github.com/althunibat/taisce/issues/95) subject lifecycle, then the session/file/MCP/adapter/portal journeys below.
-6. **Decisions:** [#96](https://github.com/althunibat/taisce/issues/96) sensitivity model and [#97](https://github.com/althunibat/taisce/issues/97) Go integration scope. Preserve D35/D39/D50 unless
+6. **Decisions:** D90 resolves sensitivity through projects; [#97](https://github.com/althunibat/taisce/issues/97) Go integration scope. Preserve D35/D39/D50 unless
    a deliberate decision changes the single-tenant, noncommercial or audit-proof model.
 
 Each issue has its own acceptance evidence. This review does not mark implementation issues closed.
