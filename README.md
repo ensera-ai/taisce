@@ -1,18 +1,26 @@
 # Taisce
 
-Memory for agents. An agent writes what it observes; later it asks a question and gets back what is
-relevant, current and attributable — with the evidence for each claim, the history behind it, and a
-guarantee that anything erased is gone and can be shown to be gone.
+Memory for agents. An agent writes what it observes; later it asks a question and gets back
+attributed claims with cited evidence. Export and erasure operate on the stored sources and their
+registered projections, with receipts computed from database state.
 
-Entities are primary and passages are evidence: a question resolves to the entities it names, the
-answer is assembled by expanding their neighbourhood, and passages are read to support what the
-traversal found. Retrieval cost is proportional to a neighbourhood rather than to how much the
-customer has stored.
+Entities organize recall and passages provide evidence. A question resolves to named entities,
+then recall expands their neighbourhood within explicit budgets. Indexed anchoring and expansion
+limits bound admitted work; controlled-host scaling and latency measurements remain in the
+[feature plan](docs/04-feature-coverage.md).
 
-Open source under Apache-2.0 — all of it, service and portal and adapters — on one PostgreSQL
-substrate. You run it: `docker compose up` on a machine, or a Helm chart in a cluster where it is
-highly available by default. Your data does not leave, and the proof that something was erased is
-computed on your own substrate rather than asserted by somebody you have to trust.
+The service is licensed under Apache-2.0 and uses one PostgreSQL instance with projects as logical
+boundaries. `docker compose up` runs the API, workers and database on one host. The Helm chart,
+portal and adapter families are tracked in the [delivery backlog](docs/04-feature-coverage.md);
+they are not all shipped components. Development occurs in `althunibat/taisce`; eventual public
+`ensera-ai/taisce` releases use separate `x.y.0` snapshots, as described in the
+[release policy](docs/05-releases.md).
+
+Inference sends model inputs to the configured, allowlisted endpoints. A hosted profile sends
+those inputs to its provider; using PostgreSQL locally does not make that inference local.
+Database erasure does not establish what an external provider retained. See the
+[operational health guide](docs/07-operational-health.md) and
+[ingestion recovery runbook](docs/06-ingestion-budget.md) for running the service.
 
 ## Where to start
 
