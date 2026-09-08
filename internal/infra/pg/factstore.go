@@ -54,6 +54,19 @@ var ErrUnboundSpeaker = errors.New("speaker reference needs the observation's at
 func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observationID string,
 	speaker domain.Role, dataSubjectID string, claim domain.Claim) (string, error) {
 
+	var factID string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		factID, err = assertFactTx(ctx, tx, schema, scope, observationID, speaker, dataSubjectID, claim, ExtractorVersion, time.Time{})
+		return err
+	})
+	return factID, err
+}
+
+// Human corrections share the same source, role and temporal write boundary; only provenance differs.
+func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observationID string,
+	speaker domain.Role, dataSubjectID string, claim domain.Claim, extractorVersion string, knownAt time.Time) (string, error) {
+
 	if dataSubjectID != "" && !speaker.SpeaksForPrincipal() {
 		return "", fmt.Errorf("%w: message %d has role %q", ErrNotSpokenByPrincipal, claim.SourceOrdinal, speaker)
 	}
@@ -67,7 +80,7 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 	}
 
 	var factID string
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err := func() error {
 		if err := lockClaimSource(ctx, tx, schema, scope, observationID); err != nil {
 			return err
 		}
@@ -106,9 +119,21 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 
 		// Stamp knowledge after entity upserts acquire their row locks. A transaction that waited
 		// behind another assertion must not use its earlier transaction-start timestamp.
-		var learnedAt time.Time
-		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&learnedAt); err != nil {
-			return fmt.Errorf("stamp fact knowledge: %w", err)
+		learnedAt := knownAt
+		if learnedAt.IsZero() {
+			query := `SELECT clock_timestamp()`
+			var args []any
+			if claim.Cardinality == domain.CardinalityOne && subjectID != "" {
+				// Wall time can move backwards. The subject row lock serializes these transitions;
+				// each successor must start strictly after the knowledge it archives, even then.
+				query = schema.SQL(`SELECT greatest(clock_timestamp(),max(lower(known))+interval '1 microsecond')
+                    FROM {schema}.fact WHERE scope=$1 AND subject_entity_id=$2::uuid AND predicate=$3
+                    AND upper_inf(valid) AND upper_inf(known) AND lower(valid)<$4`)
+				args = []any{scope, subjectID, claim.Predicate, validFrom}
+			}
+			if err := tx.QueryRow(ctx, query, args...).Scan(&learnedAt); err != nil {
+				return fmt.Errorf("stamp fact knowledge: %w", err)
+			}
 		}
 		// Save the previous validity at its original knowledge interval before changing the
 		// retained row. The snapshot, causal source, registration and new assertion commit together.
@@ -131,7 +156,7 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 		// a plausible fragment of the wrong sentence and looks entirely correct.
 		if _, err := tx.Exec(ctx, schema.SQL(insertEvidenceSQL),
 			id, observationID, claim.SourceOrdinal, claim.Quote, claim.ByteStart, claim.ByteEnd,
-			ExtractorVersion, scope); err != nil {
+			extractorVersion, scope); err != nil {
 			return fmt.Errorf("insert evidence: %w", err)
 		}
 
@@ -142,7 +167,7 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 
 		factID = id.String()
 		return nil
-	})
+	}()
 	return factID, err
 }
 

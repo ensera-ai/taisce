@@ -85,6 +85,13 @@ func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubject
 			return err
 		}
 		out.Sections["record_retraction"] = withdrawals
+		curated, err := exportRows(ctx, tx, schema, `SELECT to_jsonb(c) FROM {schema}.curated_claim c
+            JOIN {schema}.observation o ON o.scope=c.scope AND o.observation_id=c.source_observation_id
+            WHERE o.scope=$1 AND o.data_subject_id=$2 ORDER BY c.source_observation_id`, scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Sections["curated_claim"] = curated
 
 		for _, k := range kinds {
 			// The same interpolation erasure uses, and safe for the same reason: these identifiers

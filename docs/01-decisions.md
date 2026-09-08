@@ -2924,3 +2924,102 @@ are disposable coordination metadata; source instructions are human input and mu
 any replacement. Changing signature or identity normalization after release requires a versioned
 mapping for retained citations and instructions. Greenfield schemas may still be consolidated before
 the first supported release; the source-preservation requirement remains.
+
+
+## D85 — Corrections create independently attributable source claims
+
+**Status:** Accepted. **Date:** 2026-09-08. Tracked by #89; generation integration remains #58/#116.
+
+**Decision.** A correction of a current record preserves its subject, predicate and stored attribution
+while replacing the object and statement. Its expected version is mandatory. A batch of 1–20 records
+shares D84's 128-evidence-row support ceiling; objects are at most 1024 UTF-8 bytes and statements at
+most 16384. Text must be nonblank, valid UTF-8 and free of NUL. Optional valid-from is explicit;
+omission uses server time. Closed validity or knowledge conflicts rather than rewriting history.
+
+One database transaction retracts each original, appends a separate user-role observation containing
+the submitted statement, asserts the replacement through the shared fact boundary and stores its
+structured authored claim. The original knowledge end and replacement knowledge start are identical.
+The source is marked formed and the existing contiguous freshness calculation runs in that same
+transaction; no unformed source escapes and no provider call occupies a transaction. Deferred admission examines
+final source state, so an already-formed correction consumes no pending reservation and remains
+available at backlog capacity without advancing freshness past an older pending turn. The transaction
+records both the withdrawal and correction actor/count operations. Audit failure rolls everything back.
+
+`curated_claim` is source-owned human input, not a projection. It retains the structural instruction,
+source UUID, editor UUID and stable expected fact UUID. Its source is marked `curated`. Formation
+checks that marker and replays the stored claim without extraction. Missing/corrupt instructions or
+an identity mismatch fail closed. Recovery reuses the source's server-assigned editing time as knowledge
+start; client-supplied validity cannot backdate knowledge. The source text and exact quote remain inspectable with
+`extractor_version: curated/v1` and `authored_by`. Confidence stays zero: this is an attributable human
+assertion, not a model confidence estimate or evidence of truth.
+
+The original's withdrawal links to the replacement source and record while that source survives.
+Deleting the replacement source clears both identifiers through the database foreign key and trigger,
+without deleting the original withdrawal. Subject export includes authored instructions; erasure
+counts their deletion and residual, and source expiry cascades them. Removing the old source does not
+remove independently authored replacement content. Later withdrawal still suppresses the authored claim.
+
+**Alternatives rejected.** Updating the original statement would make a saved citation point at words
+it never supported. Re-extracting human corrections introduces provider cost and a second interpretation
+that can disagree with explicit input. Committing withdrawal before replacement permits partial edits.
+A background correction would need pending/failed semantics despite the absence of inference work.
+Allowing subject or predicate changes here can silently alter a different relationship or owner; that
+requires a separate assertion and explicit withdrawal, under the remaining #89 lifecycle scope.
+
+**Security and cost.** A project write credential can correct project memory. The actor and original
+attribution come from the registry and retained record; neither is a body field. Read-only credentials
+fail at the shared gate. The new statement and structured instruction are sensitive input, owned by
+the new source; their matching IDs/hashes are not anonymization. JSON instruction storage duplicates
+some bounded source text to keep replay self-contained; it is erased with that source. Formation adds
+one source-kind lookup per turn. Citation detail adds a bounded indexed author join; ordinary recall
+adds no lookup. Source/fact locks and D83 invalidation dominate contention. General cross-operation
+lock ordering and measured workloads remain #100/#103; this is an atomicity claim, not a production
+throughput claim or a promise that arbitrary concurrent database work cannot abort and require retry.
+
+**Evidence and limits.** Real PostgreSQL and HTTP tests check current/past reads at the transition,
+immutable original evidence, stored attribution, concurrent edits, atomic audit failure, malformed and
+oversized input, project and reader refusals, no-model replay, identity drift refusal, source loss,
+export, erasure and replacement expiry. Independent assertions, feedback, entity purge and arbitrary
+historical editing remain #89. Full reconstruction of superseded temporal generations remains #58/#116;
+recovering one lost derived authored claim does not close those issues.
+
+**Reversal.** Transaction helpers are internal. Authored sources and their structured instructions
+must survive any replacement design. Changing their encoding or interpreting an existing correction
+under new rules requires an explicit source-format/generation decision; they cannot be discarded as
+rebuildable projections. Public endpoint removal requires contract versioning after first release.
+
+
+## D86 — Automatic supersession uses ordered logical knowledge timestamps
+
+**Status:** Accepted. **Date:** 2026-09-08. Tracked by #119.
+
+**Decision.** For an automatically timestamped single-cardinality assertion, choose the greater of
+current database wall time and one microsecond after the latest knowledge start among the current
+records it can supersede. The writer already holds the resolved subject's row lock before this read,
+so supported concurrent assertions for that subject serialize. The same timestamp closes archived
+knowledge and begins both the changed prior state and successor. Explicit stored correction/recovery
+timestamps retain their original semantics; this policy does not reinterpret historical source input.
+
+A wall clock can move backwards, and an unbounded fresh clock reading can precede a committed
+knowledge start. Passing that reading to range construction rejects a valid assertion with a reversed
+range. Equal readings can also erase an interval's duration. The one-microsecond advance matches the
+storage timestamp resolution and ensures a nonempty interval without inventing a larger time window.
+
+**Alternatives rejected.** Failing until wall time catches up makes clock correction an ingestion
+outage. Retrying the same earlier clock reading has the same failure. Changing the old timestamp
+rewrites historical knowledge. A global timestamp sequencer would serialize unrelated projects and
+relations despite the invariant being local to the records involved in this transition.
+
+**Cost and limits.** The existing clock read becomes a scoped read of eligible current facts for
+single-cardinality writes, under existing entity locks. Ordinary recall adds no work. Logical time
+may temporarily be ahead of physical wall time after a rollback; it expresses ordering, not an exact
+measurement of elapsed time. This is not a distributed global clock or a repair for out-of-order
+validity changes. Direct database writes do not automatically participate in application lock order;
+constraints remain the final refusal boundary. Workload costs remain #103.
+
+**Evidence and reversal.** TestSupersessionAfterClockRollbackPreservesOrderedKnowledge places a retained
+knowledge start one minute ahead of wall time, then checks successful supersession, exact alignment
+of archive/prior/successor boundaries and both historical answers. It fails with SQLSTATE 22000 before
+the fix. Concurrent replay, report invalidation and authored recovery remain regression checks. The
+policy changes timestamp selection only; removing it needs no schema migration but reintroduces the
+clock-ordering failure. Existing historical timestamps must remain retained.

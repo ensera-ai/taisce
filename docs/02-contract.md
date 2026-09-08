@@ -20,6 +20,8 @@ Record retraction accepts `records`, an atomic array of 1–20 objects with `id`
 
 Retraction closes knowledge at the server time while retaining valid time and exact citations. Current recall excludes the record; earlier knowledge remains inspectable. The response supplies new versions and credential-attributed retraction metadata. Source-backed instructions prevent the same structural claim from reappearing when its source message is re-extracted. A new independent observation can assert the claim again. Retraction is not source erasure. After an uncertain response, inspect the record instead of retrying with a newly fetched version.
 
+Record correction accepts the same atomic `records` batch and support limits, adding `object` (1–1024 UTF-8 bytes), `statement` (1–16384 UTF-8 bytes) and optional `valid_from` per item. Blank, NUL-containing or invalid UTF-8 text is refused. Correction requires current known/valid state; it preserves subject, relation and attribution, withdraws the original and creates a separate authored source and replacement record. Omitted valid-from uses server time. Each result returns the original and replacement IDs, source observation ID and new version. The original's retraction metadata links to the replacement while its source survives. Curated evidence reports `curated/v1` and `authored_by`; its stored claim replays without model extraction. A correction is an accountable assertion, not a truth verification or permission to edit historical transcripts.
+
 ## Operations
 
 | Operation | Method | Path | On success |
@@ -32,6 +34,7 @@ Retraction closes knowledge at the server time while retaining valid time and ex
 | `citation.resolve` | POST | `/v1/citations/resolve` | 200 |
 | `record.list` | POST | `/v1/records/list` | 200 |
 | `record.history` | POST | `/v1/records/history` | 200 |
+| `record.correct` | POST | `/v1/records/correct` | 200 |
 | `record.retract` | POST | `/v1/records/retract` | 200 |
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
@@ -164,7 +167,7 @@ POST `/v1/citations/resolve` → 200
 | Field | Type |
 |---|---|
 | `version` | string |
-| `retraction` | {operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339)}, optional |
+| `retraction` | {operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339), replacement_source_observation_id: string, optional, replacement_record_id: string, optional}, optional |
 | `id` | string |
 | `superseded_by` | string, optional |
 | `supersession_source_observation_id` | string, optional |
@@ -179,7 +182,7 @@ POST `/v1/citations/resolve` → 200
 | `valid` | {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean} |
 | `known` | {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean} |
 | `status` | string |
-| `evidence` | array of {source_observation_id: string, source_ordinal: integer, log_offset: integer, role: string, occurred_at: timestamp (RFC 3339), quote: string, byte_start: integer, byte_end: integer, extractor_version: string, context: string, context_byte_start: integer, context_byte_end: integer, context_complete: boolean} |
+| `evidence` | array of {authored_by: string, optional, source_observation_id: string, source_ordinal: integer, log_offset: integer, role: string, occurred_at: timestamp (RFC 3339), quote: string, byte_start: integer, byte_end: integer, extractor_version: string, context: string, context_byte_start: integer, context_byte_end: integer, context_complete: boolean} |
 | `next` | {source_observation_id: string, source_ordinal: integer, byte_start: integer}, optional |
 
 
@@ -220,11 +223,28 @@ POST `/v1/records/history` → 200
 | Field | Type |
 |---|---|
 | `version` | string |
-| `retraction` | {operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339)}, optional |
+| `retraction` | {operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339), replacement_source_observation_id: string, optional, replacement_record_id: string, optional}, optional |
 | `id` | string |
 | `current` | {valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}} |
 | `previous` | array of {history_id: string, valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, ended_by_observation_id: string} |
 | `next` | {known_until: timestamp (RFC 3339), history_id: string}, optional |
+
+
+## `record.correct`
+
+POST `/v1/records/correct` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `records` | array of {id: string, expected_version: string, object: string, statement: string, valid_from: timestamp (RFC 3339)} |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `records` | array of {original_id: string, id: string, version: string, source_observation_id: string} |
 
 
 ## `record.retract`
@@ -241,7 +261,7 @@ POST `/v1/records/retract` → 200
 
 | Field | Type |
 |---|---|
-| `records` | array of {id: string, version: string, operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339)} |
+| `records` | array of {id: string, version: string, operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339), replacement_source_observation_id: string, optional, replacement_record_id: string, optional} |
 
 
 ## Refusals

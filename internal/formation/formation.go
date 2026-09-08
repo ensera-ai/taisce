@@ -78,6 +78,21 @@ type Report struct {
 // a caller re-running a turn to compare extractor versions wants the first without the second.
 func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.Observation) (Report, error) {
 	report := Report{ObservationID: observation.ID}
+	curated, err := f.facts.ReplayCurated(ctx, schema, observation.Scope, observation.ID)
+	if curated {
+		report.MessagesRead = 1
+		if errors.Is(err, pg.ErrRetractedClaim) {
+			report.ClaimsRetracted = 1
+			return report, nil
+		}
+		if err == nil {
+			report.FactsAsserted = 1
+		}
+		return report, err
+	}
+	if err != nil {
+		return report, err
+	}
 
 	messages, err := f.observations.Messages(ctx, schema, observation.ID)
 	if err != nil {

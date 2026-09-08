@@ -46,6 +46,7 @@ not anonymized data. The audit stores actor, project, operation and count, witho
 record/source identifiers. A stolen write credential can retract its project's records; this endpoint
 does not provide finer human roles than the project credential boundary.
 
-Corrections, feedback, entity purge and a supported rebuild workflow remain tracked by #89/#58.
+[Current record corrections](14-record-corrections.md) create attributable replacement sources.
+Independent assertions, feedback, entity purge and a supported rebuild workflow remain tracked by #89/#58.
 Recovery tests currently prove source replay, stable claim identity and withdrawal preservation under
 derived-row loss; they do not establish a complete generation or citation migration policy.

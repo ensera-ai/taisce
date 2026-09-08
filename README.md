@@ -153,6 +153,7 @@ freshness and export without memory mutation. Ordinary issuance defaults to read
 [Record inspection](docs/11-record-inspection.md) supports bounded browsing and temporal history;
 [citation resolution](docs/08-citation-resolution.md) provides the supporting source bytes.
 [Record retraction](docs/13-record-retractions.md) withdraws claims with version checks and atomic batches.
+[Record correction](docs/14-record-corrections.md) creates attributable replacement evidence while preserving the original citation.
 [Recall controls](docs/12-recall-controls.md) let each client set a smaller context allowance and
 explicitly select labeled source roles.
 

@@ -124,6 +124,16 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 			return err
 		}
 		out.Residual["record_retraction"] = withdrawalResidual
+		curated, err := tx.Exec(ctx, schema.SQL(`DELETE FROM {schema}.curated_claim c USING {schema}.observation o WHERE c.scope=o.scope AND c.source_observation_id=o.observation_id AND o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Deleted["curated_claim"] = int(curated.RowsAffected())
+		var curatedResidual int
+		if err := tx.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.curated_claim c JOIN {schema}.observation o ON o.scope=c.scope AND o.observation_id=c.source_observation_id WHERE o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID).Scan(&curatedResidual); err != nil {
+			return err
+		}
+		out.Residual["curated_claim"] = curatedResidual
 
 		// Last, because the cascade takes the registrations with it and the count above needs them.
 		// The observation is the root: after this, the turn's messages are gone too, and a rebuild

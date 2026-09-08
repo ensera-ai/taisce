@@ -34,9 +34,11 @@ type RecordMutation struct {
 }
 
 type RetractionDetails struct {
-	OperationID string    `json:"operation_id"`
-	PrincipalID string    `json:"principal_id"`
-	RetractedAt time.Time `json:"retracted_at"`
+	OperationID              string    `json:"operation_id"`
+	PrincipalID              string    `json:"principal_id"`
+	RetractedAt              time.Time `json:"retracted_at"`
+	ReplacementObservationID *string   `json:"replacement_source_observation_id,omitempty"`
+	ReplacementFactID        *string   `json:"replacement_record_id,omitempty"`
 }
 
 type RecordRetraction struct {
@@ -101,8 +103,8 @@ func lockClaimSource(ctx context.Context, tx pgx.Tx, schema Schema, scope, obser
 
 func readRetraction(ctx context.Context, tx pgx.Tx, schema Schema, scope, id string) (*RetractionDetails, error) {
 	var out RetractionDetails
-	err := tx.QueryRow(ctx, schema.SQL(`SELECT operation_id::text,principal_id::text,retracted_at FROM {schema}.record_retraction
-        WHERE scope=$1 AND target_fact_id=$2::uuid ORDER BY source_observation_id,source_ordinal LIMIT 1`), scope, id).Scan(&out.OperationID, &out.PrincipalID, &out.RetractedAt)
+	err := tx.QueryRow(ctx, schema.SQL(`SELECT operation_id::text,principal_id::text,retracted_at,replacement_observation_id::text,replacement_fact_id::text FROM {schema}.record_retraction
+        WHERE scope=$1 AND target_fact_id=$2::uuid ORDER BY source_observation_id,source_ordinal LIMIT 1`), scope, id).Scan(&out.OperationID, &out.PrincipalID, &out.RetractedAt, &out.ReplacementObservationID, &out.ReplacementFactID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -161,6 +163,18 @@ func retractionSources(ctx context.Context, tx pgx.Tx, schema Schema, scope stri
 // Retract is an atomic bounded batch. Source instructions, closed knowledge, report invalidation,
 // new versions and an attributable content-free audit entry either all commit or all roll back.
 func (s *RecordStore) Retract(ctx context.Context, scope, principal string, requests []RecordMutation) (RetractionBatch, error) {
+	var out RetractionBatch
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = s.retractTx(ctx, tx, scope, principal, requests)
+		return err
+	})
+	return out, err
+}
+
+// The caller owns commit so a correction can withdraw its target and assert its replacement together.
+func (s *RecordStore) retractTx(ctx context.Context, tx pgx.Tx, scope, principal string, requests []RecordMutation) (RetractionBatch, error) {
+
 	out := RetractionBatch{Records: []RecordRetraction{}}
 	if _, err := NewSchema(scope); err != nil {
 		return out, ErrInvalidRecordMutation
@@ -183,7 +197,7 @@ func (s *RecordStore) Retract(ctx context.Context, scope, principal string, requ
 		expected[id.String()] = version.String()
 		ids = append(ids, id.String())
 	}
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = func() error {
 		sources, err := retractionSources(ctx, tx, s.schema, scope, ids)
 		if err != nil {
 			return err
@@ -273,7 +287,7 @@ func (s *RecordStore) Retract(ctx context.Context, scope, principal string, requ
 		_, err = tx.Exec(ctx, s.schema.SQL(`INSERT INTO {schema}.audit_entry(operation,principal,principal_kind,project,magnitude,outcome)
             VALUES($1,$2,$3,$4,$5,$6)`), domain.AuditRecordRetract, actor.String(), domain.PrincipalCredential, scope, len(ids), domain.OutcomeAllowed)
 		return err
-	})
+	}()
 	if err != nil {
 		return RetractionBatch{}, fmt.Errorf("retract records: %w", err)
 	}

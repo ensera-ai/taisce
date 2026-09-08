@@ -46,6 +46,7 @@ type CitationInterval struct {
 }
 
 type CitationSource struct {
+	AuthoredBy       *string   `json:"authored_by,omitempty"`
 	ObservationID    string    `json:"source_observation_id"`
 	Ordinal          int       `json:"source_ordinal"`
 	LogOffset        int64     `json:"log_offset"`
@@ -165,7 +166,7 @@ func (s *CitationStore) Resolve(ctx context.Context, scope, id string, after *Ci
 			var actual, window []byte
 			var windowStart *int
 			if err := rows.Scan(&source.ObservationID, &source.Ordinal, &source.ByteStart, &source.ByteEnd, &quoteBytes, &messageBytes, &versionBytes,
-				&quote, &version, &role, &occurred, &offset, &actual, &window, &windowStart); err != nil {
+				&quote, &version, &role, &occurred, &offset, &actual, &window, &windowStart, &source.AuthoredBy); err != nil {
 				return err
 			}
 			// The extra row only signals continuation. Its contents are validated on its own page.
@@ -216,9 +217,10 @@ const citationEvidenceSQL = `SELECT e.source_observation_id::text,e.source_ordin
  THEN substring(convert_to(m.content,'UTF8') from e.byte_start+1 for e.byte_end-e.byte_start) END,
  CASE WHEN octet_length(m.content)<=$5 AND e.byte_start>=0 AND e.byte_end<=octet_length(m.content)
  THEN substring(convert_to(m.content,'UTF8') from greatest(0,e.byte_start-$7)+1 for e.byte_end+$7-greatest(0,e.byte_start-$7)) END,
- greatest(0,e.byte_start-$7)
+ greatest(0,e.byte_start-$7),c.principal_id::text
  FROM {schema}.fact_evidence e
  LEFT JOIN {schema}.observation o ON o.observation_id=e.source_observation_id AND o.scope=e.scope
  LEFT JOIN {schema}.turn_message m ON m.observation_id=o.observation_id AND m.ordinal=e.source_ordinal
+ LEFT JOIN {schema}.curated_claim c ON c.scope=e.scope AND c.source_observation_id=e.source_observation_id
  WHERE e.scope=$1 AND e.fact_id=$2 {cursor}
  ORDER BY e.source_observation_id,e.source_ordinal,e.byte_start LIMIT $3`

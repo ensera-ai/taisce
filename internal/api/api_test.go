@@ -816,6 +816,7 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		domain.AuditRecordList:      {map[string]any{}, http.StatusOK},
 		domain.AuditRecordHistory:   {map[string]any{}, http.StatusOK},
 		domain.AuditRecordRetract:   {map[string]any{}, http.StatusOK},
+		domain.AuditRecordCorrect:   {map[string]any{}, http.StatusOK},
 		domain.AuditFreshness:       {nil, http.StatusOK},
 		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
 		domain.AuditExport:          {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
@@ -866,6 +867,11 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	run(domain.AuditRecordHistory)
 	var version string
 	if err := h.pool.QueryRow(ctx, h.schema.SQL(`SELECT version::text FROM {schema}.fact WHERE fact_id=$1`), citationID).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	exercise[domain.AuditRecordCorrect].body["records"] = []pg.RecordCorrection{{RecordMutation: pg.RecordMutation{ID: citationID, ExpectedVersion: version}, Object: "Atlas", Statement: "I work at Atlas."}}
+	run(domain.AuditRecordCorrect)
+	if err := h.pool.QueryRow(ctx, h.schema.SQL(`SELECT fact_id::text,version::text FROM {schema}.fact WHERE scope='p1' AND upper_inf(known)`)).Scan(&citationID, &version); err != nil {
 		t.Fatal(err)
 	}
 	exercise[domain.AuditRecordRetract].body["records"] = []pg.RecordMutation{{ID: citationID, ExpectedVersion: version}}

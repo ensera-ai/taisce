@@ -37,6 +37,7 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 		domain.AuditRecall:  {"question": "Where does the user live?", "data_subject_id": "subject-1"},
 		domain.AuditExport:  {"data_subject_id": "subject-1"}, domain.AuditCitationResolve: {"id": id}, domain.AuditFreshness: nil,
 		domain.AuditRecordList: {}, domain.AuditRecordHistory: {"id": id},
+		domain.AuditRecordCorrect: {"records": []pg.RecordCorrection{{RecordMutation: pg.RecordMutation{ID: id, ExpectedVersion: id}, Object: "private unauthorized mutation", Statement: "private unauthorized mutation"}}},
 		domain.AuditRecordRetract: {"records": []pg.RecordMutation{{ID: id, ExpectedVersion: id}}},
 	}
 	for _, op := range api.Operations() {
@@ -46,7 +47,7 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 		}
 		status, raw := h.raw(t, op.Method, op.Path, body, token)
 		want := 200
-		if op.Name == domain.AuditObserve || op.Name == domain.AuditErase || op.Name == domain.AuditRecordRetract {
+		if op.Name == domain.AuditObserve || op.Name == domain.AuditErase || op.Name == domain.AuditRecordRetract || op.Name == domain.AuditRecordCorrect {
 			want = 403
 		}
 		if status != want {
@@ -74,7 +75,7 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 			}
 		}
 	}
-	if refusals != 4 {
+	if refusals != 5 {
 		t.Fatalf("missing denied-operation audit: %d", refusals)
 	}
 	encoded, _ := json.Marshal(entries)

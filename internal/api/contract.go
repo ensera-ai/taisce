@@ -89,6 +89,15 @@ func Contract() string {
 		"same structural claim from reappearing when its source message is re-extracted. A new independent " +
 		"observation can assert the claim again. Retraction is not source erasure. After an uncertain response, " +
 		"inspect the record instead of retrying with a newly fetched version.\n")
+	b.WriteString("\nRecord correction accepts the same atomic `records` batch and support limits, adding " +
+		"`object` (1–1024 UTF-8 bytes), `statement` (1–16384 UTF-8 bytes) and optional `valid_from` per item. " +
+		"Blank, NUL-containing or invalid UTF-8 text is refused. Correction requires current known/valid state; " +
+		"it preserves subject, relation and attribution, withdraws the original and creates a separate authored " +
+		"source and replacement record. Omitted valid-from uses server time. Each result returns the original " +
+		"and replacement IDs, source observation ID and new version. The original's retraction metadata links " +
+		"to the replacement while its source survives. Curated evidence reports `curated/v1` and `authored_by`; " +
+		"its stored claim replays without model extraction. A correction is an accountable assertion, not a " +
+		"truth verification or permission to edit historical transcripts.\n")
 	b.WriteString("\n## Operations\n\n")
 	b.WriteString("| Operation | Method | Path | On success |\n|---|---|---|---|\n")
 	for _, o := range operations {
