@@ -1533,7 +1533,8 @@ func TestContextIsNotReadFromAnotherProjectsMessage(t *testing.T) {
 	// Deliberately simulate owner-level corruption to keep the defensive context join exercised.
 	// Runtime writes cannot create this state: the project FKs are verified in the integrity suite.
 	if _, err := pool.Exec(ctx, schema.SQL(`ALTER TABLE {schema}.projection_dependency DROP CONSTRAINT dependency_source_project_fk;
-        ALTER TABLE {schema}.fact_evidence DROP CONSTRAINT evidence_source_project_fk`)); err != nil {
+        ALTER TABLE {schema}.fact_evidence DROP CONSTRAINT evidence_source_project_fk;
+        ALTER TABLE {schema}.fact_receipt DROP CONSTRAINT fact_receipt_scope_source_observation_id_fkey`)); err != nil {
 		t.Fatal(err)
 	}
 	// A fact in another project whose evidence points at this project's message: the shape a defect

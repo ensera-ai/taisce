@@ -103,6 +103,14 @@ func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observat
 			factID = id.String()
 			return nil
 		}
+		restored, err := restoreFactReceiptTx(ctx, tx, schema, scope, id.String())
+		if err != nil {
+			return err
+		}
+		if restored {
+			factID = id.String()
+			return nil
+		}
 		subjectID, err := resolveEntity(ctx, tx, schema, scope, observationID, claim.Subject, claim.SubjectType, dataSubjectID, subjectSpeaker)
 		if err != nil {
 			return err
@@ -163,6 +171,10 @@ func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observat
 		if _, err := tx.Exec(ctx, schema.SQL(registerProjectionSQL),
 			observationID, scope, ProjectionFact, id.String(), nullIfEmpty(dataSubjectID)); err != nil {
 			return fmt.Errorf("register fact projection: %w", err)
+		}
+
+		if _, err := tx.Exec(ctx, schema.SQL(retainFactReceiptSQL), scope, id); err != nil {
+			return fmt.Errorf("retain formation receipt: %w", err)
 		}
 
 		factID = id.String()

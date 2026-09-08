@@ -3054,3 +3054,59 @@ export/erasure, foreign-source refusal and registration-failure rollback. Changi
 would create new diagnostic identities on replay and require a deliberate data-generation decision
 after release; no independent mapping table needs migration. This is a recovery prerequisite and
 does not itself implement the rebuild workflow under #58.
+
+## D88 — Recorded formation outcomes are source-owned recovery input
+
+**Decision.** Admitted facts retain a `fact_receipt` in the same transaction as their fact,
+evidence and registration. The receipt contains the exact admitted record, original evidence,
+entity identities and pipeline stamp. Temporal updates and archived intervals retain their state
+transactionally. These receipts, authored claims and withdrawal instructions extend the authoritative
+source set beyond the raw message log: a model's exact interpretation and the time it became knowledge
+cannot be reconstructed from its input words alone. Losing this source set requires backup recovery.
+
+`taisce recover facts` reads a project-scoped page of 1–100 receipts, optionally restricted to one
+observation. It restores missing facts, their recorded entity identities, original evidence and
+archived knowledge intervals without inference. Existing facts win. It verifies the quote against
+surviving source bytes before writing; inconsistent inputs or constraints abort the whole page.
+Source locks serialize competing recovery, assertion and curation for those records. Foreign keys
+and source-row locks prevent a committed recovery from retaining an erased source. Database deadlock
+or cancellation aborts a page; retry repeats an idempotent unit.
+
+Recall remains available from retained records during recovery. A page commits atomically, and other
+pages do not disappear while it runs. A successor outside the page is temporarily an unresolved link;
+its receipt keeps the identifier, and recovery attaches the live link when the successor arrives.
+Intervals already have their recorded bounds, so a missing successor never reopens an older claim.
+Reattaching a link may advance an optimistic record version; saved claim and history IDs remain.
+Pages are live UUID scans, not corpus snapshots. Restart a complete pass to include concurrent
+additions below a previous cursor. The operator receives counts and a cursor, never memory content;
+each committed page records a content-free audit operation with a per-invocation operator UUID.
+
+**Ownership and limits.** Receipts belong to their original observation and any later supersession
+cause. History also belongs to its transition source. Export covers those dependencies, explicit
+erasure counts them before removing observations, and retention cascades them. Entity identity
+copies omit accumulated aliases from other observations. This reader covers admitted records written
+with receipts. It does not recover missing receipts, evidence-only loss on an otherwise retained
+fact, manually attached additional evidence, entity-only loss, or manually inserted facts without
+receipts. It does not regenerate chunks, embeddings or summaries, and it does not reinterpret text
+under a newer model. Those generation workflows remain #58; their evidence must name the rules that
+actually ran. There is no fabricated historical backfill for this unreleased schema.
+
+**Security and cost.** The asset is recorded knowledge and its provenance; project credentials must
+not recover foreign sources, and an operator must not inadvertently resurrect erased or withdrawn
+knowledge. SQL predicates, source constraints, withdrawal state, byte checks and atomic audit hold
+that boundary. A database administrator can rewrite both sources and receipts; this is not tamper
+proof storage. Receipts duplicate admitted statement/evidence and identity metadata, and each fact
+transition updates its receipt. That adds storage and write amplification, including WAL; it adds no
+receipt lookup to ordinary recall. The page limit bounds transaction work, not a production latency
+promise. Controlled-host storage and workload measurements remain #101/#103.
+
+**Alternatives rejected.** Re-extraction alone changes outputs and knowledge times. Inferring times
+from `formed_at` cannot reconstruct individual claims or transitions. A full event-sourced rewrite
+would introduce a second temporal engine; retaining the existing recorded states reuses the tested
+constraints and read semantics. Deleting all visible memory before replay would expose an empty
+project. A generation switch is appropriate for changed interpretations, but is unnecessary for
+restoring missing records with already recorded meaning.
+
+**Reversal.** Moderate. Stop writing receipts, retire the recovery reader and drop two source-owned
+tables after choosing another supported recovery contract. Their historical contents cannot be
+recreated from messages after deletion; backups and the release support policy must reflect that.

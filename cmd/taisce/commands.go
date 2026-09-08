@@ -42,6 +42,7 @@ const usage = `taisce — memory for agents
   taisce audit seal                seal everything written since the last seal
   taisce formation parked          inspect a bounded page of parked turn metadata (--project required)
   taisce formation unpark          retry one parked turn (--project required)
+  taisce recover facts             restore a bounded page of missing facts (--project required)
   taisce health                    show content-free operational aggregates using the operator connection
   taisce probe                     check local readiness (--live for liveness, --worker for worker probes)
   taisce version                   what this binary is
@@ -72,6 +73,8 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 		return auditCommand(ctx, args[1:])
 	case "formation":
 		return formationCommand(ctx, args[1:], os.Stdout)
+	case "recover":
+		return recoveryCommand(ctx, args[1:], os.Stdout)
 	case "health":
 		return healthCommand(ctx, args[1:], os.Stdout)
 	case "probe":

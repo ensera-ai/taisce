@@ -899,6 +899,7 @@ const (
 	AuditCredentialIssue  = "credential.issue"
 	AuditCredentialRevoke = "credential.revoke"
 	AuditFormationUnpark  = "formation.unpark"
+	AuditFormationRecover = "formation.recover"
 	AuditCitationResolve  = "citation.resolve"
 	AuditRecordList       = "record.list"
 	AuditRecordHistory    = "record.history"
@@ -922,7 +923,7 @@ func RecordableOperation(name string) bool {
 	switch name {
 	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
 		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,
-		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate, AuditFormationUnpark, AuditCitationResolve, AuditRecordList, AuditRecordHistory, AuditRecordRetract, AuditRecordCorrect:
+		AuditCredentialIssue, AuditCredentialRevoke, AuditAuthenticate, AuditFormationUnpark, AuditFormationRecover, AuditCitationResolve, AuditRecordList, AuditRecordHistory, AuditRecordRetract, AuditRecordCorrect:
 		return true
 	}
 	return false

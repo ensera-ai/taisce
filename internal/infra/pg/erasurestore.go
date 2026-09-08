@@ -135,6 +135,21 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 		}
 		out.Residual["curated_claim"] = curatedResidual
 
+		// Count source-owned outcomes before cascading their parent rows. A transition is owned
+		// by both the original source and the later causal source, like fact history itself.
+		for _, table := range []string{"fact_receipt_history", "fact_receipt"} {
+			tag, err := tx.Exec(ctx, schema.SQL("DELETE FROM {schema}."+table+" r WHERE "+receiptOwnershipSQL(table)), scope, dataSubjectID)
+			if err != nil {
+				return err
+			}
+			out.Deleted[table] = int(tag.RowsAffected())
+			var remaining int
+			if err := tx.QueryRow(ctx, schema.SQL("SELECT count(*) FROM {schema}."+table+" r WHERE "+receiptOwnershipSQL(table)), scope, dataSubjectID).Scan(&remaining); err != nil {
+				return err
+			}
+			out.Residual[table] = remaining
+		}
+
 		// Last, because the cascade takes the registrations with it and the count above needs them.
 		// The observation is the root: after this, the turn's messages are gone too, and a rebuild
 		// derives only from what survived rather than repairing what did not.

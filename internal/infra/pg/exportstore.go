@@ -93,6 +93,14 @@ func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubject
 		}
 		out.Sections["curated_claim"] = curated
 
+		for _, table := range []string{"fact_receipt", "fact_receipt_history"} {
+			records, err := exportRows(ctx, tx, schema, "SELECT to_jsonb(r) FROM {schema}."+table+" r WHERE "+receiptOwnershipSQL(table)+" ORDER BY r.fact_id", scope, dataSubjectID)
+			if err != nil {
+				return err
+			}
+			out.Sections[table] = records
+		}
+
 		for _, k := range kinds {
 			// The same interpolation erasure uses, and safe for the same reason: these identifiers
 			// come from `projection_kind`, whose constraints permit nothing that is not one.
