@@ -166,6 +166,8 @@ var operations = []route{
 		func(s *Server) grantedHandler { return s.listRecords }, recordListRequest{}, pg.RecordPage{}},
 	{Operation{domain.AuditRecordHistory, http.MethodPost, "/records/history", http.StatusOK},
 		func(s *Server) grantedHandler { return s.recordHistory }, recordHistoryRequest{}, pg.RecordHistoryPage{}},
+	{Operation{domain.AuditRecordAssert, http.MethodPost, "/records/assert", http.StatusOK},
+		func(s *Server) grantedHandler { return s.assertRecords }, recordAssertionRequest{}, pg.AssertionBatch{}},
 	{Operation{domain.AuditRecordCorrect, http.MethodPost, "/records/correct", http.StatusOK},
 		func(s *Server) grantedHandler { return s.correctRecords }, recordCorrectionRequest{}, pg.CorrectionBatch{}},
 	{Operation{domain.AuditRecordRetract, http.MethodPost, "/records/retract", http.StatusOK},

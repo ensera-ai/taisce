@@ -34,6 +34,7 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 | `citation.resolve` | POST | `/v1/citations/resolve` | 200 |
 | `record.list` | POST | `/v1/records/list` | 200 |
 | `record.history` | POST | `/v1/records/history` | 200 |
+| `record.assert` | POST | `/v1/records/assert` | 200 |
 | `record.correct` | POST | `/v1/records/correct` | 200 |
 | `record.retract` | POST | `/v1/records/retract` | 200 |
 
@@ -228,6 +229,23 @@ POST `/v1/records/history` → 200
 | `current` | {valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}} |
 | `previous` | array of {history_id: string, valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, ended_by_observation_id: string} |
 | `next` | {known_until: timestamp (RFC 3339), history_id: string}, optional |
+
+
+## `record.assert`
+
+POST `/v1/records/assert` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `records` | array of {idempotency_key: string, data_subject_id: string, subject: string, predicate: string, object: string, statement: string, valid_from: timestamp (RFC 3339)} |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `records` | array of {id: string, version: string, source_observation_id: string, replayed: boolean} |
 
 
 ## `record.correct`

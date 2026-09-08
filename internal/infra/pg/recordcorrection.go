@@ -79,33 +79,15 @@ func (s *RecordStore) Correct(ctx context.Context, scope, principal string, requ
 			if validFrom.IsZero() {
 				validFrom = now
 			}
-			turn := domain.Turn{Scope: scope, DataSubjectID: owner, OccurredAt: now, Messages: []domain.Message{{Role: domain.RoleUser, Content: r.Statement, OccurredAt: now}}}
-			if err := turn.Validate(); err != nil {
-				return ErrInvalidRecordMutation
-			}
-			source, err := appendTurnTx(ctx, tx, s.schema, turn)
-			if err != nil {
-				return err
-			}
 			claim := domain.Claim{Subject: subject, Predicate: predicate, Object: r.Object, Statement: r.Statement, Quote: r.Statement, ByteEnd: len(r.Statement), Cardinality: domain.Cardinality(cardinality), ObjectType: objectKind, ValidFrom: validFrom}
-			id, err := assertFactTx(ctx, tx, s.schema, scope, source.ID, domain.RoleUser, owner, claim, CuratedExtractorVersion, now)
+			id, sourceID, err := authorCuratedTx(ctx, tx, s.schema, scope, principal, owner, claim, now)
 			if err != nil {
 				return err
 			}
-			payload, err := json.Marshal(claim)
-			if err != nil {
+			if _, err := tx.Exec(ctx, s.schema.SQL(`UPDATE {schema}.record_retraction SET replacement_observation_id=$3::uuid,replacement_fact_id=$4::uuid WHERE scope=$1 AND target_fact_id=$2::uuid`), scope, original, sourceID, id); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, s.schema.SQL(`INSERT INTO {schema}.curated_claim(scope,source_observation_id,fact_id,principal_id,claim) VALUES($1,$2::uuid,$3::uuid,$4::uuid,$5::jsonb)`), scope, source.ID, id, principal, payload); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, s.schema.SQL(`UPDATE {schema}.observation SET kind='curated',formed_at=clock_timestamp() WHERE scope=$1 AND observation_id=$2::uuid`), scope, source.ID); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, s.schema.SQL(`UPDATE {schema}.record_retraction SET replacement_observation_id=$3::uuid,replacement_fact_id=$4::uuid WHERE scope=$1 AND target_fact_id=$2::uuid`), scope, original, source.ID, id); err != nil {
-				return err
-			}
-			result := CorrectedRecord{OriginalID: original, ID: id, SourceObservationID: source.ID}
+			result := CorrectedRecord{OriginalID: original, ID: id, SourceObservationID: sourceID}
 			if err := tx.QueryRow(ctx, s.schema.SQL(`SELECT version::text FROM {schema}.fact WHERE scope=$1 AND fact_id=$2::uuid`), scope, id).Scan(&result.Version); err != nil {
 				return err
 			}

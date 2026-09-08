@@ -817,6 +817,7 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		domain.AuditRecordHistory:   {map[string]any{}, http.StatusOK},
 		domain.AuditRecordRetract:   {map[string]any{}, http.StatusOK},
 		domain.AuditRecordCorrect:   {map[string]any{}, http.StatusOK},
+		domain.AuditRecordAssert:    {map[string]any{"records": []pg.RecordAssertion{{IdempotencyKey: "29ec5631-bae3-4cf8-a165-a8759a8f9931", DataSubjectID: "subject-1", Subject: "Atlas", Predicate: "works_at", Object: "Ensera", Statement: "Atlas works at Ensera"}}}, http.StatusOK},
 		domain.AuditFreshness:       {nil, http.StatusOK},
 		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
 		domain.AuditExport:          {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
@@ -876,6 +877,7 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	}
 	exercise[domain.AuditRecordRetract].body["records"] = []pg.RecordMutation{{ID: citationID, ExpectedVersion: version}}
 	run(domain.AuditRecordRetract)
+	run(domain.AuditRecordAssert)
 	run(domain.AuditExport)
 	run(domain.AuditErase)
 	for _, o := range surface {

@@ -3186,3 +3186,57 @@ to ordinary recall, and makes no production performance claim.
 require a complete authority/propagation contract, data classification, new tests and migration of
 existing records. It must never reinterpret missing labels as broader access. The project-only
 contract remains the supported behavior unless that work is explicitly adopted.
+
+## D91 — Independent assertions are attributable source input with stable retries
+
+**Decision.** `POST /v1/records/assert` accepts an atomic batch of 1–20 application-authored claims.
+Each carries subject, admitted predicate, object, statement, an optional data subject/validity start,
+and a required UUID retry key. The vocabulary supplies cardinality and object type. The statement
+becomes a new source message and exact evidence; `curated/v1` and the authenticated credential's UUID
+identify its origin. Confidence is zero, meaning no model estimate. The operation calls no model.
+These records use the same inspection, correction, withdrawal, source export/erasure and receipt
+recovery paths as other admitted records.
+
+The project and author come from the credential. A supplied data subject is the application's
+attribution, not independently verified human identity. Relative speaker references require that
+attribution and use the stored speaker binding. Unresolvable subject terms are refused unless they
+are registered speaker references. The statement is authored evidence; byte agreement does not prove
+its truth or that it logically entails the supplied structured relation. Read-only keys are denied
+before parsing. Client fields cannot override role, cardinality, confidence, project or author.
+
+**Retries.** The existing observation retry table stores an operation-namespaced key digest and an
+explicit versioned request fingerprint. Text is compared exactly and validity instants are normalized
+to UTC; omitted validity remains omitted in the fingerprint. Reusing a key with different input or an
+erased source conflicts. Deletion clears source/payload metadata and retains the digest tombstone.
+An identical retry returns the source's record with `replayed=true`, restores missing derived state
+from its receipt when needed, and preserves withdrawal. A new key intentionally authors a new source.
+Batch results preserve request order and carry final record versions, including when a later entry
+superseded an earlier one. Success audit counts newly authored records; a pure retry counts zero.
+
+**Time and atomicity.** Independent assertions use the shared ordered knowledge clock. Their authored
+source timestamps agree with the recorded knowledge event, including logical advancement after clock
+rollback. Explicit validity remains distinct. Corrections keep their existing exact withdrawal boundary.
+The whole batch, retry receipts, authored inputs, facts, temporal changes and success audit commit or
+roll back together. Assertions complete synchronously and do not consume unfinished inference capacity
+or advance freshness past earlier pending observations. Database interruption or deadlock aborts the
+batch; retry with the same keys. Out-of-order overlapping single-cardinality validity is refused with a
+record conflict rather than inventing a historical correction.
+
+**Bounds and cost.** Subject/object/data-subject values are at most 1,024 UTF-8 bytes; a predicate is at
+most 128 and a statement at most 16,384. Required fields must contain text, and NUL/invalid UTF-8 are
+refused. The shared request-body/admission limits also apply. Each new assertion writes a source,
+chunk, authored claim, fact/evidence, registration and recovery receipt; each key retains a minimal
+post-erasure tombstone. This buys reliable client retries and exact provenance at a storage/write cost.
+There is no additional model call or ordinary recall stage, and no production throughput claim.
+
+**Alternatives rejected.** Editing an existing transcript misattributes the new claim. Re-extracting
+the authored statement makes the submitted relation depend on model behavior. Accepting cardinality
+or confidence from a client bypasses the vocabulary or misrepresents provenance. Best-effort batches
+leave partial success for clients to discover. Content deduplication merges independently authored
+sources; retry identity instead expresses whether a request is the same operation. A new retry table
+would duplicate the existing tombstone and source-erasure mechanism without a new requirement.
+
+**Reversal.** Moderate. The endpoint and shared writer can be retired, but existing authored sources
+must remain inspectable and erasable, and retry tombstones must not be forgotten while queued clients
+can replay them. Changing fingerprint semantics requires an explicit version decision. Independent
+assertion does not complete feedback, entity purge, human-specific authority or full generations in #89/#58.
