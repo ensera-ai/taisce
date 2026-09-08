@@ -87,8 +87,10 @@ func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, d
 		// fact about PostgreSQL and this is a security boundary.
 		fmt.Sprintf(`REVOKE ALL ON SCHEMA %s FROM PUBLIC`, ControlSchema),
 		fmt.Sprintf(`REVOKE ALL ON ALL TABLES IN SCHEMA %s FROM PUBLIC`, ControlSchema),
-		fmt.Sprintf(`GRANT ALL ON SCHEMA %s TO %s`, ControlSchema, ControlRole),
-		fmt.Sprintf(`GRANT ALL ON ALL TABLES IN SCHEMA %s TO %s`, ControlSchema, ControlRole),
+		fmt.Sprintf(`REVOKE CREATE ON SCHEMA %s FROM %s`, ControlSchema, ControlRole),
+		fmt.Sprintf(`GRANT USAGE ON SCHEMA %s TO %s`, ControlSchema, ControlRole),
+		fmt.Sprintf(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA %s FROM %s`, ControlSchema, ControlRole),
+		fmt.Sprintf(`GRANT SELECT ON ALL TABLES IN SCHEMA %s TO %s`, ControlSchema, ControlRole),
 		// Nothing is granted to the data identity here. Its absence from this list IS the boundary,
 		// so there is deliberately no statement to read.
 		//

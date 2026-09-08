@@ -125,6 +125,12 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string) error {
 		return fmt.Errorf("provision the schema: %w", err)
 	}
 	log.Info("schema provisioned", "schema", schema.String())
+	if err := migrate.ValidateRolePrivileges(ctx, admin, schema, migrate.DataRole, migrate.MemoryPlane); err != nil {
+		return err
+	}
+	if err := migrate.ValidateRolePrivileges(ctx, admin, schema, migrate.ControlRole, migrate.RegistryPlane); err != nil {
+		return err
+	}
 
 	if err := migrate.ProvisionScope(ctx, admin, schema.String(), *project); err != nil {
 		return fmt.Errorf("provision project %q: %w", *project, err)

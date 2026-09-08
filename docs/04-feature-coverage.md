@@ -28,18 +28,21 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Quickstart contract [#107](https://github.com/althunibat/taisce/issues/107) | Closed; `651cf61`. Examples use credential-bound project and explicit subject attribution. | None in this issue. |
 | Database integrity [#100](https://github.com/althunibat/taisce/issues/100) | Core implemented; `d66537a`. Deferred project-consistent references, runtime catalog restrictions, exact report/child provenance, concurrent report retry fix, shared retention and source-evidence removal. | General rebuild/formation/erasure concurrency. No RLS confidentiality claim; D68 records the assessment. |
 
-| Single-tenant provisioning [#99](https://github.com/althunibat/taisce/issues/99) | Implemented and tested in this batch. One default memory namespace, compatible instance-wide override, explicit provisioning names, fresh/restart/upgrade tests, reconciled service-role flags. | Effective privilege drift from existing grants/memberships/ownership is tracked in [#109](https://github.com/althunibat/taisce/issues/109). |
+| Single-tenant provisioning [#99](https://github.com/althunibat/taisce/issues/99) | Closed; `17ac077`. One default memory namespace, compatible instance-wide override, explicit provisioning names, fresh/restart/upgrade tests, reconciled service-role flags. | Effective privilege drift from existing grants/memberships/ownership is tracked in [#109](https://github.com/althunibat/taisce/issues/109). |
+
+| Effective runtime privileges [#109](https://github.com/althunibat/taisce/issues/109) | Implemented and tested in this batch. Bootstrap and each new pool connection check direct/inherited privileges, SET ROLE, ownership and protected catalogs. Registry runtime is read-only. | No remaining scope in this issue. D70 documents remediation and connection-admission limits. |
 
 The complete real-PostgreSQL suite and uncached repeat for single-tenant provisioning pass at
 **89.1%**, now the enforced floor. Integrity's targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
-Inference profiles are tracked separately. The local English/Arabic speaker/correction corpus passed
-with real inference (five fixtures, 96.75 seconds). Its full inference suite is running. The
-OpenRouter speaker run passed its first fixture, then stopped on upstream HTTP 429; that is incomplete,
-not a pass. The GPU profile has no endpoint/model/allowlist configured and awaits operator details.
+Inference profiles are tracked separately. The full local inference suite passed in 2140.657 seconds
+on the earlier speaker-binding working tree. The targeted description/thematic/speaker rerun
+against `17ac077` passed in 462.482 seconds. Known semantic separation limitations remain explicit
+in the tests. OpenRouter stopped on upstream HTTP 429; a later bounded retry was also rate-limited.
+Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist configuration.
 
-Next: effective database privilege validation (#109), then
+Next: atomic project provisioning and consistent names (#110), then
 indexed/bounded anchoring, admission controls and operational measurements under their existing
 issues. The generation/rebuild lifecycle is required before closing #84 or #100. Product and adapter
 journeys retain their acceptance criteria and remain in the execution order below.

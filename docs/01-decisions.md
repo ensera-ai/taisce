@@ -1459,6 +1459,50 @@ their behavior. The override remains because removing it would require an operat
 migration and would complicate isolated fixtures. Undoing the default is a configuration change;
 restoring elevated login attributes weakens the documented privilege boundary.
 
+### D70 — Runtime connections prove their effective database privilege boundary
+
+Safe role flags do not undo a prior grant or object ownership. Bootstrap validates the effective
+memory and registry roles after provisioning and before minting a credential. Runtime pools validate
+every newly opened physical connection before admitting it; startup pings both pools before a
+listener or worker starts. Login and active identities are both checked, along with immediately
+inherited roles and roles reachable through `SET ROLE`, so `RESET ROLE` cannot expose a hidden
+administrative session after a successful check.
+
+The memory role may serve project memory and read its policy catalogs. It must not read control
+objects, change those catalogs, own application tables/namespaces, create schemas, or reach elevated
+role attributes. The registry runtime reads credentials; it neither writes them nor accesses project
+memory. Bootstrap removes the previous registry write/CREATE grants. Credential issue/revoke and
+schema changes use the operator's separate administrative connection. Memory namespace configuration
+refuses `control`, `public`, `information_schema` and `pg_*` before any provisioning can mix stores.
+
+Unsafe direct grants, column grants, inheritance, SET-role escapes, ownership and policy writes are
+refused with a fixed diagnostic category. Tests seed each condition in isolated fixtures, force pool
+reconnection, and prove explicit remediation restores service. Serving tests use actual non-owner
+memory/registry logins, and administrative DSNs are refused on either runtime connection.
+
+**Operator remediation.** Keep the admin DSN for bootstrap/operator commands; use separate non-owner
+memory and read-only registry DSNs for serving. When validation reports a forbidden grant or owner,
+inspect the named plane's role memberships and object privileges as the operator, remove the excess
+privilege or restore the intended administrative owner, then restart. Bootstrap does not silently
+reassign objects or revoke arbitrary memberships, since those may express an administrative policy
+that must be understood before changing it. No credential material is included in the findings.
+
+**Limits.** This is connection admission, not continuous monitoring of administrator actions. A
+privileged administrator can change grants after admission, alter the checks or install a function
+that exposes data. Arbitrary security-definer code and extension behavior require their own review.
+The check does not make shared-role project reads confidential without authenticated scope filters.
+It supplements the actual database grants; it is not a substitute for them.
+
+**Rejected:** trusting different DSN strings to mean different privileges; checking only rolsuper;
+checking only current_user after SET ROLE; checking only the first pool connection; automatically
+reassigning ownership or stripping unrelated memberships; running catalog checks on every query.
+
+**Impact and undo cost.** Privilege inspection adds catalog reads when a physical connection opens,
+not to each memory operation. No production latency claim is made. Deployments that previously
+served with an admin login now fail startup and must supply the intended non-owner identities.
+Undoing the guard is a code change that restores that unsafe configuration; registry runtime writes
+would also require a deliberate grant change and a new consumer contract.
+
 ### D1 — PostgreSQL is the only required dependency
 
 Not a vector database, graph engine, message broker, cache or object store.

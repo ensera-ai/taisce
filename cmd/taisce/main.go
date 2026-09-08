@@ -120,12 +120,12 @@ func run(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("schema: %w", err)
 	}
 
-	memory, err := pgxpool.New(ctx, memoryDSN)
+	memory, err := migrate.NewRuntimePool(ctx, memoryDSN, schema, migrate.MemoryPlane)
 	if err != nil {
 		return fmt.Errorf("connect memory: %w", err)
 	}
 	defer memory.Close()
-	registry, err := pgxpool.New(ctx, registryDSN)
+	registry, err := migrate.NewRuntimePool(ctx, registryDSN, schema, migrate.RegistryPlane)
 	if err != nil {
 		return fmt.Errorf("connect registry: %w", err)
 	}
@@ -321,6 +321,9 @@ func configuredMemorySchema() (pg.Schema, error) {
 	name := strings.TrimSpace(os.Getenv(envSchema))
 	if name == "" {
 		name = "memory"
+	}
+	if name == "control" || name == "public" || name == "information_schema" || strings.HasPrefix(name, "pg_") {
+		return "", fmt.Errorf("%s selects a reserved namespace", envSchema)
 	}
 	return pg.NewSchema(name)
 }

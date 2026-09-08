@@ -139,6 +139,13 @@ its value during upgrades. Changing it selects different storage and does not mi
 creation adds a project row and partition inside the existing memory namespace. Database grants
 protect credential secrets; authenticated project filters control memory reads.
 
+Serving requires non-owner database logins: the memory role serves project data, and the registry
+role reads credentials. Administrative DSNs belong to bootstrap/operator commands. Startup and new
+pool connections refuse elevated roles, unsafe inherited grants, credential access from the memory
+role, application-object ownership, and writable policy catalogs. If validation fails, review the
+reported role's grants/ownership and correct them before restarting; see
+[D70](docs/01-decisions.md#d70--runtime-connections-prove-their-effective-database-privilege-boundary).
+
 Migration 0023 validates project-consistent database relationships and refuses inconsistent existing
 rows atomically. It also invalidates previously generated community reports because their source
 registrations may be incomplete; the worker regenerates them from retained facts. Observations,

@@ -12,9 +12,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/ensera-ai/taisce/internal/migrate"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 
@@ -123,7 +125,7 @@ func TestAnUnreachableDatabaseStopsTheProcessStarting(t *testing.T) {
 // not answer is the failure this is for.
 func TestItServesAndShutsDownWhenItsContextEnds(t *testing.T) {
 	port := freePort(t)
-	env := complete(t)
+	env := runtimeConfiguration(t)
 	env[envAddr] = fmt.Sprintf("127.0.0.1:%d", port)
 	withEnv(t, env)
 
@@ -157,7 +159,7 @@ func TestAPortAlreadyInUseStopsTheProcessStarting(t *testing.T) {
 	}
 	defer held.Close()
 
-	env := complete(t)
+	env := runtimeConfiguration(t)
 	env[envAddr] = held.Addr().String()
 	withEnv(t, env)
 
@@ -405,7 +407,7 @@ func reachable(url string, within time.Duration) bool {
 // work rather than a process that was misconfigured.
 func TestAConfiguredModelStartsTheFormationDriver(t *testing.T) {
 	port := freePort(t)
-	env := complete(t)
+	env := runtimeConfiguration(t)
 	env[envAddr] = fmt.Sprintf("127.0.0.1:%d", port)
 	withEnv(t, env)
 
@@ -554,7 +556,7 @@ func TestACredentialCannotBeMintedForAProjectThatDoesNotExist(t *testing.T) {
 // is in the database rather than in a process.
 func TestTheAPIRoleServesWithoutForming(t *testing.T) {
 	port := freePort(t)
-	env := complete(t)
+	env := runtimeConfiguration(t)
 	env[envAddr] = fmt.Sprintf("127.0.0.1:%d", port)
 	env[envRole] = "api"
 	withEnv(t, env)
@@ -589,7 +591,7 @@ func TestTheAPIRoleServesWithoutForming(t *testing.T) {
 // serves no reads.
 func TestTheWorkerRoleFormsAndBindsNothing(t *testing.T) {
 	port := freePort(t)
-	env := complete(t)
+	env := runtimeConfiguration(t)
 	env[envAddr] = fmt.Sprintf("127.0.0.1:%d", port)
 	env[envRole] = "worker"
 	withEnv(t, env)
@@ -622,7 +624,7 @@ func TestTheWorkerRoleFormsAndBindsNothing(t *testing.T) {
 // Defaulting a typo to "all" would give a deployment that quietly runs both halves in every pod —
 // which is the state the split existed to avoid, arrived at by a spelling mistake.
 func TestAnUnknownRoleIsRefused(t *testing.T) {
-	env := complete(t)
+	env := runtimeConfiguration(t)
 	env[envRole] = "aip"
 	withEnv(t, env)
 
@@ -811,4 +813,36 @@ func TestAuditSealAndVerifyFromTheCommandLine(t *testing.T) {
 	if err := dispatch(ctx, quiet(), []string{"audit", "nonsense"}); err == nil {
 		t.Fatal("an unknown audit command reported success")
 	}
+}
+
+// Serving tests use the deployed non-owner identities. Operator tests retain their separate
+// administrative fixture DSN, so a startup privilege check cannot be passed by a superuser fake.
+func runtimeConfiguration(t *testing.T) map[string]string {
+	t.Helper()
+	env := complete(t)
+	ctx := context.Background()
+	owner, err := pgxpool.New(ctx, env[envMemoryDSN])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	if err := migrate.EstablishPlanes(ctx, owner, "taisce-test-control", "taisce-test-data"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.ProvisionMemorySchema(ctx, owner, env[envSchema]); err != nil {
+		t.Fatal(err)
+	}
+	for key, role := range map[string]string{envMemoryDSN: migrate.DataRole, envRegistryDSN: migrate.ControlRole} {
+		parsed, err := url.Parse(env[key])
+		if err != nil {
+			t.Fatal(err)
+		}
+		password := "taisce-test-data"
+		if key == envRegistryDSN {
+			password = "taisce-test-control"
+		}
+		parsed.User = url.UserPassword(role, password)
+		env[key] = parsed.String()
+	}
+	return env
 }
