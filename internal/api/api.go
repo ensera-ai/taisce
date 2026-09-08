@@ -392,6 +392,11 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 	}
 
 	stored, replayed, err := s.observations.AppendIdempotent(r.Context(), s.schema, turn, req.IdempotencyKey)
+	if errors.Is(err, pg.ErrIngestionCapacity) {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, codeRateLimited, "unfinished observation capacity is full; retry after formation or erasure with the same idempotency key")
+		return
+	}
 	if errors.Is(err, pg.ErrInvalidIdempotencyKey) {
 		writeError(w, http.StatusBadRequest, codeInvalidTurn, "idempotency_key must be a UUID")
 		return

@@ -218,7 +218,7 @@ func TestProjectNameMigrationValidatesExistingRowsAtomically(t *testing.T) {
 			if err := pool.QueryRow(ctx, schema.SQL(`SELECT (SELECT count(*) FROM {schema}.project WHERE scope=$1),(SELECT max(version) FROM {schema}.schema_migration)`), scope).Scan(&retained, &version); err != nil {
 				t.Fatal(err)
 			}
-			expected := 24
+			expected := all[len(all)-1].Version
 			if length == 64 {
 				expected = 23
 			}

@@ -17,11 +17,13 @@ import (
 	"github.com/ensera-ai/taisce/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
 	ErrInvalidIdempotencyKey = errors.New("idempotency key must be a UUID")
 	ErrIdempotencyConflict   = errors.New("idempotency key already identifies a different or erased observation")
+	ErrIngestionCapacity     = errors.New("unfinished observation capacity is full")
 )
 
 // AppendIdempotent returns the original receipt for the same logical write. No key means an
@@ -108,6 +110,10 @@ func (s *ObservationStore) AppendIdempotent(ctx context.Context, schema Schema, 
 		return nil
 	})
 	if err != nil {
+		var databaseError *pgconn.PgError
+		if errors.As(err, &databaseError) && databaseError.Code == "P0001" && databaseError.ConstraintName == "ingestion_backlog_capacity" {
+			return domain.Observation{}, false, ErrIngestionCapacity
+		}
 		return domain.Observation{}, false, err
 	}
 	return out, replayed, nil

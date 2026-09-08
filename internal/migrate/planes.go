@@ -175,6 +175,9 @@ func grantMemoryToDataPlane(ctx context.Context, pool *pgxpool.Pool, schema Sche
 		fmt.Sprintf(`REVOKE INSERT, UPDATE, DELETE ON %s.projection_kind, %s.predicate,
             %s.unresolvable_term, %s.speaker_term, %s.schema_migration FROM %s`,
 			schema, schema, schema, schema, schema, DataRole),
+		fmt.Sprintf(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON
+            %s.ingestion_budget, %s.ingestion_project_usage, %s.ingestion_reservation FROM %s`,
+			schema, schema, schema, DataRole),
 	} {
 		if _, err := pool.Exec(ctx, statement); err != nil {
 			return fmt.Errorf("grant memory namespace %q to the data plane: %w", schema, err)

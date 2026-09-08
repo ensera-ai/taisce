@@ -195,8 +195,9 @@ curl -X POST localhost:8080/v1/erasures -H "Authorization: Bearer $TOKEN" \
 message and 256 KiB per turn. Busy request capacity returns `429 rate_limited` with `Retry-After: 1`;
 retry with backoff and the same observation idempotency key. The server derives project and
 credential concurrency from its memory pool, which needs at least three connections for API mode.
-See the [contract](docs/02-contract.md) and D73 for request, authentication and audit limits. Durable
-backlog admission remains under development; a provider outage can still accumulate stored turns.
+See the [contract](docs/02-contract.md) and D73 for request, authentication and audit limits. Unfinished turns also reserve durable backlog slots: 4096 per instance and 512 per project by
+default, including parked turns. Formation, erasure or retention release the slots. Operators can
+inspect and change these limits using the [ingestion budget runbook](docs/06-ingestion-budget.md).
 
 **Personal recall names the data subject explicitly.** For example:
 

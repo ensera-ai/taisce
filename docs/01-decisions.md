@@ -2399,3 +2399,64 @@ and deployment-wide cost are measured; no cluster-wide guarantee is claimed from
 changes overload behavior and requires new resource evidence. Lowering observation limits affects
 client compatibility, including retries of previously accepted larger payloads. Durable backlog
 accounting and live metrics need their own storage/operational contracts.
+
+
+## D74 — Unfinished turns hold durable ingestion reservations
+
+**Date:** 2026-09-08. **Tracking:** [#93](https://github.com/althunibat/taisce/issues/93).
+
+**Decision.** An unformed conversation turn reserves one backlog slot in PostgreSQL. Defaults are
+4096 slots for the instance memory namespace and 512 for any one project. Parked turns still count: a
+provider outage must not create room for unlimited new ingestion merely by exhausting retries.
+Formation releases the reservation, and erasure/retention release it through the source observation's
+foreign-key cascade. Admission and release commit atomically with the operation that caused them.
+Idempotent replays return an existing receipt without requesting another reservation.
+
+Migration 0025 backfills reservations and exact counters from existing unformed turns, including
+parked ones. Previously accepted history is preserved even above the new limits. Further ingestion
+is refused until work drains or the operator deliberately raises the policy. Runtime identities
+can read policy/accounting but cannot change it or forge reservations. HTTP returns `429 rate_limited`
+with `Retry-After: 1` when the database refuses capacity; rejected observation rows, messages, chunks,
+retry receipts and watermark increments roll back together.
+
+**Transaction and performance tradeoff.** A deferred source trigger synchronizes the reservation
+against the final observation state. It updates a singleton counter and the project's counter at
+transaction end, after ordinary observation/watermark locks are taken. Releasing a reservation also
+uses a deferred trigger. The global row update serializes final accounting and causes stale
+repeatable-read transactions to fail with a serialization error instead of oversubscribing from an
+old snapshot. Each admission uses a fixed number of counter/registration statements, avoiding a
+backlog scan on every write. The singleton is an intentional write bottleneck; its throughput and
+vacuum cost require controlled-host measurement under #103. No latency claim is made here.
+
+**Security boundary.** The threat is a noisy API credential or repeated ingestion during a provider
+outage. Table privileges prevent runtime queries from deleting reservations or inflating budgets.
+The narrowly scoped trigger functions run as the migration owner, use qualified relation names and
+a fixed `pg_catalog, pg_temp` search path, refuse unexpected trigger tables, and revoke PUBLIC
+execution. Runtime writes can fire installed triggers without gaining permission to attach them
+to other tables. Tests also grant EXECUTE deliberately and prove a temporary-table spoof cannot
+decrement counters. This does not defend against the database owner or an arbitrary SQL principal
+already permitted to falsely mark observations formed; the application worker owns that transition.
+
+**Scope and limits.** Slots count unfinished turns, not bytes or all retained history. New API turns
+also have D73's message/content bounds. Physical disk is not reserved, completed memory can continue
+to grow, and operators must select limits with storage headroom and retention in mind. Reservations
+are shared by API replicas using the same memory namespace; HTTP concurrency gates remain local
+to each process. A quota is not an inference scheduling fairness guarantee.
+
+**Alternatives.** Process-local backlog counters disappear on restart and disagree across replicas.
+A preflight count without an atomic reservation races at capacity. Counting the complete backlog
+under a global lock imposes a scan on every admitted write. Treating parking as completion permits
+unbounded growth during an outage. Dropping old accepted turns to fit a new limit was rejected
+because an operational configuration is not authorization to delete memory.
+
+**Evidence.** Real PostgreSQL tests cover project/global boundaries, 24 concurrent writers, stale
+repeatable-read snapshots, rollback after forced trigger execution, idempotent retries at capacity,
+parking/unparking, formation, erasure, retention, upgrade above a limit and runtime privilege refusal.
+A worker test uses an HTTP provider returning 503, verifies parking does not release capacity, then
+recovers the provider and proves successful formation restores admission. This fault-injection test
+is separate from live-model quality/profile evaluation.
+
+**Undo cost.** Removing the policy requires dropping its triggers and operational tables in a
+reviewed migration; observations and their projections need not be rewritten. Changing the counted
+unit to messages/bytes requires backfilling and reconciling accounting before a cutover. Configure
+budgets in their own operator transaction rather than mixing policy updates with application writes.
