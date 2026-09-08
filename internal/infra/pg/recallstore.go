@@ -6,6 +6,7 @@ package pg
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -141,6 +142,9 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityIDs []string, limit int,
 	sources []string, at domain.AsOf, hops int, subject string) ([]domain.CitedFact, error) {
 
+	if err := s.ValidateAsOf(ctx, scopes, at); err != nil {
+		return nil, err
+	}
 	if len(sources) == 0 {
 		// An empty set returns nothing rather than everything. A caller that computed its source
 		// list and got nothing meant nothing; the alternative — treating empty as unrestricted — is
@@ -355,8 +359,38 @@ var (
 		"upper_inf(f.valid) AND upper_inf(f.known)")
 	selectFactsValidAtSQL = fmt.Sprintf(factsAboutTemplate,
 		"f.valid @> $9::timestamptz AND upper_inf(f.known)")
-	selectFactsKnownAtSQL = fmt.Sprintf(factsAboutTemplate,
-		"upper_inf(f.valid) AND f.known @> $9::timestamptz")
-	selectFactsBitemporalSQL = fmt.Sprintf(factsAboutTemplate,
-		"f.valid @> $9::timestamptz AND f.known @> $10::timestamptz")
+	selectFactsKnownAtSQL    = historicalFactsSQL(9, "upper_inf(state.valid)")
+	selectFactsBitemporalSQL = historicalFactsSQL(10, "state.valid @> $9::timestamptz")
 )
+
+// Historical statements retain the indexed endpoint arms and add a per-fact range lookup. Ordinary
+// current reads never join history. Temporal state is selected before fanout, at every hop.
+func historicalFactsSQL(knownParam int, predicate string) string {
+	query := fmt.Sprintf(factsAboutTemplate, predicate)
+	join := fmt.Sprintf(`FROM {schema}.fact f
+ JOIN LATERAL (
+   SELECT f.valid WHERE f.known @> $%[1]d::timestamptz
+   UNION ALL
+   SELECT h.valid FROM {schema}.fact_history h
+    WHERE h.fact_id=f.fact_id AND h.scope=f.scope AND h.known @> $%[1]d::timestamptz
+ ) state ON true`, knownParam)
+	query = strings.ReplaceAll(query, "FROM {schema}.fact f", join)
+	query = strings.ReplaceAll(query, "lower(f.valid)", "lower(state.valid)")
+	return strings.ReplaceAll(query, "upper(f.valid)", "upper(state.valid)")
+}
+
+// ValidateAsOf applies before anchor discovery as well as direct store reads, so an unanswerable
+// historical query cannot masquerade as an empty result. No query is added to the current path.
+func (s *RecallStore) ValidateAsOf(ctx context.Context, scopes []string, at domain.AsOf) error {
+	if !at.HasKnown() || len(scopes) == 0 {
+		return nil
+	}
+	var available bool
+	if err := s.pool.QueryRow(ctx, s.schema.SQL(`SELECT NOT EXISTS(SELECT 1 FROM {schema}.fact_history_boundary WHERE scope=ANY($1) AND $2::timestamptz<available_from)`), scopes, at.Known.UTC()).Scan(&available); err != nil {
+		return err
+	}
+	if !available {
+		return domain.ErrHistoryUnavailable
+	}
+	return nil
+}

@@ -630,6 +630,11 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 	// every read rather than a default (D24) — it has one member now, which is the whole of D47.
 	bundle, err := s.recaller.RecallForSubjectAsOf(r.Context(), []string{grant.Project}, req.Question,
 		recall.PrincipalSources, req.at(), req.Hops, req.DataSubjectID)
+	if errors.Is(err, domain.ErrHistoryUnavailable) {
+		s.record(r, domain.AuditRecall, grant, domain.OutcomeRefused, 0)
+		writeError(w, http.StatusUnprocessableEntity, codeHistoryUnavailable, err.Error())
+		return
+	}
 	if errors.Is(err, domain.ErrRecallQuestionSize) || errors.Is(err, domain.ErrRecallTerms) || errors.Is(err, domain.ErrRecallMatches) {
 		writeError(w, http.StatusBadRequest, codeInvalidQuestion, err.Error())
 		return
@@ -838,11 +843,12 @@ const (
 	// A key identifies one logical write, including after its content has been erased.
 	codeIdempotencyConflict errorCode = "idempotency_conflict"
 	// codeInvalidQuestion is a recall with nothing to answer.
-	codeInvalidQuestion errorCode = "invalid_question"
-	codeRateLimited     errorCode = "rate_limited"
-	codeInvalidCitation errorCode = "invalid_citation"
-	codeCitationLimit   errorCode = "citation_limit"
-	codeNotFound        errorCode = "not_found"
+	codeInvalidQuestion    errorCode = "invalid_question"
+	codeRateLimited        errorCode = "rate_limited"
+	codeInvalidCitation    errorCode = "invalid_citation"
+	codeCitationLimit      errorCode = "citation_limit"
+	codeNotFound           errorCode = "not_found"
+	codeHistoryUnavailable errorCode = "history_unavailable"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -860,7 +866,7 @@ const (
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
-	codeInvalidCitation, codeCitationLimit, codeNotFound,
+	codeInvalidCitation, codeCitationLimit, codeNotFound, codeHistoryUnavailable,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

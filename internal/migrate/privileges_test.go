@@ -51,6 +51,7 @@ func TestRuntimePoolRefusesPrivilegeDriftAndAcceptsRemediation(t *testing.T) {
 		{"namespace owner", `ALTER SCHEMA SCHEMA OWNER TO {role}`, `ALTER SCHEMA SCHEMA OWNER TO {owner}`, MemoryPlane},
 		{"create database", `ALTER ROLE {role} CREATEDB`, `ALTER ROLE {role} NOCREATEDB`, MemoryPlane},
 		{"schema create", `GRANT CREATE ON SCHEMA SCHEMA TO {role}`, `REVOKE CREATE ON SCHEMA SCHEMA FROM {role}`, MemoryPlane},
+		{"history boundary write", `GRANT UPDATE ON SCHEMA.fact_history_boundary TO {role}`, `REVOKE UPDATE ON SCHEMA.fact_history_boundary FROM {role}`, MemoryPlane},
 		{"policy catalog write", `GRANT UPDATE ON SCHEMA.projection_kind TO {role}`, `REVOKE UPDATE ON SCHEMA.projection_kind FROM {role}`, MemoryPlane},
 		{"registry credential write", `GRANT UPDATE ON control.credential TO {role}`, `REVOKE UPDATE ON control.credential FROM {role}`, RegistryPlane},
 		{"registry memory read", `GRANT SELECT ON SCHEMA.observation TO {role}`, `REVOKE SELECT ON SCHEMA.observation FROM {role}`, RegistryPlane},

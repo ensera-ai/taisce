@@ -150,6 +150,9 @@ POST `/v1/citations/resolve` → 200
 | Field | Type |
 |---|---|
 | `id` | string |
+| `superseded_by` | string, optional |
+| `supersession_source_observation_id` | string, optional |
+| `history_available_from` | timestamp (RFC 3339), optional |
 | `scope` | string |
 | `subject_entity_id` | string, optional |
 | `object_entity_id` | string, optional |
@@ -184,6 +187,7 @@ Any operation may answer with any of these.
 | `invalid_citation` |
 | `citation_limit` |
 | `not_found` |
+| `history_unavailable` |
 
 ## Liveness
 

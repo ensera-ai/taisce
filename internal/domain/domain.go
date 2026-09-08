@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -1063,3 +1064,6 @@ type AuditVerification struct {
 	// different accusations, and a verifier that says only "invalid" tells nobody what happened.
 	Failure string
 }
+
+// ErrHistoryUnavailable refuses a knowledge instant preceding trustworthy retained history.
+var ErrHistoryUnavailable = errors.New("the requested knowledge time predates available history")

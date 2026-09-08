@@ -62,22 +62,25 @@ type CitationSource struct {
 }
 
 // Citation is the currently retained record and one page of exact supporting sources.
-// The stored intervals are not a reconstruction of unrecorded knowledge-history versions (#116).
+// The stored intervals describe the retained state; migration boundaries disclose unavailable history.
 type Citation struct {
-	ID         string           `json:"id"`
-	Scope      string           `json:"scope"`
-	SubjectID  *string          `json:"subject_entity_id"`
-	ObjectID   *string          `json:"object_entity_id"`
-	Predicate  string           `json:"predicate"`
-	Statement  string           `json:"statement"`
-	Confidence float32          `json:"confidence"`
-	SourceRole string           `json:"source_role"`
-	RecordedAt time.Time        `json:"recorded_at"`
-	Valid      CitationInterval `json:"valid"`
-	Known      CitationInterval `json:"known"`
-	Status     string           `json:"status"`
-	Evidence   []CitationSource `json:"evidence"`
-	Next       *CitationCursor  `json:"next,omitempty"`
+	ID                   string           `json:"id"`
+	SupersededBy         *string          `json:"superseded_by,omitempty"`
+	SupersessionSource   *string          `json:"supersession_source_observation_id,omitempty"`
+	HistoryAvailableFrom *time.Time       `json:"history_available_from,omitempty"`
+	Scope                string           `json:"scope"`
+	SubjectID            *string          `json:"subject_entity_id"`
+	ObjectID             *string          `json:"object_entity_id"`
+	Predicate            string           `json:"predicate"`
+	Statement            string           `json:"statement"`
+	Confidence           float32          `json:"confidence"`
+	SourceRole           string           `json:"source_role"`
+	RecordedAt           time.Time        `json:"recorded_at"`
+	Valid                CitationInterval `json:"valid"`
+	Known                CitationInterval `json:"known"`
+	Status               string           `json:"status"`
+	Evidence             []CitationSource `json:"evidence"`
+	Next                 *CitationCursor  `json:"next,omitempty"`
 }
 
 type CitationStore struct {
@@ -109,10 +112,11 @@ func (s *CitationStore) Resolve(ctx context.Context, scope, id string, after *Ci
 		var validOpen, knownOpen bool
 		err := tx.QueryRow(ctx, s.schema.SQL(`SELECT fact_id::text,scope,subject_entity_id::text,object_entity_id::text,predicate,
  CASE WHEN octet_length(statement)<=$3 THEN statement END,octet_length(statement),confidence,source_role,recorded_at,
- lower(valid),upper(valid),lower_inc(valid),upper_inc(valid),lower(known),upper(known),lower_inc(known),upper_inc(known),upper_inf(valid),upper_inf(known)
+ lower(valid),upper(valid),lower_inc(valid),upper_inc(valid),lower(known),upper(known),lower_inc(known),upper_inc(known),upper_inf(valid),upper_inf(known),superseded_by::text,supersession_source::text,
+ (SELECT available_from FROM {schema}.fact_history_boundary b WHERE b.scope=f.scope)
  FROM {schema}.fact f WHERE scope=$1 AND fact_id=$2 AND EXISTS(SELECT 1 FROM {schema}.fact_evidence e WHERE e.scope=f.scope AND e.fact_id=f.fact_id)`), scope, factID.String(), MaxCitationStatementBytes).Scan(
 			&out.ID, &out.Scope, &out.SubjectID, &out.ObjectID, &out.Predicate, &statement, &statementBytes, &out.Confidence, &out.SourceRole, &out.RecordedAt,
-			&out.Valid.From, &out.Valid.Until, &out.Valid.FromInclusive, &out.Valid.UntilInclusive, &out.Known.From, &out.Known.Until, &out.Known.FromInclusive, &out.Known.UntilInclusive, &validOpen, &knownOpen)
+			&out.Valid.From, &out.Valid.Until, &out.Valid.FromInclusive, &out.Valid.UntilInclusive, &out.Known.From, &out.Known.Until, &out.Known.FromInclusive, &out.Known.UntilInclusive, &validOpen, &knownOpen, &out.SupersededBy, &out.SupersessionSource, &out.HistoryAvailableFrom)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrCitationNotFound
 		}

@@ -2603,3 +2603,67 @@ identity, independent temporal metadata, supersession, erasure, project privacy,
 multiple spans, corrupt evidence and content-free audit. This establishes behavior, not production
 throughput (#103). Removing the route/store is low cost; migration 0028 adds only an audit operation.
 Persisted audit entries must remain valid even if the route is later retired.
+
+## D78 — Preserve validity as it was known before supersession
+
+**Problem.** Closing validity in place changed answers to earlier knowledge-time queries. A Dublin
+claim known at K1 with open validity disappeared from an August/K1 query after a later Amman claim
+closed it in June at K2. An April/K1 result also disclosed a June end that was not known at K1.
+
+**Decision.** Keep the fact UUID and immutable claim content on the retained fact. On the supported
+single-cardinality supersession path, save its previous validity and knowledge interval in
+`fact_history`, close that knowledge interval at K2, and advance the retained row's knowledge start
+to K2 while closing its validity. The new assertion begins knowledge at the same K2. The archive,
+causal source, provenance registrations, changed validity and new fact commit in one transaction.
+K2 comes from the database clock after entity row locks, not a transaction-start timestamp that
+could precede a competing writer's commit. The existing cardinality exclusion still rejects
+conflicting equal-start/out-of-order writes; this does not introduce automatic retroactive repair.
+
+Current and valid-time-only reads retain their existing query shape. Reads with an explicit
+knowledge time select current or archived validity before filtering/fanout at each graph hop. A
+GiST exclusion/index prevents overlapping archived knowledge intervals for one fact and supports
+per-fact historical lookup. Saved citation IDs remain unchanged; current citation inspection adds
+the successor and causal observation, with project-consistent foreign keys. Historical recall and
+subject export expose preserved versions; a general version-list/correction API remains #89.
+
+**Migration.** Migration 0029 creates no fictional historical rows. Each project with existing
+facts receives an immutable-to-runtime `available_from` boundary at migration time. Its earlier
+knowledge queries return `422 history_unavailable`, including questions finding no anchors. New or
+empty projects have no lost-history boundary. Existing facts and ranges remain intact as the
+baseline. The first later archive starts no earlier than the trustworthy migration boundary.
+The catalog survives subject erasure because it describes project migration capability,
+not a subject. Reapplying migrations does not move the boundary. Runtime grants and new connection
+validation protect the catalog from writes and privilege drift.
+
+**Governance and causal invalidation.** History registers both the fact's retained source
+observations and the observation causing the transition. Its projection kind does not survive
+removal of any registered contributor. Current closed validity also names its causal observation
+through a project-consistent foreign key. Erasure or expiry of that cause invalidates the affected
+fact and its history, even when the original source survives. This deliberately loses a derived
+record rather than retain an end date derived from erased information or guess that reopening it
+would be consistent. The surviving observation remains available for a future rebuild (#58).
+Removing a successor fact clears that link; retained causal observation identity still explains the
+transition. Cascaded projection deletes are governed by the same transaction, although per-kind
+receipt counts count direct deletions and can omit cascaded rows. Residual and actual-table tests
+verify removal. No general cascade count is presented as a complete row total.
+
+**Scope and limits.** This preserves temporal state for the existing immutable-claim supersession
+writer. Later curated changes to statement, entities, roles or evidence must version those fields
+as well; they must not reuse this interval-only archive as if it were a complete mutable-record
+snapshot. Historical recall still uses current entity names/aliases and retained evidence, and
+therefore is not a byte-identical replay of an earlier API response. Knowledge timestamps identify
+logical assertion order; they are not PostgreSQL commit timestamps. Direct owner edits to factual
+rows can defeat this application contract; this is not a tamper-proof historical ledger.
+
+**Alternatives.** Cloning every fact and all evidence complicates stable IDs, graph references and
+erasure while duplicating unchanged content. Reconstructing old validity from later facts guesses
+at missing history. Replacing every query with a historical union adds work to the common current
+path. Stored-procedure conversion is not needed: parameterized SQL and the existing Go transaction
+boundary implement this change.
+
+**Evidence and reversal cost.** Tests distinguish earlier/current knowledge, valid time and exact
+transition boundaries, concurrent conflicts, late rollback, project boundaries, source erasure,
+retention, export and an existing-data upgrade. A 2,000-version fixture checks indexed historical
+lookup. Production mixed-workload cost and rebuild integration remain #103/#58 and keep #116 open.
+Removing the archive after use discards acquired history and must not silently restore historical
+claims; retaining the migration boundary and refusing unavailable queries is mandatory on reversal.

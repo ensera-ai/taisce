@@ -87,20 +87,17 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 			validFrom = time.Now().UTC()
 		}
 
-		// Supersession, for the eleven relations that hold one value at a time.
-		//
-		// The exclusion constraint refuses two overlapping valid intervals for one subject, so this
-		// is not an optimisation — without it the second `lives_in` for a person is an error rather
-		// than a move. Closing the earlier interval at the new one's start is what a move IS: the
-		// old fact stays, with an end, which is the history the product exists to keep.
-		//
-		// Both statements are in the same transaction as the insert, so a crash between them cannot
-		// leave a subject with no current value. And the constraint is still the guarantee: if two
-		// writers race past this close, one of their inserts is refused by the database rather than
-		// both succeeding.
+		// Stamp knowledge after entity upserts acquire their row locks. A transaction that waited
+		// behind another assertion must not use its earlier transaction-start timestamp.
+		var learnedAt time.Time
+		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&learnedAt); err != nil {
+			return fmt.Errorf("stamp fact knowledge: %w", err)
+		}
+		// Save the previous validity at its original knowledge interval before changing the
+		// retained row. The snapshot, causal source, registration and new assertion commit together.
 		if claim.Cardinality == domain.CardinalityOne && subjectID != "" {
 			if _, err := tx.Exec(ctx, schema.SQL(supersedeSQL),
-				scope, subjectID, claim.Predicate, validFrom); err != nil {
+				scope, subjectID, claim.Predicate, validFrom, learnedAt, observationID, id, nullIfEmpty(dataSubjectID)); err != nil {
 				return fmt.Errorf("supersede the earlier fact: %w", err)
 			}
 		}
@@ -108,7 +105,7 @@ func (s *FactStore) Assert(ctx context.Context, schema Schema, scope, observatio
 		if _, err := tx.Exec(ctx, schema.SQL(insertFactSQL),
 			id, scope, nullIfEmptyString(subjectID), nullIfEmptyString(objectID),
 			claim.Predicate, claim.Statement, validFrom, claim.Confidence,
-			nullIfEmpty(dataSubjectID), string(claim.Cardinality), string(speaker)); err != nil {
+			nullIfEmpty(dataSubjectID), string(claim.Cardinality), string(speaker), learnedAt); err != nil {
 			return fmt.Errorf("insert fact: %w", err)
 		}
 
@@ -231,8 +228,8 @@ UPDATE {schema}.entity
 const insertFactSQL = `
 INSERT INTO {schema}.fact
     (fact_id, scope, subject_entity_id, object_entity_id, predicate, statement,
-     valid, confidence, data_subject_id, cardinality, source_role)
-VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9, $10, $11)`
+     valid, confidence, data_subject_id, cardinality, source_role, known, recorded_at)
+VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9, $10, $11, tstzrange($12,NULL), $12)`
 
 // Closes whatever this subject currently holds for this relation, at the moment the new one starts.
 //
@@ -245,13 +242,27 @@ VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9, $10, $1
 // one started — is left alone. Out-of-order arrival is real, and the right answer to it is a
 // bitemporal correction rather than an interval this statement invents.
 const supersedeSQL = `
-UPDATE {schema}.fact
-   SET valid = tstzrange(lower(valid), $4)
- WHERE scope = $1
-   AND subject_entity_id = $2::uuid
-   AND predicate = $3
-   AND upper_inf(valid)
-   AND lower(valid) < $4`
+WITH previous AS MATERIALIZED (
+ SELECT fact_id,scope,valid,known FROM {schema}.fact
+ WHERE scope=$1 AND subject_entity_id=$2::uuid AND predicate=$3
+   AND upper_inf(valid) AND upper_inf(known) AND lower(valid)<$4
+ FOR UPDATE
+), saved AS (
+ INSERT INTO {schema}.fact_history(history_id,scope,fact_id,valid,known,source_observation_id)
+ SELECT gen_random_uuid(),p.scope,p.fact_id,p.valid,
+   tstzrange(greatest(lower(p.known),(SELECT available_from FROM {schema}.fact_history_boundary b WHERE b.scope=p.scope)),$5),$6::uuid FROM previous p
+ RETURNING history_id,fact_id
+), registered AS (
+ INSERT INTO {schema}.projection_dependency(source_observation_id,scope,projection_kind,projection_id,data_subject_id)
+ SELECT d.source_observation_id,d.scope,'fact_history',s.history_id::text,d.data_subject_id
+ FROM saved s JOIN {schema}.projection_dependency d ON d.projection_kind='fact' AND d.projection_id=s.fact_id::text AND d.scope=$1
+ UNION
+ SELECT $6::uuid,$1,'fact_history',s.history_id::text,$8::text FROM saved s
+ ON CONFLICT DO NOTHING
+)
+UPDATE {schema}.fact f SET valid=tstzrange(lower(f.valid),$4),known=tstzrange($5,NULL),
+ superseded_by=$7::uuid,supersession_source=$6::uuid
+ WHERE f.fact_id IN (SELECT fact_id FROM saved)`
 
 const insertEvidenceSQL = `
 INSERT INTO {schema}.fact_evidence

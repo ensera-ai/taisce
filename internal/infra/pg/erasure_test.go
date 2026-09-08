@@ -120,6 +120,14 @@ func TestEverythingDerivedFromASubjectIsErasedWithAResidualOfZero(t *testing.T) 
 	schema := tenant(t, pool, "er_zero")
 	formed(t, pool, schema,
 		subjectTurn("subject-1", "Marta works at Ensera and cycles to work."))
+	// Temporal history is a declared projection too; create a real supersession before testing
+	// that every kind is erased. Both turns belong to the subject selected below.
+	for i, city := range []string{"Dublin", "Oslo"} {
+		at := time.Date(2026, time.Month(1+i), 1, 0, 0, 0, 0, time.UTC)
+		statedAt(t, ctx, pg.NewObservationStore(pool), pg.NewFactStore(pool), schema, at,
+			"Marta lives in "+city, domain.Claim{Subject: "Marta", Predicate: "lives_in", Cardinality: domain.CardinalityOne, Object: city, Statement: "Marta lives in " + city, ValidFrom: at})
+	}
+
 	described(t, pool, schema)
 
 	// Before: every projection kind has rows, so the erasure has something to prove.
