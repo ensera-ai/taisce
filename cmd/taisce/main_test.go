@@ -43,7 +43,7 @@ func complete(t *testing.T) map[string]string {
 	return map[string]string{
 		envMemoryDSN:   dsn,
 		envRegistryDSN: dsn,
-		envSchema:      "api_journey",
+		envSchema:      "cmd_runtime",
 		envAddr:        "127.0.0.1:0",
 	}
 }
