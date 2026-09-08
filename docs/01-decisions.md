@@ -2772,3 +2772,48 @@ and 2,000 historical intervals. These establish access paths, not production lat
 The endpoints add no new source-of-truth rows. Removing their indexes only changes performance;
 removing endpoints after the first supported release would require a versioned contract change.
 Corrections, retractions, batches, entity purge and rebuild preservation remain #89/#58.
+
+## D82 — Recall controls are explicit and context allowances are hard limits
+
+**Status:** Accepted. **Date:** 2026-09-08. Tracked by #92.
+
+**Decision.** Recall accepts optional `max_characters` and `source_roles` alongside its existing
+hop control. The configured character budget is the default and ceiling; a request can choose any
+positive value up to it. The row ceiling remains server-controlled. Effective character/row limits,
+roles and clamped hops are returned in `controls`, including when no facts match. A copied recaller
+configuration holds each request's choice so simultaneous clients cannot alter one another's budget.
+
+An omitted/null role list means `user`. An explicit list must be nonempty, unique and drawn from
+`user`, `assistant`, `system`, `tool`. This selects assertion provenance, not project authority or
+permission to promote non-user messages into personal facts. Existing attribution/write rules and
+project, subject, temporal and erasure predicates remain in force at every hop. A fetched document
+has its stored message role; there is no invented `document` role or new ingestion mechanism. Document
+ingestion remains #91. Invalid controls return `400 invalid_recall_controls` before store reads.
+Hops retain their established clamping to 1–2 and the response makes the chosen value inspectable.
+
+**Accounting.** `characters` counts Unicode code points in returned fact subjects, predicates,
+objects, statements, source-role labels, quotes, contexts, path names and path predicates. Both quote
+and context count because both are returned. It is a fact-content allowance: identifiers, anchors,
+dates, numeric metadata and JSON syntax are outside it. It is neither grapheme counting, a tokenizer
+estimate nor the total serialized response size.
+
+The cut applies before appending every fact, including the first. If nothing fits, the response has
+no facts, zero characters and `truncated: true`. A normal empty result has `truncated: false`. The
+implementation previously counted UTF-8 bytes and allowed an oversized first fact; both behaviors
+are incompatible with a client-selected character ceiling. Greenfield contracts can be corrected
+without preserving those behaviors. Budgeting still cuts an unranked sequence; it does not claim to
+return the most useful subset or reduce database work below the independent row/hop/fanout bounds.
+
+**Alternatives.** Allowing the first fact to overflow defeats the context limit. Silently raising a
+small request hides the effective allowance. Returning an error for an ordinary cut would make
+partial recall harder to consume despite existing truncation metadata. Byte counts penalize the
+same number of Arabic letters relative to ASCII; Unicode code points give an explicit, reproducible
+unit. Token counts depend on a client model/tokenizer this service does not control. Exposing all
+roles by default removes the trust choice the caller must make explicitly.
+
+**Evidence and reversal cost.** Real HTTP/PostgreSQL conformance covers independent client budgets,
+exact content accounting, labeled non-user facts, invalid controls, clamped hops and project/subject/
+temporal/erasure boundaries. A portable JSON fixture records these cases for SDK runners. A concurrent
+Go test checks budget isolation and a Unicode/path test catches byte counting or uncharged graph
+text. Changing the accounting unit after a supported release would change client context sizing and
+require a versioned contract decision. No stored rows, SQL writer or model prompt changes are needed.

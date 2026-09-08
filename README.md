@@ -152,6 +152,8 @@ freshness and export without memory mutation. Ordinary issuance defaults to read
 [credential access](docs/10-project-credentials.md) for issuance and permissions.
 [Record inspection](docs/11-record-inspection.md) supports bounded browsing and temporal history;
 [citation resolution](docs/08-citation-resolution.md) provides the supporting source bytes.
+[Recall controls](docs/12-recall-controls.md) let each client set a smaller context allowance and
+explicitly select labeled source roles.
 
 Serving requires non-owner database logins: the memory role serves project data, and the registry
 role reads credentials. Administrative DSNs belong to bootstrap/operator commands. Startup and new

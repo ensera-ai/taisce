@@ -12,6 +12,10 @@ Recall questions are limited to 8192 UTF-8 bytes, 512 distinct candidate names a
 
 Observations admit at most 64 messages, 65536 UTF-8 content bytes per message and 262144 content bytes per turn. Exceeding these limits returns HTTP 400 and `invalid_turn` before storage. Busy authentication or project/credential capacity returns HTTP 429 and `rate_limited`, with `Retry-After: 1`. Retry with backoff and the same observation idempotency key; a refusal has no stored receipt. Request concurrency limits are per API process; durable unfinished-turn limits are shared by the instance and also return `rate_limited`. Existing keyed receipts can be replayed at backlog capacity. Health checks remain outside request admission.
 
+Recall `max_characters` must be positive and no larger than the server's configured budget. Omission uses that budget. The count is Unicode code points in returned fact subjects, predicates, objects, statements, source-role labels, quotes, contexts, paths and path predicates. Identifiers, anchors, dates and JSON syntax are excluded. A first fact that cannot fit returns no facts, zero characters and `truncated: true`. This is a content allowance, not a serialized-response or token limit.
+
+Recall `source_roles` defaults to `["user"]`. An explicit nonempty list may contain `user`, `assistant`, `system` and `tool`, without duplicates. Unknown roles, empty lists and invalid budgets return HTTP 400 and `invalid_recall_controls`. There is no `document` role; fetched document text uses its stored message role. Source selection preserves project, subject, erasure and temporal filters. Hops are clamped to 1–2. Every successful response reports effective limits, roles and hops in `controls`, including empty bundles.
+
 ## Operations
 
 | Operation | Method | Path | On success |
@@ -77,12 +81,15 @@ POST `/v1/recalls` → 200
 | `question` | string |
 | `as_of` | timestamp (RFC 3339), optional |
 | `as_known_at` | timestamp (RFC 3339), optional |
+| `max_characters` | integer, optional |
+| `source_roles` | array of string |
 | `hops` | integer |
 
 ### Response
 
 | Field | Type |
 |---|---|
+| `controls` | {max_characters: integer, max_rows: integer, source_roles: array of string, hops: integer} |
 | `anchors` | array of {entity_id: string, name: string, type: string, matched: string} |
 | `facts` | array of {fact_id: string, subject: string, predicate: string, object: string, statement: string, confidence: number, valid_from: timestamp (RFC 3339), valid_until: timestamp (RFC 3339), optional, anchored_on: string, source_role: string, hops: integer, path: array of string, via: array of string, co_derived_with: array of string, evidence: {observation_id: string, source_ordinal: integer, quote: string, byte_start: integer, byte_end: integer, context: string, context_start: integer, context_complete: boolean}} |
 | `truncated` | boolean |
@@ -232,6 +239,7 @@ Any operation may answer with any of these.
 | `not_found` |
 | `forbidden` |
 | `invalid_record_page` |
+| `invalid_recall_controls` |
 
 ## Liveness
 

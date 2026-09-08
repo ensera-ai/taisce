@@ -67,6 +67,17 @@ func Contract() string {
 		"at backlog capacity. Health checks remain outside request admission.\n",
 		domain.MaxObservationMessages, domain.MaxMessageBytes, domain.MaxObservationBytes)
 
+	b.WriteString("\nRecall `max_characters` must be positive and no larger than the server's configured budget. " +
+		"Omission uses that budget. The count is Unicode code points in returned fact subjects, predicates, " +
+		"objects, statements, source-role labels, quotes, contexts, paths and path predicates. Identifiers, " +
+		"anchors, dates and JSON syntax are excluded. A first fact that cannot fit returns no facts, zero " +
+		"characters and `truncated: true`. This is a content allowance, not a serialized-response or token limit.\n")
+	b.WriteString("\nRecall `source_roles` defaults to `[\"user\"]`. An explicit nonempty list may contain " +
+		"`user`, `assistant`, `system` and `tool`, without duplicates. Unknown roles, empty lists and invalid " +
+		"budgets return HTTP 400 and `invalid_recall_controls`. There is no `document` role; fetched document " +
+		"text uses its stored message role. Source selection preserves project, subject, erasure and temporal " +
+		"filters. Hops are clamped to 1–2. Every successful response reports effective limits, roles and hops " +
+		"in `controls`, including empty bundles.\n")
 	b.WriteString("\n## Operations\n\n")
 	b.WriteString("| Operation | Method | Path | On success |\n|---|---|---|---|\n")
 	for _, o := range operations {

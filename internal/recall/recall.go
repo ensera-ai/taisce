@@ -12,6 +12,7 @@ import (
 	"context"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/ensera-ai/taisce/internal/domain"
 )
@@ -191,15 +192,7 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	if len(question) > domain.MaxRecallQuestionBytes {
 		return domain.Bundle{}, domain.ErrRecallQuestionSize
 	}
-	if hops < DirectHop {
-		hops = DirectHop
-	}
-	if hops > MaxHops {
-		// Clamped rather than refused. A caller asking for more than this gets the deepest answer
-		// the system gives, which is the useful outcome; refusing would turn a request for more
-		// memory into an error a caller has to handle on a path that otherwise cannot fail.
-		hops = MaxHops
-	}
+	hops = clampHops(hops)
 	if len(scopes) == 0 {
 		return domain.Bundle{}, nil
 	}
@@ -253,10 +246,9 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	spent := 0
 	for _, f := range facts {
 		size := factSize(f)
-		if spent+size > r.budget.Characters && len(bundle.Facts) > 0 {
-			// At least one fact always comes back. A budget too small for the first fact returns it
-			// anyway and says it was cut: an empty bundle would be indistinguishable from a memory
-			// with nothing in it, which is the one thing a cut must not look like.
+		if size > r.budget.Characters-spent {
+			// Never exceed a caller's context allowance, including for the first fact. Truncated
+			// distinguishes an empty budget cut from an ordinary question with no matching facts.
 			bundle.Truncated = true
 			break
 		}
@@ -377,16 +369,18 @@ func markCoDerived(facts []domain.CitedFact) {
 // in different casing are recognised as being about the same subject.
 func NormalizeSubject(s string) string { return domain.NormalizeName(s) }
 
-// factSize is what a fact costs a caller, in characters.
-//
-// The fields that are rendered, and only those: a caller pays for what arrives, and counting an
-// identifier they receive but never read into their context would make the budget describe something
-// other than what it bounds. The quote and the context around it are both counted even though the
-// context contains the quote, because both are on the wire — a budget that counted the words once
-// would be describing a payload the caller does not receive. Approximate by a few characters of JSON punctuation per fact, and
-// deliberately so — an exact serialisation cost would depend on the encoder rather than on the
-// content.
+// factSize counts Unicode code points in the fact text a caller places in context. Quote and
+// surrounding context are both charged because both are returned. Source labels and graph paths
+// are also text; identifiers, anchors, timestamps and JSON syntax are outside this content budget.
 func factSize(f domain.CitedFact) int {
-	return len(f.Subject) + len(f.Predicate) + len(f.Object) + len(f.Statement) +
-		len(f.Evidence.Quote) + len(f.Evidence.Context.Text)
+	size := 0
+	for _, text := range []string{f.Subject, f.Predicate, f.Object, f.Statement, f.SourceRole, f.Evidence.Quote, f.Evidence.Context.Text} {
+		size += utf8.RuneCountInString(text)
+	}
+	for _, path := range [][]string{f.Path, f.Via} {
+		for _, text := range path {
+			size += utf8.RuneCountInString(text)
+		}
+	}
+	return size
 }

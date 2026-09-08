@@ -681,10 +681,8 @@ func TestTheBundleIsCutByWhatTheCallerCanAfford(t *testing.T) {
 	}
 }
 
-// At least one fact always comes back. A budget too small for the first fact returns it anyway and
-// says it was cut — an empty bundle would be indistinguishable from a memory with nothing in it,
-// which is the one thing a cut must not look like.
-func TestABudgetTooSmallForOneFactStillReturnsOne(t *testing.T) {
+// A too-small context allowance returns no facts and explicitly reports the budget cut.
+func TestABudgetTooSmallForOneFactReturnsAnExplicitlyTruncatedEmptyBundle(t *testing.T) {
 	long := strings.Repeat("x", 5000)
 	facts := []domain.CitedFact{
 		{ID: "f1", Subject: "Marta", Statement: long, AnchoredOn: "e1",
@@ -697,8 +695,8 @@ func TestABudgetTooSmallForOneFactStillReturnsOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
-	if len(bundle.Facts) != 1 {
-		t.Fatalf("got %d facts; a budget too small must still answer with one", len(bundle.Facts))
+	if len(bundle.Facts) != 0 || bundle.Characters != 0 {
+		t.Fatalf("a too-small budget returned %d facts costing %d", len(bundle.Facts), bundle.Characters)
 	}
 	if !bundle.Truncated {
 		t.Fatal("the bundle was cut and does not say so")

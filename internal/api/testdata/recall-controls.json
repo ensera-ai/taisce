@@ -1,0 +1,21 @@
+{
+  "server_max_characters": 100000,
+  "cases": [
+    {"name":"default_user_only","request":{"question":"Atlas"},"status":200,"facts":1,"roles":["user"],"hops":1,"budget":100000},
+    {"name":"tiny_budget","request":{"question":"Atlas","max_characters":1},"status":200,"facts":0,"roles":["user"],"hops":1,"budget":1,"truncated":true},
+    {"name":"explicit_tool","request":{"question":"Atlas","source_roles":["tool"]},"status":200,"facts":1,"roles":["tool"],"hops":1,"budget":100000},
+    {"name":"all_labeled_roles","request":{"question":"Atlas","source_roles":["tool","user","assistant","system"]},"status":200,"facts":4,"roles":["tool","user","assistant","system"],"hops":1,"budget":100000},
+    {"name":"upper_hop_clamp","request":{"question":"Atlas","hops":999},"status":200,"facts":1,"roles":["user"],"hops":2,"budget":100000},
+    {"name":"lower_hop_clamp","request":{"question":"Atlas","hops":-7},"status":200,"facts":1,"roles":["user"],"hops":1,"budget":100000},
+    {"name":"empty_result_controls","request":{"question":"NobodyKnown","max_characters":100},"status":200,"facts":0,"roles":["user"],"hops":1,"budget":100},
+    {"name":"zero_budget","request":{"question":"Atlas","max_characters":0},"status":400},
+    {"name":"negative_budget","request":{"question":"Atlas","max_characters":-1},"status":400},
+    {"name":"above_server_budget","request":{"question":"Atlas","max_characters":100001},"status":400},
+    {"name":"empty_roles","request":{"question":"Atlas","source_roles":[]},"status":400},
+    {"name":"duplicate_roles","request":{"question":"Atlas","source_roles":["tool","tool"]},"status":400},
+    {"name":"too_many_roles","request":{"question":"Atlas","source_roles":["user","tool","assistant","system","user"]},"status":400},
+    {"name":"unknown_role","request":{"question":"Atlas","source_roles":["document"]},"status":400},
+    {"name":"role_case_is_explicit","request":{"question":"Atlas","source_roles":["USER"]},"status":400},
+    {"name":"project_cannot_be_requested","request":{"question":"Atlas","scope":"p2"},"status":400}
+  ]
+}

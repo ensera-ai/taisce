@@ -492,7 +492,7 @@ type recallRequest struct {
 	// Optional, because a second hop costs every caller who did not need one, and because at two hops
 	// a bundle contains facts about things the question never named. Whether that is the answer or
 	// noise depends on the question, and only the caller knows which they asked.
-	Hops int `json:"hops"`
+	recall.Controls
 }
 
 // at is the pair of instants this request asks about.
@@ -511,8 +511,9 @@ func (r recallRequest) at() domain.AsOf {
 }
 
 type recallResponse struct {
-	Anchors []anchorPayload `json:"anchors"`
-	Facts   []factPayload   `json:"facts"`
+	Controls recall.EffectiveControls `json:"controls"`
+	Anchors  []anchorPayload          `json:"anchors"`
+	Facts    []factPayload            `json:"facts"`
 	// Truncated says the limit cut the result, and it is not a ranking verdict: nothing has ranked
 	// these, so a cut bundle is missing arbitrary members rather than the least relevant ones. A
 	// caller told only the facts would read the cut as a judgement.
@@ -633,8 +634,13 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 
 	// The credential's project, and only ever that. The authorised set is still an argument on
 	// every read rather than a default (D24) — it has one member now, which is the whole of D47.
-	bundle, err := s.recaller.RecallForSubjectAsOf(r.Context(), []string{grant.Project}, req.Question,
-		recall.PrincipalSources, req.at(), req.Hops, req.DataSubjectID)
+	bundle, effective, err := s.recaller.RecallWithControls(r.Context(), []string{grant.Project}, req.Question,
+		req.at(), req.DataSubjectID, req.Controls)
+	if errors.Is(err, recall.ErrInvalidControls) {
+		s.record(r, domain.AuditRecall, grant, domain.OutcomeRefused, 0)
+		writeError(w, http.StatusBadRequest, codeInvalidRecallControls, "recall controls must fit the server limits and allowed source roles")
+		return
+	}
 	if errors.Is(err, domain.ErrRecallQuestionSize) || errors.Is(err, domain.ErrRecallTerms) || errors.Is(err, domain.ErrRecallMatches) {
 		writeError(w, http.StatusBadRequest, codeInvalidQuestion, err.Error())
 		return
@@ -646,7 +652,9 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 	}
 	// The magnitude is how many facts came back. Never the question, and never what they said.
 	s.record(r, domain.AuditRecall, grant, domain.OutcomeAllowed, len(bundle.Facts))
-	writeJSON(w, http.StatusOK, renderBundle(bundle))
+	out := renderBundle(bundle)
+	out.Controls = effective
+	writeJSON(w, http.StatusOK, out)
 }
 
 func renderBundle(b domain.Bundle) recallResponse {
@@ -843,13 +851,14 @@ const (
 	// A key identifies one logical write, including after its content has been erased.
 	codeIdempotencyConflict errorCode = "idempotency_conflict"
 	// codeInvalidQuestion is a recall with nothing to answer.
-	codeInvalidQuestion   errorCode = "invalid_question"
-	codeRateLimited       errorCode = "rate_limited"
-	codeInvalidCitation   errorCode = "invalid_citation"
-	codeCitationLimit     errorCode = "citation_limit"
-	codeNotFound          errorCode = "not_found"
-	codeForbidden         errorCode = "forbidden"
-	codeInvalidRecordPage errorCode = "invalid_record_page"
+	codeInvalidQuestion       errorCode = "invalid_question"
+	codeRateLimited           errorCode = "rate_limited"
+	codeInvalidCitation       errorCode = "invalid_citation"
+	codeCitationLimit         errorCode = "citation_limit"
+	codeNotFound              errorCode = "not_found"
+	codeForbidden             errorCode = "forbidden"
+	codeInvalidRecordPage     errorCode = "invalid_record_page"
+	codeInvalidRecallControls errorCode = "invalid_recall_controls"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -867,7 +876,7 @@ const (
 var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
-	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage,
+	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.
