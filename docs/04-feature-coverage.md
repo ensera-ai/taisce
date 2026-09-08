@@ -33,10 +33,11 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 
 | Exact anchor admission [#102](https://github.com/althunibat/taisce/issues/102) | Core implemented; `3b3a3bb`. Separate indexed name/alias arms, question/term/match limits, explicit refusal before traversal, real-database plan and attribution/erasure tests. | Alias-specific ownership and concurrent registration, normalized-relation comparison and controlled-host workload measurements. Issue remains open. |
 
-| Shared request admission [#93](https://github.com/althunibat/taisce/issues/93) | Request admission implemented; `cd6c76c`. Message count/byte bounds, pool-derived project/credential concurrency, bounded authentication/audit work and retryable HTTP refusal. Two-project progress and registry-lock tests use real PostgreSQL. | Durable backlog admission is implemented in this batch; controlled-host workloads, deployment-wide request admission policy and live operational metrics remain open. |
+| Shared request admission [#93](https://github.com/althunibat/taisce/issues/93) | Request admission `cd6c76c`; durable backlog reservations `1b3b1fe`. Size and concurrency bounds, protected accounting across processes, atomic release on formation/erasure/retention, and retryable HTTP refusal. | Controlled-host workloads, deployment-wide request admission policy and live operational metrics remain open. |
+| Operator formation recovery [#113](https://github.com/althunibat/taisce/issues/113) | Bounded metadata pagination and project-scoped retry with atomic audit and watermark correction. D75 and the ingestion runbook document authority, privacy and retry behavior. | Readiness/health metrics remain #94. |
 
-The complete real-PostgreSQL suite and uncached repeat through shared request admission pass at
-**90.5%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
+The complete real-PostgreSQL suite and uncached repeat through operator recovery pass at
+**90.6%**, now the enforced floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
 Inference profiles are tracked separately. The full local inference suite passed in 2140.657 seconds
@@ -45,7 +46,7 @@ against `17ac077` passed in 462.482 seconds. Known semantic separation limitatio
 in the tests. OpenRouter stopped on upstream HTTP 429; a later bounded retry was also rate-limited.
 Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist configuration.
 
-Next: operator observability (#94), formation recovery and the remaining product journeys.
+Next: operator observability (#94) and the remaining product journeys.
 Anchoring’s ownership and workload criteria stay in #102. The generation/rebuild lifecycle is
 required before closing #84 or #100. Product and adapter journeys retain their acceptance criteria
 and remain in the execution order below.

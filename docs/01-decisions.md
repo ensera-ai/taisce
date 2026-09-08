@@ -2460,3 +2460,49 @@ is separate from live-model quality/profile evaluation.
 reviewed migration; observations and their projections need not be rewritten. Changing the counted
 unit to messages/bytes requires backfilling and reconciling accounting before a cutover. Configure
 budgets in their own operator transaction rather than mixing policy updates with application writes.
+
+## D75 — Operator recovery is bounded, project-scoped and atomic with its audit
+
+**Decision.** `taisce formation parked` reads one live keyset page of metadata (default 100,
+maximum 200). The partial parked index now orders by project and log offset, so the query can stop
+at the requested page instead of sorting the full queue. A page fetches one extra row to determine
+whether `next_after` is needed. New work behind a cursor appears when the operator starts a fresh
+scan; this is not a durable snapshot export.
+
+`taisce formation unpark` accepts one project and observation UUID, locks that project's turn,
+resets its failure state and corrects its freshness watermark in one transaction. It retains the
+unfinished-turn reservation. Concurrent retries serialize on the observation: only one changes the
+parked state; subsequent retries are audited no-ops. A missing or wrong-project turn is a refused
+operation. No command bypasses the worker's normal extraction/retry policy.
+
+**Security and operations.** These commands use the existing operator database connection and a
+fixed ten-second deadline. The output contains no subject identifiers, message text or stored
+provider error: error strings may contain submitted memory. Recovery writes `formation.unpark` to
+the existing ledger with project, outcome and magnitude; audit failure rolls back the recovery.
+The principal is a generated invocation UUID returned to the operator, not a claim of authenticated
+human identity. Human attribution comes from external access/session controls around the operator
+connection. No observation UUID is retained in the audit row. This deliberate operator action can
+fail closed on audit, while ordinary request audit retains its separately documented availability
+tradeoff. Metadata listing does not read memory content and adds no new audit operation.
+
+A timeout or broken output may happen after commit. Repeating the same project/observation is safe
+and reports the current parked state; if the worker has parked it again, it may be retried again.
+Operators should repair the provider before retrying. The command does not automatically drain,
+raise capacity, delete data or resume suspended projects.
+
+**Alternatives rejected.** Direct SQL flag resets cannot guarantee the freshness watermark is
+correct. An unscoped UUID-only operator command makes a mistaken project selection invisible.
+Returning raw provider errors can disclose memory during routine diagnostics. An unbounded listing
+can consume increasing memory during the outage it is intended to diagnose. Bulk unpark and a
+remote operator API add amplification and authorization policy that this single-turn workflow does
+not require. Requiring a new human identity system for a local operator command would delay recovery
+without making a shared database credential attributable.
+
+**Evidence.** Real-PostgreSQL tests cover pagination and project filtering, twelve concurrent
+retries with one state transition, wrong-project refusal, retained quota, downward watermark
+correction, rollback when audit is refused and cancellation while a row is locked. CLI tests cover
+argument refusal, metadata-only output and safe retry when output fails after commit.
+
+**Reversal cost.** Low for the CLI and index, one migration for the operation constraint. Existing
+audit rows must retain their operation vocabulary; removing command support must not invalidate or
+rewrite the ledger. No memory representation or inference prompt changes. Tracked in #113.

@@ -40,6 +40,8 @@ const usage = `taisce — memory for agents
   taisce credential revoke <id>    stop a credential resolving
   taisce audit verify              recompute the ledger's chain and report what it covers
   taisce audit seal                seal everything written since the last seal
+  taisce formation parked          inspect a bounded page of parked turn metadata (--project required)
+  taisce formation unpark          retry one parked turn (--project required)
   taisce version                   what this binary is
 
 Configuration is read from the environment. TAISCE_MEMORY_DSN and TAISCE_REGISTRY_DSN are the two
@@ -66,6 +68,8 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 		return credentialCommand(ctx, args[1:])
 	case "audit":
 		return auditCommand(ctx, args[1:])
+	case "formation":
+		return formationCommand(ctx, args[1:], os.Stdout)
 	case "version", "--version":
 		fmt.Println(version)
 		return nil

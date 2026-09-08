@@ -37,12 +37,35 @@ return its original receipt while capacity is full. A capacity refusal rolls bac
 write, including its receipt and log offset. A timeout or connection failure can have an uncertain
 commit outcome; retry with the same key instead of inventing a new one.
 
-During a provider outage, inspect formation failures and parked observations, restore the provider
-configuration, then unpark work deliberately. Unparking currently exists as the internal
-`ObservationStore.Unpark` operation; the operator command/API is still tracked under the formation
-recovery backlog. Do not reset its flags independently of the freshness watermark. Parking itself
-does not free capacity. Erasure and retention remain data-governance operations and should not be
-used merely to hide an operational queue. Raise a limit only with enough resource headroom.
+During a provider outage, restore the provider configuration, inspect parked observations and
+unpark work deliberately. With the instance operator connection configured as `TAISCE_ADMIN_DSN`:
+
+```sh
+taisce formation parked --project my_project --limit 100
+taisce formation parked --project my_project --after 123 --limit 100
+taisce formation unpark --project my_project 550e8400-e29b-41d4-a716-446655440000
+```
+
+The listing returns JSON metadata: observation UUID, log offset, attempt count and parked timestamp.
+It never selects memory content, subject identifiers or stored provider errors. Page size is 1–200;
+omit `--after` for the first page and use `next_after` from the response for the next one. This is a
+live scan: newly parked turns behind a cursor require starting a fresh scan. Commands have a ten
+second deadline, including connecting and waiting for locks. Put flags before the observation UUID.
+
+Recovery changes only the named turn in the named project and corrects the freshness watermark in
+the same transaction. It records a `formation.unpark` audit entry with the project, result and count.
+The returned `audit_principal` is a generated invocation UUID, not the identity of an authenticated
+human; access to the operator database connection supplies the authority. No observation or subject
+identifier is retained in this audit entry. Human attribution depends on the operator's external
+access/session controls. A failed audit insert rolls back recovery. Repeating a completed recovery
+returns `changed: false`; if the command times out or output fails after commit, repeat the same
+project/UUID to inspect the current result safely. A worker can subsequently park the turn again if
+the provider is still failing. Project suspension blocks client access; it does not pause background
+formation. Recovery does not change the project's suspension state.
+
+Do not reset flags independently of the freshness watermark. Parking and unparking do not free
+capacity. Erasure and retention remain data-governance operations and should not be used merely to
+hide an operational queue. Raise a limit only with enough resource headroom.
 
 For an accounting check, compare the global counter, reservation count and unfinished-turn count:
 
