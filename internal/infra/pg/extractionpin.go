@@ -35,9 +35,10 @@ func pinLockedExtractionTx(ctx context.Context, tx pgx.Tx, schema Schema, scope,
 		return ErrInvalidExtractionVersion
 	}
 	var existing string
-	err := tx.QueryRow(ctx, schema.SQL(`SELECT extractor_version FROM {schema}.source_extraction WHERE scope=$1 AND source_observation_id=$2::uuid`), scope, source).Scan(&existing)
+	var generated bool
+	err := tx.QueryRow(ctx, schema.SQL(`SELECT extractor_version,generation_id IS NOT NULL FROM {schema}.source_extraction WHERE scope=$1 AND source_observation_id=$2::uuid`), scope, source).Scan(&existing, &generated)
 	if err == nil {
-		if existing != version {
+		if existing != version || generated {
 			return ErrExtractionChanged
 		}
 		return nil

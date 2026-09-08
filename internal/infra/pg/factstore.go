@@ -5,6 +5,7 @@ package pg
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -73,6 +74,13 @@ func (s *FactStore) AssertVersioned(ctx context.Context, schema Schema, scope, o
 // Human corrections share the same source, role and temporal write boundary; only provenance differs.
 func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observationID string,
 	speaker domain.Role, dataSubjectID string, claim domain.Claim, extractorVersion string, knownAt time.Time) (string, error) {
+	return assertFactVersionTx(ctx, tx, schema, scope, observationID, speaker, dataSubjectID, claim, extractorVersion, knownAt, uuid.Nil)
+}
+
+// A generation uses the same attribution, withdrawal, entity and evidence boundary as an ordinary
+// assertion. Only its identity and temporal reconciliation differ; its caller owns atomic cutover.
+func assertFactVersionTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observationID string,
+	speaker domain.Role, dataSubjectID string, claim domain.Claim, extractorVersion string, knownAt time.Time, generation uuid.UUID) (string, error) {
 
 	if dataSubjectID != "" && !speaker.SpeaksForPrincipal() {
 		return "", fmt.Errorf("%w: message %d has role %q", ErrNotSpokenByPrincipal, claim.SourceOrdinal, speaker)
@@ -95,15 +103,25 @@ func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observat
 		if err != nil {
 			return err
 		}
-		if err := pinLockedExtractionTx(ctx, tx, schema, scope, observationID, extractorVersion); err != nil {
-			return err
+		if generation == uuid.Nil {
+			if err := pinLockedExtractionTx(ctx, tx, schema, scope, observationID, extractorVersion); err != nil {
+				return err
+			}
 		}
 		if err := refuseRetractedClaim(ctx, tx, schema, scope, observationID, dataSubjectID, claim, subjectSpeaker, objectSpeaker); err != nil {
 			return err
 		}
+		if generation != uuid.Nil {
+			if err := refuseCorrectedGenerationSlotTx(ctx, tx, schema, scope, observationID, dataSubjectID, claim, subjectSpeaker); err != nil {
+				return err
+			}
+		}
 		id, err := sourceClaimID(scope, observationID, dataSubjectID, claim, subjectSpeaker, objectSpeaker)
 		if err != nil {
 			return err
+		}
+		if generation != uuid.Nil {
+			id = uuid.NewHash(sha256.New(), generation, id[:], 8)
 		}
 		var retained bool
 		if err := tx.QueryRow(ctx, schema.SQL(`SELECT EXISTS(SELECT 1 FROM {schema}.fact WHERE scope=$1 AND fact_id=$2)`), scope, id).Scan(&retained); err != nil {
@@ -155,7 +173,15 @@ func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observat
 		}
 		// Save the previous validity at its original knowledge interval before changing the
 		// retained row. The snapshot, causal source, registration and new assertion commit together.
-		if claim.Cardinality == domain.CardinalityOne && subjectID != "" {
+		var boundary generationBoundary
+		if generation != uuid.Nil && claim.Cardinality == domain.CardinalityOne && subjectID != "" {
+			var err error
+			boundary, err = generationValidityTx(ctx, tx, schema, scope, observationID, generation.String(), subjectID, claim.Predicate, id.String(), validFrom)
+			if err != nil {
+				return err
+			}
+		}
+		if generation == uuid.Nil && claim.Cardinality == domain.CardinalityOne && subjectID != "" {
 			if _, err := tx.Exec(ctx, schema.SQL(supersedeSQL),
 				scope, subjectID, claim.Predicate, validFrom, learnedAt, observationID, id, nullIfEmpty(dataSubjectID)); err != nil {
 				return fmt.Errorf("supersede the earlier fact: %w", err)
@@ -165,7 +191,7 @@ func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observat
 		if _, err := tx.Exec(ctx, schema.SQL(insertFactSQL),
 			id, scope, nullIfEmptyString(subjectID), nullIfEmptyString(objectID),
 			claim.Predicate, claim.Statement, validFrom, claim.Confidence,
-			nullIfEmpty(dataSubjectID), string(claim.Cardinality), string(speaker), learnedAt); err != nil {
+			nullIfEmpty(dataSubjectID), string(claim.Cardinality), string(speaker), learnedAt, boundary.Until, boundary.Successor, boundary.Source); err != nil {
 			return fmt.Errorf("insert fact: %w", err)
 		}
 
@@ -292,8 +318,8 @@ UPDATE {schema}.entity
 const insertFactSQL = `
 INSERT INTO {schema}.fact
     (fact_id, scope, subject_entity_id, object_entity_id, predicate, statement,
-     valid, confidence, data_subject_id, cardinality, source_role, known, recorded_at)
-VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, NULL), $8, $9, $10, $11, tstzrange($12,NULL), $12)`
+     valid, confidence, data_subject_id, cardinality, source_role, known, recorded_at, superseded_by, supersession_source)
+VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, $13), $8, $9, $10, $11, tstzrange($12,NULL), $12, $14::uuid, $15::uuid)`
 
 // Closes whatever this subject currently holds for this relation, at the moment the new one starts.
 //

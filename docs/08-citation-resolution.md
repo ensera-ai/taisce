@@ -28,8 +28,10 @@ A retained superseded fact can return `validity_closed`; a closed knowledge inte
 `knowledge_closed`. `current` means both stored upper bounds are open, not that the claim has been
 independently verified or is valid at every instant. Recorded supersession links are available in `superseded_by` and
 `supersession_source_observation_id`. [Historical recall](09-temporal-history.md) selects preserved
-validity versions. Retraction relationships and rebuild-stable citation mappings
-remain #89/#58. Do not infer a successor from similar text or matching predicates.
+validity versions. Retraction relationships and generation-stable citation mappings are returned in
+`retraction`, `generation` and `reinterpreted_by`. A generation-retired fact has status
+`reinterpreted` unless it was explicitly retracted; scope-wide rebuild orchestration remains #58. Do
+not infer a successor from similar text or matching predicates.
 
 Unknown, erased and other-project fact IDs all return the same `404 not_found`. Invalid identifiers
 or page parameters return `400 invalid_citation`. Oversized legacy source text returns

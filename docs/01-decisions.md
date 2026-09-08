@@ -3484,3 +3484,41 @@ procedure. PostgreSQL/HTTP tests cover real configuration propagation, key rotat
 changed configuration refusal before inference, failed/empty attempts, concurrent first pins,
 project/missing-source refusal, immutable pins, storage failure rollback, exact citation recovery,
 export, counted erasure and expiry. Existing correction/replay tests retain human-authored provenance.
+
+## D97 — Rebuild publishes one bounded source generation atomically
+
+**Decision.** `taisce rebuild facts --project <project> --source <observation-uuid> --key
+<operation-uuid>` prepares one retained conversation source under the current extraction identity
+and publishes it in one PostgreSQL transaction. The source is read with a repeatable-read snapshot,
+bounded to 256 messages and 1 MiB, and the model runs before the cutover lock is taken. The cutover
+rechecks the source digest, retires only prior model-derived facts for that source, writes new facts
+with generation-scoped IDs, records admitted/rejected/retracted/refused outcomes, and replaces the
+source extraction pin. Missing current model-derived facts are restored from source-owned receipts
+inside publication before retirement, so later recovery cannot revive the previous interpretation
+(#123). Damaged receipts abort publication. A generation row and per-fact disposition rows are the
+durable receipt.
+
+The old facts stay readable while preparation runs and remain as historical, knowledge-closed rows
+after publication. Citations expose the generation that admitted a fact and the generation that
+retired it, so a changed interpretation is explainable rather than an apparent edit. A human
+correction wins over a generated claim with the same source-message subject/relation slot; changing
+the proposed object cannot bypass it. A source-backed withdrawal continues to block its matching
+structural claim. The same operation key and extraction identity
+replay the committed result and finish the formed watermark without another model call. A changed
+source, identity or concurrent correction aborts the cutover and leaves the prior generation intact.
+
+**Cost and alternatives.** This adds two bounded lineage tables and a source extraction pointer; it
+does not add a cache or a second datastore. Preparation holds no database transaction, so model
+latency does not block a project's ingestion queue. Publication locks one source, scans at most 100
+claims and retires at most 100 prior generated facts. Deleting and re-deriving would make recall
+temporarily empty and lose the historical explanation. Appending new facts without retirement would
+make current recall contain competing interpretations. A scope-wide rebuild is still a sequence of
+these source generations and requires its own progress and cancellation contract.
+
+**Reversal and proof.** Moderate before release: generation tables and the source pointer can be
+removed only with a migration that preserves old facts and their evidence. PostgreSQL tests prove
+atomic rollback, changed-source refusal, idempotent replay, exact quote validation, role and
+retraction policy, human-correction protection, temporal boundaries, citation/export lineage and
+subject erasure. The command has a content-free JSON progress result. Full-scope orchestration,
+other projection rebuilds and workload measurements remain #58/#103. Model-response caching is
+tracked separately in [ensera-ai/taisce#108](https://github.com/ensera-ai/taisce/issues/108).

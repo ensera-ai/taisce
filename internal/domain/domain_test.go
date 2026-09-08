@@ -95,6 +95,25 @@ func TestNormalizationMergesCasingAndWhitespaceAndNothingElse(t *testing.T) {
 	}
 }
 
+func TestOntologyRejectsEmptyAndDuplicateRelations(t *testing.T) {
+	if _, err := NewOntology(nil); err == nil {
+		t.Fatal("empty ontology was accepted")
+	}
+	p := Predicate{Name: "works_at", Cardinality: CardinalityMany}
+	if _, err := NewOntology([]Predicate{p, p}); err == nil {
+		t.Fatal("duplicate relation was accepted")
+	}
+}
+
+func TestErasureCleanReportsResidualRows(t *testing.T) {
+	if !(Erasure{Residual: map[string]int{"fact": 0, "entity": 0}}).Clean() {
+		t.Fatal("zero residual rows were reported as dirty")
+	}
+	if (Erasure{Residual: map[string]int{"fact": 1}}).Clean() {
+		t.Fatal("residual rows were reported as clean")
+	}
+}
+
 // ── #86: what the ledger will not record ──────────────────────────────────────────────────────
 //
 // Checked before the insert as well as by the schema, so a caller gets the reason rather than a

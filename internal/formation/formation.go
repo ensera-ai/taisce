@@ -94,6 +94,19 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 		return report, err
 	}
 
+	generation, published, err := f.facts.ReplayGeneration(ctx, schema, observation.Scope, observation.ID)
+	if err != nil {
+		return report, err
+	}
+	if published {
+		report.MessagesRead = generation.Messages
+		report.FactsAsserted = generation.Asserted
+		report.ClaimsRejected = generation.Rejected
+		report.ClaimsRetracted = generation.Retracted
+		report.ClaimsRefusedByRole = generation.RefusedRole
+		return report, nil
+	}
+
 	messages, err := f.observations.Messages(ctx, schema, observation.ID)
 	if err != nil {
 		return report, err

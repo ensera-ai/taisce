@@ -98,6 +98,10 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 			return fmt.Errorf("open erasure request: %w", err)
 		}
 
+		if err := eraseGenerationMetadataTx(ctx, tx, schema, scope, dataSubjectID, &out); err != nil {
+			return err
+		}
+
 		for _, k := range kinds {
 			tag, err := tx.Exec(ctx, deleteProjectionSQL(schema, k), scope, dataSubjectID)
 			if err != nil {

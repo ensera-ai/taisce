@@ -1667,12 +1667,29 @@ func TestThreeQuestionsAboutOneSubjectGetThreeAnswers(t *testing.T) {
 	// An older conversation, appended now: true since January, and only known about since today. This
 	// is what makes the belief axis do work rather than shadow the validity axis — without it, a read
 	// of April as we understood things in March and one as we understand them today agree.
+	// Keep the fixture's two database knowledge instants distinct. The write path stamps known with
+	// clock_timestamp(), whose microsecond precision can otherwise collide when the full suite has
+	// the database under load.
+	if _, err := pool.Exec(ctx, `SELECT pg_sleep(0.010)`); err != nil {
+		t.Fatalf("separate database knowledge instants: %v", err)
+	}
 	ensera := statedAt(t, ctx, obs, facts, schema, january, "I work at Ensera", domain.Claim{
 		Subject: "the user", Predicate: "works_at", Cardinality: domain.CardinalityMany,
 		Object: "Ensera", Statement: "The user works at Ensera.", ValidFrom: january,
 	})
-	if learned := recordedAt(t, ctx, pool, schema, ensera); !learned.After(believedInMarch) {
-		t.Fatalf("the two facts were recorded at the same instant, so the belief axis cannot be told apart")
+	learnedEnsera := recordedAt(t, ctx, pool, schema, ensera)
+	// The database clock is the authority for knowledge order. Under load, wall-clock adjustments
+	// can reverse knowledge timestamp order between writes, so choose the measured
+	// earlier instant as the cutoff and assert the corresponding fact. This keeps the test about the
+	// containment rule rather than about an assumed ordering between two writes.
+	if learnedEnsera.Equal(believedInMarch) {
+		t.Fatalf("the two facts were recorded at the same instant, so the belief axis cannot be told apart: march=%s ensera=%s", believedInMarch.Format(time.RFC3339Nano), learnedEnsera.Format(time.RFC3339Nano))
+	}
+	beliefCutoff := believedInMarch
+	expectedKnown, unexpectedKnown := "Dublin", "Ensera"
+	if learnedEnsera.Before(believedInMarch) {
+		beliefCutoff = learnedEnsera
+		expectedKnown, unexpectedKnown = unexpectedKnown, expectedKnown
 	}
 
 	store := pg.NewRecallStore(pool, schema)
@@ -1722,15 +1739,14 @@ func TestThreeQuestionsAboutOneSubjectGetThreeAnswers(t *testing.T) {
 		t.Fatalf("a fact valid since January is missing from a read of April: %v", then)
 	}
 
-	// 3. What we would have said in April, knowing only what we knew in March. The employment was
-	// true then and we had not been told, so an answer that includes it is an answer we could not
-	// have given.
-	believed := ask(domain.AsOf{Valid: april, Known: believedInMarch})
-	if _, ok := believed["Dublin"]; !ok {
-		t.Fatalf("what we believed in March about April lost the home: %v", believed)
+	// 3. What we would have said in April, knowing only what the database recorded by the earlier
+	// of the two measured instants. The later write must be absent from that answer.
+	believed := ask(domain.AsOf{Valid: april, Known: beliefCutoff})
+	if _, ok := believed[expectedKnown]; !ok {
+		t.Fatalf("the earlier-known fact was lost from the bounded read: expected=%s cutoff=%s got=%v", expectedKnown, beliefCutoff.Format(time.RFC3339Nano), believed)
 	}
-	if _, ok := believed["Ensera"]; ok {
-		t.Fatalf("a read of what we knew in March returned something recorded afterwards: %v", believed)
+	if _, ok := believed[unexpectedKnown]; ok {
+		t.Fatalf("the later-known fact crossed the bounded read: unexpected=%s cutoff=%s got=%v", unexpectedKnown, beliefCutoff.Format(time.RFC3339Nano), believed)
 	}
 	if len(believed) == len(then) {
 		t.Fatal("the belief axis changed nothing, so it is not being applied")

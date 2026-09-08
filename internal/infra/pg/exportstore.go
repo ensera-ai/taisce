@@ -111,6 +111,14 @@ func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubject
 		}
 		out.Sections["source_extraction"] = pins
 
+		for _, table := range []string{"fact_generation", "fact_generation_record"} {
+			items, err := exportRows(ctx, tx, schema, "SELECT to_jsonb(r) FROM {schema}."+table+" r WHERE r.scope=$1 AND r.source_observation_id IN (SELECT observation_id FROM {schema}.observation WHERE scope=$1 AND data_subject_id=$2) ORDER BY r.generation_id", scope, dataSubjectID)
+			if err != nil {
+				return err
+			}
+			out.Sections[table] = items
+		}
+
 		for _, table := range []string{"fact_receipt", "fact_receipt_history"} {
 			records, err := exportRows(ctx, tx, schema, "SELECT to_jsonb(r) FROM {schema}."+table+" r WHERE "+receiptOwnershipSQL(table)+" ORDER BY r.fact_id", scope, dataSubjectID)
 			if err != nil {

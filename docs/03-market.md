@@ -82,10 +82,11 @@ possible, and it is enforced by a foreign key rather than by a prompt. An open t
 decision into a model's judgement per message, which is the failure the closed set exists to prevent —
 four names for one relation and a traversal that finds a quarter of what it should.
 
-**2. Response caching, which we do not have and which a rebuild needs.** Their reasons are network
-resilience and idempotence. Ours would be cost: a rebuild re-runs every extraction, and extraction here
-was measured at forty to ninety seconds per message on a local model. A rebuild is the schema's whole
-argument (#58) and is currently priced at the entire corpus's inference bill.
+**2. Response caching, which we do not have and which a scope rebuild needs.** Their reasons are network
+resilience and idempotence. Ours would be cost: a scope-wide rebuild re-runs every extraction, and
+extraction here was measured at forty to ninety seconds per message on a local model. A bounded
+single-source generation exists, but it is still priced at one model call per message until a cache
+with an erasure contract is designed (#58, #108).
 
 *What does not cross is where it lives.* A cache of model responses keyed on prompt content is a second
 place a customer's words live, and D1 refuses a second datastore precisely because it is a second sweep

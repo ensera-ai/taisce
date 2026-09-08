@@ -33,8 +33,9 @@ recall timestamps select a historical view. [Record history](11-record-inspectio
 
 Erasure and retention remove historical derivatives too. If the source that established a closing
 date is erased, the affected fact can become unavailable even when its original observation remains.
-Reopening that fact would require reconstruction under the future rebuild workflow. This preserves
-the erasure boundary without guessing at truth. An already returned client response cannot be revoked.
+Reopening that fact requires an explicit source generation after the erasure boundary is satisfied.
+This preserves the erasure boundary without guessing at truth. An already returned client response
+cannot be revoked.
 
 The historical view preserves fact validity/knowledge, not prior entity labels, alias lookup state,
 or an exact replay of an earlier API response. Arbitrary retroactive corrections, mutable-record

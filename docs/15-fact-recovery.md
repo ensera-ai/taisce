@@ -53,5 +53,8 @@ preserves this stamp; it does not stamp the operator's current model onto old ev
 `source_extraction` control row is authoritative source metadata and must be backed up with the
 observation/receipts, not dropped as a projection. Failed and empty extraction attempts also pin a
 configuration. A changed retry is refused; restore the original binary/configuration to finish an
-unfinished source. Deleting a pin is not a supported reset. Changed-model generation cutover remains
-tracked in #58. D96 defines the fingerprint inputs and the limits of model aliases and routing.
+unfinished source. Deleting a pin is not a supported reset. Single-source changed-model generation
+cutover is available through `taisce rebuild facts`; it keeps the old interpretation historical and
+records lineage. Scope-wide orchestration remains #58; response caching is tracked in
+[ensera-ai/taisce#108](https://github.com/ensera-ai/taisce/issues/108). D96
+defines the fingerprint inputs and the limits of model aliases and routing.

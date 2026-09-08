@@ -44,6 +44,7 @@ const usage = `taisce — memory for agents
   taisce formation unpark          retry one parked turn (--project required)
   taisce artifact limits           inspect or replace project artifact storage allowances
   taisce recover facts             restore a bounded page of missing facts (--project required)
+  taisce rebuild facts             reinterpret one source atomically (--project, --source, --key required)
   taisce health                    show content-free operational aggregates using the operator connection
   taisce probe                     check local readiness (--live for liveness, --worker for worker probes)
   taisce version                   what this binary is
@@ -78,6 +79,8 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 		return artifactCommand(ctx, args[1:], os.Stdout)
 	case "recover":
 		return recoveryCommand(ctx, args[1:], os.Stdout)
+	case "rebuild":
+		return rebuildCommand(ctx, args[1:], os.Stdout)
 	case "health":
 		return healthCommand(ctx, args[1:], os.Stdout)
 	case "probe":

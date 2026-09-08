@@ -65,6 +65,8 @@ type CitationSource struct {
 // Citation is the currently retained record and one page of exact supporting sources.
 // The stored intervals describe the retained state; historical recall selects earlier versions.
 type Citation struct {
+	Generation         *GenerationLink    `json:"generation,omitempty"`
+	ReinterpretedBy    *GenerationLink    `json:"reinterpreted_by,omitempty"`
 	Version            string             `json:"version"`
 	Retraction         *RetractionDetails `json:"retraction,omitempty"`
 	ID                 string             `json:"id"`
@@ -141,6 +143,13 @@ func (s *CitationStore) Resolve(ctx context.Context, scope, id string, after *Ci
 			if out.Retraction != nil {
 				out.Status = "retracted"
 			}
+		}
+		out.Generation, out.ReinterpretedBy, err = generationLinksTx(ctx, tx, s.schema, scope, out.ID)
+		if err != nil {
+			return err
+		}
+		if !knownOpen && out.Retraction == nil && out.ReinterpretedBy != nil {
+			out.Status = "reinterpreted"
 		}
 		query := citationEvidenceSQL
 		args := []any{scope, factID.String(), limit + 1, domain.MaxMessageBytes, domain.MaxMessageBytes, 256, domain.ContextWindow}

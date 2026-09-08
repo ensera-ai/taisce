@@ -381,6 +381,8 @@ POST `/v1/citations/resolve` → 200
 
 | Field | Type |
 |---|---|
+| `generation` | {generation_id: string, extractor_version: string, applied_at: timestamp (RFC 3339)}, optional |
+| `reinterpreted_by` | {generation_id: string, extractor_version: string, applied_at: timestamp (RFC 3339)}, optional |
 | `version` | string |
 | `retraction` | {operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339), replacement_source_observation_id: string, optional, replacement_record_id: string, optional}, optional |
 | `id` | string |
