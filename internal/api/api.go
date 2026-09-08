@@ -733,19 +733,6 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, grant credential
 
 // ── Shared ────────────────────────────────────────────────────────────────────────────────────
 
-func decode(w http.ResponseWriter, r *http.Request, into any) bool {
-	// Bounded, because an unbounded body is a way to spend our memory with one request. A turn is
-	// text; a megabyte of it is already far past anything a conversation produces.
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		writeError(w, http.StatusBadRequest, codeInvalidBody, "the request body could not be read")
-		return false
-	}
-	return true
-}
-
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

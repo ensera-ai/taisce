@@ -48,6 +48,11 @@ func Contract() string {
 			"The version is in the path. It is permanent from the day the first client ships: " +
 			"a field is only ever added, and anything else is a new version.\n")
 
+	b.WriteString("\nRequests must contain one complete UTF-8 JSON object followed only by whitespace. " +
+		"Duplicate keys (including case aliases), unknown fields, invalid Unicode escapes and " +
+		"nesting beyond 128 levels are refused with HTTP 400 and `invalid_body`. " +
+		"The 1 MiB limit includes all bytes of the body, including trailing whitespace.\n")
+
 	b.WriteString("\n## Operations\n\n")
 	b.WriteString("| Operation | Method | Path | On success |\n|---|---|---|---|\n")
 	for _, o := range operations {

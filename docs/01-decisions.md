@@ -1181,6 +1181,26 @@ knob with nothing behind it).
 sets none of them and behaves exactly as before, and removing the split would be removing two
 environment variables nobody had to set.
 
+### D62 — The complete JSON representation is validated before a request can act
+
+A request contains exactly one object, uses valid Unicode, has unique keys at every nesting level,
+and ends with whitespace or EOF. The whole body is limited to 1 MiB and 128 nesting levels.
+Case-folded property aliases count as duplicates because the Go decoder maps them to the same field.
+Every refusal returns `invalid_body` without echoing keys, content or parser errors.
+
+The protected asset is the meaning of a write or governance selector. An authenticated caller can
+submit bytes interpreted differently by a gateway and the server; no append or erasure may run until
+those bytes have one unambiguous interpretation. The HTTP/PostgreSQL test
+`TestAmbiguousBodiesCannotAppendOrErase` verifies that refused requests consume no offsets, erase no
+observations and produce no successful operation entry. This does not authenticate message contents.
+
+**Rejected:** decoding only once (ignores trailing data); checking EOF alone (still accepts duplicate
+keys and repairs malformed Unicode); decoding into a map first (loses duplicate-key evidence).
+The bounded token pass adds one linear scan before typed decoding, without another materialised tree.
+
+**How hard to undo.** Transport-only, with no schema migration. Relaxing it would reintroduce multiple
+interpretations of the same request. Tracked in development issue #87.
+
 ---
 
 ## Substrate
