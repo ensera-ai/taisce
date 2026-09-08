@@ -1,99 +1,164 @@
 #!/usr/bin/env bash
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
 #
-# Publish the working history to the public repository as one commit.
-#
-# ── THE TWO REPOSITORIES, AND WHY THEY DIFFER ────────────────────────────────────────────────────
-#
-#   althunibat/taisce   the working history. Every commit, with its measurements, its arguments and
-#                       the things that turned out to be wrong. This is where the reasoning lives and
-#                       where the work happens.
-#
-#   ensera-ai/taisce    the published repository. One commit per release, so somebody arriving reads
-#                       a project rather than an excavation.
-#
-# ── THE TWO VERSION LINES ────────────────────────────────────────────────────────────────────────
-#
-#   x.y.z   every commit on the working history, z counting commits since the last release. Computed,
-#           so nobody maintains it and no two commits can claim the same version.
-#
-#   x.y.0   a release, and the only thing that exists publicly. The patch position is always zero
-#           there, which is deliberate: a published version is an account somebody wrote, and there
-#           is no such thing as an unaccounted-for public release.
-#
-# WHAT THAT COSTS, because it is not free: an urgent fix ships as the next MINOR rather than as a
-# patch, so the version number cannot say "small, urgent" to somebody deciding whether to upgrade
-# today. The release notes have to say it instead. That is a real loss and it is the price of every
-# public version being a deliberate account rather than a build number.
-#
-# The working history is not noise and is not hidden for being embarrassing — it is where a decision
-# can be traced to the run that produced it. It is separated because a stranger evaluating this needs
-# to read what the software IS, and fifty-five commits of how it came to be is a different document
-# for a different reader.
-#
-# ── WHAT THIS SCRIPT WILL NOT DO ─────────────────────────────────────────────────────────────────
-#
-# It does not squash silently. The commit message is written by a person, because the published
-# history is one line per release and that line is the only account a reader gets.
+# Prepare a public release in a separate repository, then publish that reviewed snapshot explicitly.
+# The developer checkout and its branches are never switched, reset or pushed by this script.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-message_file="${1:-}"
-if [ -z "$message_file" ] || [ ! -f "$message_file" ]; then
-  echo "usage: scripts/publish.sh <file containing the release commit message>" >&2
-  echo "" >&2
-  echo "The message is the whole account a reader of the public repository gets of this release." >&2
-  exit 1
-fi
+die() { echo "release: $*" >&2; exit 1; }
+usage() {
+  die "usage: scripts/publish.sh prepare <message-file> <new-plan-directory> | publish <plan-directory>"
+}
 
-release="$("$root/scripts/version.sh" next-release)"
-if git rev-parse "v$release" >/dev/null 2>&1; then
-  echo "publish: v$release already exists; a version is published once" >&2
-  exit 1
-fi
+# Read the configured URL, not a remote name's assumed meaning. Git URL rewriting remains available
+# for an operator's transport configuration and for the disposable-repository integration tests.
+check_remotes() {
+  development_url="$(git config --get remote.althunibat.url)" || die "missing development remote althunibat"
+  public_url="$(git config --get remote.origin.url)" || die "missing public remote origin"
+  case "$development_url" in
+    git@github.com:althunibat/taisce.git|https://github.com/althunibat/taisce.git) ;;
+    *) die "althunibat must identify the private development repository" ;;
+  esac
+  case "$public_url" in
+    git@github.com:ensera-ai/taisce.git|https://github.com/ensera-ai/taisce.git) ;;
+    *) die "origin must identify the public release repository" ;;
+  esac
+}
 
-if [ -n "$(git status --porcelain)" ]; then
-  echo "publish: the working tree is not clean" >&2
-  exit 1
-fi
+check_clean() {
+  [ -z "$(git status --porcelain)" ] || die "the development checkout must be clean"
+}
 
-work="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$work" = "main" ]; then
-  echo "publish: run this from the working branch, not from main" >&2
-  exit 1
-fi
+# Every existing public commit must be an accounted-for release on a linear history. Refusing an
+# unexpected history protects existing work; repairing or replacing it is a separate operator action.
+check_public_history() {
+  local commit tag tags parents
+  for commit in $(git -C "$snapshot" rev-list "$parent"); do
+    parents="$(git -C "$snapshot" rev-list --parents -n 1 "$commit")"
+    [ "$(printf '%s\n' "$parents" | wc -w | tr -d ' ')" -le 2 ] || die "public history contains a merge"
+    tags="$(git -C "$snapshot" tag --points-at "$commit")"
+    local releases=0
+    while IFS= read -r tag; do
+      if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.0$ ]]; then releases=$((releases + 1)); fi
+    done <<< "$tags"
+    [ "$releases" -eq 1 ] || die "public history contains an unaccounted-for commit or release alias"
+  done
+}
 
-echo "publish: $work ($("$root/scripts/version.sh" current)) -> ensera-ai/taisce main as v$release"
+case "${1:-}" in
+  prepare)
+    [ "$#" -eq 3 ] || usage
+    message_file="$2"
+    [ -s "$message_file" ] || die "a nonempty release message file is required"
+    # Resolve before changing directories. The plan must be new; no existing files are overwritten.
+    message_file="$(cd "$(dirname "$message_file")" && pwd)/$(basename "$message_file")"
+    check_remotes
+    check_clean
+    source="$(git rev-parse HEAD)"
+    branch="$(git symbolic-ref --quiet --short HEAD)" || die "prepare from a development branch"
+    remote_source="$(git ls-remote "$development_url" "refs/heads/$branch" | cut -f1)"
+    [ "$remote_source" = "$source" ] || die "push the development source branch before preparing a release"
+    version="$(./scripts/version.sh next-release)"
+    [[ "$version" =~ ^[0-9]{1,6}\.[0-9]{1,6}\.0$ ]] || die "public version must be x.y.0"
+    [ -z "$(git ls-remote "$public_url" "refs/tags/v$version")" ] || die "public version already exists"
 
-# Every check the working branch has to pass, before anything leaves.
-make licence
-make test
+    make licence
+    make test
+    check_clean
+    [ "$(git rev-parse HEAD)" = "$source" ] || die "development source changed during validation"
 
-# main is rebuilt from the working tree rather than merged, so the published history is exactly one
-# commit per release with no accumulation of merge shapes.
-git checkout -B main-publish "$work" >/dev/null 2>&1
-git checkout --orphan main-orphan >/dev/null 2>&1
-git add -A
-git commit -q -F "$message_file"
+    # Plans contain private provenance and must be new directories outside the source checkout.
+    [ ! -e "$3" ] && [ ! -L "$3" ] || die "plan directory already exists"
+    plan="$(cd "$(dirname "$3")" && pwd)/$(basename "$3")"
+    case "$plan/" in "$root/"*) die "release plans must be outside the development checkout" ;; esac
+    mkdir "$plan"
+    snapshot="$plan/repository"
+    git init -q "$snapshot"
+    git -C "$snapshot" config user.name "$(git config user.name)"
+    git -C "$snapshot" config user.email "$(git config user.email)"
+    git -C "$snapshot" remote add public "$public_url"
+    parent="$(git ls-remote "$public_url" refs/heads/main | cut -f1)"
+    if [ -n "$parent" ]; then
+      git -C "$snapshot" fetch -q --tags public refs/heads/main
+      parent="$(git -C "$snapshot" rev-parse FETCH_HEAD)"
+      check_public_history
+      previous="$(git -C "$snapshot" tag --points-at "$parent" | sed -nE 's/^v([0-9]+\.[0-9]+)\.0$/\1/p')"
+      previous_major="${previous%%.*}"; previous_minor="${previous##*.}"
+      next_major="${version%%.*}"; rest="${version#*.}"; next_minor="${rest%%.*}"
+      [[ "$previous_major" =~ ^[0-9]{1,6}$ && "$previous_minor" =~ ^[0-9]{1,6}$ ]] || die "previous version is unsupported"
+      if ! ((10#$next_major > 10#$previous_major || (10#$next_major == 10#$previous_major && 10#$next_minor > 10#$previous_minor))); then
+        die "public version must advance beyond the previous release"
+      fi
+    fi
 
-git tag -a "v$release" -m "$(head -1 "$message_file")"
-git push -f origin main-orphan:main
-git push origin "v$release"
-
-git checkout "$work" >/dev/null 2>&1
-git branch -D main-publish main-orphan >/dev/null 2>&1
-
-# The working line moves to the released minor, so the next commit is x.y.1 rather than continuing to
-# count against a line that has been published. Committed here rather than left to somebody, because
-# forgetting it makes every subsequent version wrong in the same direction.
-echo "${release%.*}" > VERSION
-git add VERSION
-git commit -q -m "The working line moves to ${release%.*} after publishing v$release
-
-Every commit from here is ${release%.*}.z, counting from the release rather than from whatever came
-before it. Written by scripts/publish.sh, because forgetting it makes every version after this one
-wrong in the same direction and nothing would say so."
-git push "$(git config --get branch."$work".remote)" "$work:main"
-
-echo "publish: v$release is public; the working line is now $("$root/scripts/version.sh" current)"
+    git archive "$source" | tar -xf - -C "$snapshot"
+    # The public tree carries the released minor line, so version.sh reports .0 at the public tag.
+    printf '%s\n' "${version%.*}" > "$snapshot/VERSION"
+    git -C "$snapshot" add -A
+    private_tracker="https://github.com/althunibat/taisce/"'issues'
+    if git -C "$snapshot" grep --cached -q -F "$private_tracker"; then
+      die "export contains private issue links; curate the public tree before preparing a release"
+    fi
+    tree="$(git -C "$snapshot" write-tree)"
+    if [ -n "$parent" ]; then
+      commit="$(git -C "$snapshot" commit-tree "$tree" -p "$parent" -F "$message_file")"
+    else
+      commit="$(git -C "$snapshot" commit-tree "$tree" -F "$message_file")"
+    fi
+    git -C "$snapshot" update-ref refs/heads/release "$commit"
+    git -C "$snapshot" symbolic-ref HEAD refs/heads/release
+    git -C "$snapshot" tag -a "v$version" "$commit" -F "$message_file"
+    # Plain data, never sourced as shell code. The prepared commit and manifest are independently
+    # checked again at publication so accidental edits cannot redirect a release or its ancestry.
+    printf '%s\n' "$source" > "$plan/source"
+    printf '%s\n' "$branch" > "$plan/source-branch"
+    printf '%s\n' "$parent" > "$plan/parent"
+    printf '%s\n' "$version" > "$plan/version"
+    printf '%s\n' "$commit" > "$plan/commit"
+    printf '%s\n' "$tree" > "$plan/tree"
+    printf '%s\n' "$public_url" > "$plan/public-url"
+    printf '%s\n' "$development_url" > "$plan/development-url"
+    echo "Prepared v$version at $plan"
+    echo "Review the snapshot, commit, license notices and release provenance before running publish."
+    ;;
+  publish)
+    [ "$#" -eq 2 ] || usage
+    check_remotes
+    check_clean
+    plan="$(cd "$2" && pwd)"
+    snapshot="$plan/repository"
+    [ "$(cat "$plan/public-url")" = "$public_url" ] || die "public destination changed"
+    [ "$(cat "$plan/development-url")" = "$development_url" ] || die "development destination changed"
+    source="$(cat "$plan/source")"; parent="$(cat "$plan/parent")"
+    version="$(cat "$plan/version")"; commit="$(cat "$plan/commit")"; tree="$(cat "$plan/tree")"
+    [[ "$source" =~ ^[0-9a-f]{40}$ && "$commit" =~ ^[0-9a-f]{40}$ && "$tree" =~ ^[0-9a-f]{40}$ ]] || die "invalid prepared object ID"
+    [[ -z "$parent" || "$parent" =~ ^[0-9a-f]{40}$ ]] || die "invalid prepared parent"
+    [[ "$version" =~ ^[0-9]{1,6}\.[0-9]{1,6}\.0$ ]] || die "invalid public version"
+    [ "$(git rev-parse HEAD)" = "$source" ] || die "development source changed since preparation"
+    [ "$(git -C "$snapshot" rev-parse "$commit^{tree}")" = "$tree" ] || die "prepared tree changed"
+    [ "$(git -C "$snapshot" show -s --format=%P "$commit")" = "$parent" ] || die "prepared ancestry changed"
+    [ "$(git -C "$snapshot" rev-parse "refs/tags/v$version^{commit}")" = "$commit" ] || die "prepared tag changed"
+    [ "$(git -C "$snapshot" show "$commit:VERSION")" = "${version%.*}" ] || die "public version stamp is wrong"
+    [ -z "$(git -C "$snapshot" status --porcelain)" ] || die "prepared snapshot has unreviewed edits"
+    remote_parent="$(git ls-remote "$public_url" refs/heads/main | cut -f1)"
+    remote_tag="$(git ls-remote "$public_url" "refs/tags/v$version^{}" | cut -f1)"
+    if [ "$remote_parent" = "$commit" ] && [ "$remote_tag" = "$commit" ]; then
+      echo "v$version is already published; no refs changed"
+      exit 0
+    fi
+    [ "$remote_parent" = "$parent" ] || die "public main changed; prepare and review a new release plan"
+    [ -z "$(git ls-remote "$public_url" "refs/tags/v$version")" ] || die "public version already exists"
+    # The lease is a compare-and-swap against the reviewed parent, including an absent first branch.
+    # The prepared commit must name that exact parent above, so this cannot rewrite public history.
+    # Atomic push prevents a released branch without its version tag, or the inverse.
+    git -C "$snapshot" push --atomic "--force-with-lease=refs/heads/main:$parent" "$public_url" \
+      "$commit:refs/heads/main" "refs/tags/v$version:refs/tags/v$version"
+    echo "Published v$version. Private source-to-public mapping remains in $plan."
+    echo "Advance the private VERSION line deliberately under the release workflow; no private refs were changed."
+    ;;
+  *) usage ;;
+esac

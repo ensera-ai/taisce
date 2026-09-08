@@ -525,6 +525,19 @@ configuration, internal drafts and private tracking links. Existing organization
 and issues also need review before the repository becomes public. Development issue #37 tracks the
 automation and evidence; recording this contract does not mean the publisher is implemented.
 
+**The two histories have different release markers.** Private `dev/vX.Y.0` names the source
+commit; public `vX.Y.0` names the exported snapshot. Patch counting accepts only a marker that is an
+ancestor of the current checkout. A fetched public tag cannot change private patch numbering.
+After release, the private marker and the normal commit advancing `VERSION` are recorded explicitly;
+the publisher never switches or pushes the private branch as a side effect.
+
+**Preparation is separate from publication.** A release plan contains an isolated, reviewable snapshot
+and the source/public mapping. The new public commit has exactly the previous public tip as its
+parent. Publication checks that tip again and atomically pushes the branch and its release tag using
+a compare-and-swap lease. A concurrent public update is refused. Tests against disposable Git remotes
+prove that two releases retain two public commits, exclude private commit objects, and cannot publish
+a tag alone when the branch push races. See `docs/05-releases.md`; supply-chain issue #37 remains open.
+
 **The patch number is computed, never stored.** A number kept in a file is a number somebody forgets
 to bump, and the failure is silent: two commits claiming the same version, discovered when a bug
 report names one of them. Counting commits since a tag cannot disagree with the history it describes.

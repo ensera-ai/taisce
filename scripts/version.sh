@@ -28,13 +28,20 @@ case "${1:-current}" in
     ;;
 
   current)
-    # Commits since this line was released. The release tag itself is z=0, so the first commit after
-    # it is z=1 — which keeps `.0` meaning "released" and nothing else.
-    if git rev-parse "v${line}.0" >/dev/null 2>&1; then
-      z="$(git rev-list --count "v${line}.0..HEAD")"
+    # Public snapshot tags are not ancestors of private development. A private dev/vX.Y.0
+    # marker identifies the source commit; the public vX.Y.0 tag identifies the exported snapshot.
+    # Only an ancestor can define a commit count on this history.
+    base=""
+    for candidate in "refs/tags/dev/v${line}.0" "refs/tags/v${line}.0"; do
+      if git rev-parse --verify "$candidate^{commit}" >/dev/null 2>&1 &&
+         git merge-base --is-ancestor "$candidate" HEAD; then
+        base="$candidate"
+        break
+      fi
+    done
+    if [ -n "$base" ]; then
+      z="$(git rev-list --count "$base..HEAD")"
     else
-      # No release on this line yet: count everything, so a version exists before the first release
-      # rather than the tooling refusing to say what this is.
       z="$(git rev-list --count HEAD)"
     fi
     echo "${line}.${z}"
