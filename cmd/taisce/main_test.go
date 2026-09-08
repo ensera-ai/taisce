@@ -41,7 +41,7 @@ func complete(t *testing.T) map[string]string {
 	return map[string]string{
 		envMemoryDSN:   dsn,
 		envRegistryDSN: dsn,
-		envTenant:      "api_journey",
+		envSchema:      "api_journey",
 		envAddr:        "127.0.0.1:0",
 	}
 }
@@ -56,7 +56,7 @@ func withEnv(t *testing.T, env map[string]string) {
 // Each of these is a way for a deployment to be wrong, and each has to stop the process rather than
 // be defaulted into something that happens to run.
 func TestStartingWithoutRequiredConfigurationIsRefused(t *testing.T) {
-	for _, missing := range []string{envMemoryDSN, envTenant} {
+	for _, missing := range []string{envMemoryDSN} {
 		t.Run(missing, func(t *testing.T) {
 			env := complete(t)
 			env[missing] = ""
@@ -98,7 +98,7 @@ func TestTheRegistryConnectionCannotBeArrivedAtByOmission(t *testing.T) {
 // statement rather than after.
 func TestAnUnusableSchemaNameIsRefusedAtStartup(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "not a valid identifier; DROP SCHEMA public"
+	env[envSchema] = "not a valid identifier; DROP SCHEMA public"
 	withEnv(t, env)
 
 	if err := run(context.Background(), quiet()); err == nil {
@@ -237,7 +237,7 @@ func TestAnUnknownCommandIsAnError(t *testing.T) {
 // credential on the second run, or every restart leaves a key nobody can account for.
 func TestBootstrapIsIdempotentAndMintsOneCredential(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "cmd_bootstrap"
+	env[envSchema] = "cmd_bootstrap"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
 	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
@@ -266,7 +266,7 @@ func TestBootstrapIsIdempotentAndMintsOneCredential(t *testing.T) {
 // that works because nobody chose one.
 func TestBootstrapRefusesWithoutTheIdentityPasswords(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "cmd_nopass"
+	env[envSchema] = "cmd_nopass"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
 	t.Setenv("TAISCE_CONTROL_PASSWORD", "")
@@ -285,7 +285,7 @@ func TestBootstrapRefusesWithoutTheIdentityPasswords(t *testing.T) {
 // and the compose file both run it on every start.
 func TestCreatingAProjectIsRepeatable(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "cmd_project"
+	env[envSchema] = "cmd_project"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
 	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
@@ -313,7 +313,7 @@ func TestCreatingAProjectIsRepeatable(t *testing.T) {
 // from a lost token without a portal.
 func TestACredentialCanBeMintedAndRevokedFromTheCommandLine(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "cmd_cred"
+	env[envSchema] = "cmd_cred"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
 	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
@@ -443,27 +443,27 @@ func TestTheOperatorCommandsRefuseMissingConfiguration(t *testing.T) {
 	base := complete(t)
 
 	t.Run("no admin or memory connection", func(t *testing.T) {
-		env := map[string]string{envAdminDSN: "", envMemoryDSN: "", envTenant: base[envTenant]}
+		env := map[string]string{envAdminDSN: "", envMemoryDSN: "", envSchema: base[envSchema]}
 		withEnv(t, env)
 		if err := dispatch(context.Background(), quiet(), []string{"project", "list"}); err == nil {
 			t.Fatal("ran with no connection at all")
 		}
 	})
 
-	t.Run("no schema", func(t *testing.T) {
-		env := map[string]string{envAdminDSN: base[envMemoryDSN], envMemoryDSN: base[envMemoryDSN], envTenant: ""}
-		withEnv(t, env)
-		err := dispatch(context.Background(), quiet(), []string{"project", "list"})
-		if err == nil {
-			t.Fatal("ran with no schema named")
+	t.Run("default memory namespace", func(t *testing.T) {
+		withEnv(t, map[string]string{envAdminDSN: base[envMemoryDSN], envSchema: ""})
+		pool, schema, err := adminPool(context.Background())
+		if err != nil {
+			t.Fatal(err)
 		}
-		if !strings.Contains(err.Error(), envTenant) {
-			t.Fatalf("the refusal does not name what is missing: %v", err)
+		defer pool.Close()
+		if schema.String() != "memory" {
+			t.Fatalf("default namespace: %q", schema)
 		}
 	})
 
 	t.Run("unusable schema name", func(t *testing.T) {
-		env := map[string]string{envAdminDSN: base[envMemoryDSN], envTenant: "not a; identifier"}
+		env := map[string]string{envAdminDSN: base[envMemoryDSN], envSchema: "not a; identifier"}
 		withEnv(t, env)
 		if err := dispatch(context.Background(), quiet(), []string{"project", "list"}); err == nil {
 			t.Fatal("ran with a schema name that cannot be an identifier")
@@ -473,7 +473,7 @@ func TestTheOperatorCommandsRefuseMissingConfiguration(t *testing.T) {
 	t.Run("unreachable database", func(t *testing.T) {
 		env := map[string]string{
 			envAdminDSN: "postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable&connect_timeout=2",
-			envTenant:   base[envTenant],
+			envSchema:   base[envSchema],
 		}
 		withEnv(t, env)
 		if err := dispatch(context.Background(), quiet(), []string{"project", "list"}); err == nil {
@@ -487,7 +487,7 @@ func TestTheOperatorCommandsRefuseMissingConfiguration(t *testing.T) {
 func TestEachCommandSaysWhatItWantedWhenCalledBare(t *testing.T) {
 	env := complete(t)
 	env[envAdminDSN] = env[envMemoryDSN]
-	env[envTenant] = "cmd_usage"
+	env[envSchema] = "cmd_usage"
 	withEnv(t, env)
 
 	for name, args := range map[string][]string{
@@ -518,7 +518,7 @@ func TestEachCommandSaysWhatItWantedWhenCalledBare(t *testing.T) {
 // debugs it.
 func TestACredentialCannotBeMintedForAProjectThatDoesNotExist(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "cmd_nosuchproject"
+	env[envSchema] = "cmd_nosuchproject"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
 	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
@@ -642,7 +642,7 @@ func TestAnUnknownRoleIsRefused(t *testing.T) {
 // statement.
 func TestAProjectNameThatCannotBeAnIdentifierIsRefused(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "cmd_badname"
+	env[envSchema] = "cmd_badname"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
 	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
@@ -689,7 +689,7 @@ func TestAProjectNameThatCannotBeAnIdentifierIsRefused(t *testing.T) {
 // is an erasure with a counted residual rather than a lifecycle verb that happens to destroy things.
 func TestAProjectCanBeSuspendedAndResumed(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "cmd_suspend"
+	env[envSchema] = "cmd_suspend"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
 	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")
@@ -748,7 +748,7 @@ func TestTheBinaryReportsItsVersion(t *testing.T) {
 // demonstrating to their own auditor that they have not rewritten their own records.
 func TestAuditSealAndVerifyFromTheCommandLine(t *testing.T) {
 	env := complete(t)
-	env[envTenant] = "cmd_audit"
+	env[envSchema] = "cmd_audit"
 	env[envAdminDSN] = env[envMemoryDSN]
 	withEnv(t, env)
 	t.Setenv("TAISCE_CONTROL_PASSWORD", "taisce-test-control")

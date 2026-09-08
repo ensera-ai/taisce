@@ -43,7 +43,7 @@ func tenant(t *testing.T, pool *pgxpool.Pool, name string) pg.Schema {
 	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS `+name+` CASCADE`); err != nil {
 		t.Fatalf("drop: %v", err)
 	}
-	if err := migrate.ProvisionTenant(ctx, pool, name); err != nil {
+	if err := migrate.ProvisionMemorySchema(ctx, pool, name); err != nil {
 		t.Fatalf("provision tenant: %v", err)
 	}
 	if err := migrate.ProvisionScope(ctx, pool, name, "p1"); err != nil {

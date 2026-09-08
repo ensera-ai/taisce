@@ -44,7 +44,7 @@ const usage = `taisce — memory for agents
 
 Configuration is read from the environment. TAISCE_MEMORY_DSN and TAISCE_REGISTRY_DSN are the two
 database connections, and they are separate so that a memory query cannot read a credential.
-TAISCE_SCHEMA names this instance's schema.
+TAISCE_SCHEMA optionally selects this instance's memory namespace (default: memory).
 `
 
 // dispatch routes a subcommand, defaulting to serving.
@@ -121,7 +121,7 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string) error {
 	}
 	log.Info("registry established")
 
-	if err := migrate.ProvisionTenant(ctx, admin, schema.String()); err != nil {
+	if err := migrate.ProvisionMemorySchema(ctx, admin, schema.String()); err != nil {
 		return fmt.Errorf("provision the schema: %w", err)
 	}
 	log.Info("schema provisioned", "schema", schema.String())
@@ -326,14 +326,14 @@ func credentialCommand(ctx context.Context, args []string) error {
 // requireProject refuses to mint a credential for a project that does not exist.
 //
 // This is the check a foreign key would make, in the only place that can make it: the credential is
-// in the registry schema and the project is in the tenant schema, and no constraint crosses that
-// boundary because crossing it is what the boundary exists to prevent.
+// in the control namespace and the project is in the memory namespace. This preflight keeps
+// operator mistakes explicit; it is not a claim that PostgreSQL forbids cross-schema foreign keys.
 //
 // It is a weaker guarantee than a constraint — a credential minted some other way could still name
 // nothing — and it catches the case that actually happens, which is a typo becoming a token that
 // authenticates successfully and reaches no memory at all.
 func requireProject(ctx context.Context, admin *pgxpool.Pool, project string) error {
-	schema, err := pg.NewSchema(strings.TrimSpace(os.Getenv(envTenant)))
+	schema, err := configuredMemorySchema()
 	if err != nil {
 		return err
 	}
@@ -364,14 +364,11 @@ func adminPool(ctx context.Context) (*pgxpool.Pool, pg.Schema, error) {
 	if dsn == "" {
 		return nil, "", fmt.Errorf("%s (or %s) is not set", envAdminDSN, envMemoryDSN)
 	}
-	tenant := strings.TrimSpace(os.Getenv(envTenant))
-	if tenant == "" {
-		return nil, "", fmt.Errorf("%s is not set", envTenant)
-	}
-	schema, err := pg.NewSchema(tenant)
+	schema, err := configuredMemorySchema()
 	if err != nil {
 		return nil, "", fmt.Errorf("schema: %w", err)
 	}
+
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, "", fmt.Errorf("connect: %w", err)

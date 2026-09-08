@@ -434,7 +434,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS `+tenant+` CASCADE`); err != nil {
 		t.Fatalf("drop: %v", err)
 	}
-	if err := migrate.ProvisionTenant(ctx, pool, tenant); err != nil {
+	if err := migrate.ProvisionMemorySchema(ctx, pool, tenant); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 	schema, err := pg.NewSchema(tenant)

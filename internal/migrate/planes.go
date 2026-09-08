@@ -11,43 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The two database identities.
-//
-// One deployment, one database, two logins. The memory service connects as one of these and the
-// registry as the other, and what separates them is a grant rather than a promise.
+// One instance has separate control and memory database identities.
 const (
-	// ControlRole owns the registry and creates tenant schemas. It is the only identity that can
-	// answer a question about more than one customer.
+	// ControlRole accesses the credential registry. Operator DDL uses the admin connection.
 	ControlRole = "taisce_control"
-	// DataRole serves memory. It reads and writes inside tenant schemas and has no privilege at all
-	// in the registry, so a component that serves one tenant cannot enumerate the rest.
+	// DataRole serves project memory and cannot read credential secrets in control.
 	DataRole = "taisce_data"
 )
 
-// EstablishPlanes creates the two identities, the registry's schema, and the grants between them.
-//
-// Run once per deployment, by whoever has the rights to create a role. It is idempotent, because
-// this is the kind of step an operator repeats when unsure whether it ran.
-//
-// # Why a grant and not a convention
-//
-// The memory service must never be able to enumerate customers: it serves one tenant per statement
-// and its entire boundary is that another tenant's name is not in the statement it is running. A
-// component that can list every customer, read every credential and read every subscription is one
-// bad predicate away from crossing that. Expressed in code, "the memory service does not read the
-// registry" is a rule every future query has to remember. Expressed as a grant it is a rule no query
-// can break, including one written by hand during an incident.
-//
-// # What this boundary does and does not buy
-//
-// It stops the memory service reading the registry. It does NOT stop it reading another tenant's
-// memory: one process serves every tenant, so it necessarily holds privilege on every tenant schema,
-// and the separation between them remains the schema name in the statement.
-//
-// That is the right division rather than a shortfall. The memory service already holds every
-// customer's memory, so hiding the list of tenant names from it protects nothing worth protecting.
-// What is worth protecting is a different category — credentials, billing, the people behind the
-// accounts — and that is what is on the other side of this grant.
+// EstablishPlanes creates or reconciles the instance logins, control namespace and grants.
+// It is an idempotent deployment operation requiring an administrative connection.
+// DataRole serves all projects in the instance: authenticated application scope filters control
+// reads, while foreign keys enforce project-consistent writes. Schema naming alone grants no
+// confidentiality against a role with access to that schema. An owner/admin can change these rules.
 func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, dataPassword string) error {
 	if controlPassword == "" || dataPassword == "" {
 		// A login role with no password is one anything on the network can assume, which would make
@@ -116,7 +92,7 @@ func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, d
 		// Nothing is granted to the data identity here. Its absence from this list IS the boundary,
 		// so there is deliberately no statement to read.
 		//
-		// And it cannot create a schema of its own: provisioning a tenant is the control plane's
+		// And it cannot create a schema of its own: provisioning instance storage is the operator's
 		// operation, and an identity that can create schemas can create one it then has full rights
 		// inside.
 		fmt.Sprintf(`REVOKE CREATE ON DATABASE %s FROM PUBLIC`, database),
@@ -141,7 +117,7 @@ func ensureRole(ctx context.Context, pool *pgxpool.Pool, name, password string) 
 	}
 	// The password is interpolated as a quoted literal rather than bound, because role statements do
 	// not take parameters. It comes from a deployment's configuration and never from a request.
-	statement := fmt.Sprintf(`%s ROLE %s LOGIN PASSWORD %s`,
+	statement := fmt.Sprintf(`%s ROLE %s LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %s`,
 		verb, pgx.Identifier{name}.Sanitize(), quoteLiteral(password))
 	if _, err := pool.Exec(ctx, statement); err != nil {
 		return fmt.Errorf("%s role %q: %w", verb, name, err)
@@ -162,21 +138,10 @@ func quoteLiteral(s string) string {
 	return string(append(out, '\''))
 }
 
-// grantTenantToDataPlane gives the memory service what it needs inside one tenant, and nothing more.
-//
-// Run after a tenant's migrations, so that tables created by a migration added later are covered by
-// the grant rather than being unreachable until somebody notices.
-//
-// # Why this is skipped when the role is absent
-//
-// The identities are a deployment step and creating one needs the right to create a role, which a
-// developer running against a local database may not have. Refusing to provision a tenant without
-// them would make the substrate unusable for exactly the people who most need to run it.
-//
-// A deployment that has not established the planes runs everything as one identity — which is the
-// state this decision replaces, and it is honest to say so rather than to fail in a way that reads
-// as a bug.
-func grantTenantToDataPlane(ctx context.Context, pool *pgxpool.Pool, schema Schema) error {
+// grantMemoryToDataPlane applies runtime privileges after memory migrations. It grants one
+// instance namespace. An absent role is
+// allowed for isolated migration fixtures without deployment-role provisioning privileges.
+func grantMemoryToDataPlane(ctx context.Context, pool *pgxpool.Pool, schema Schema) error {
 	var exists bool
 	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, DataRole).
 		Scan(&exists); err != nil {
@@ -210,7 +175,7 @@ func grantTenantToDataPlane(ctx context.Context, pool *pgxpool.Pool, schema Sche
 			schema, schema, schema, schema, schema, DataRole),
 	} {
 		if _, err := pool.Exec(ctx, statement); err != nil {
-			return fmt.Errorf("grant tenant %q to the data plane: %w", schema, err)
+			return fmt.Errorf("grant memory namespace %q to the data plane: %w", schema, err)
 		}
 	}
 	return nil

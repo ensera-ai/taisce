@@ -29,7 +29,7 @@ import (
 // for the validation to drift.
 type Schema = pg.Schema
 
-// NewSchema validates a tenant's schema name.
+// NewSchema validates a database namespace.
 var NewSchema = pg.NewSchema
 
 // maxIdentifierLength is PostgreSQL's limit, restated for the tests that assert the boundary.
@@ -38,14 +38,10 @@ const maxIdentifierLength = 63
 //go:embed sql/*.sql control/*.sql
 var scripts embed.FS
 
-// The two migration sets, and the schema each belongs to.
-//
-// They advance independently. A tenant is migrated when its schema is brought up to date, which
-// happens per tenant at a moment somebody chose; the registry is migrated once. One version number
-// over both would make the second wait on the first, or claim a version half its tables had never
-// seen.
+// Memory and control have independent migration sequences within one instance. Schema parameters
+// support upgrades of existing namespace names and isolated database fixtures, not tenant routing.
 const (
-	tenantScripts  = "sql"
+	memoryScripts  = "sql"
 	controlScripts = "control"
 	// ControlSchema is where the registry lives. Fixed rather than configurable: it is one schema
 	// for the whole deployment, and a name that can vary is a name a grant can be written against
@@ -64,7 +60,7 @@ type Script struct {
 //
 // A duplicate version is an error rather than a last-one-wins, because two files claiming the same
 // version apply in filename order on one machine and in another order on the next.
-func Load() ([]Script, error) { return load(tenantScripts) }
+func Load() ([]Script, error) { return load(memoryScripts) }
 
 // LoadControl reads the embedded registry migrations, ordered by version.
 func LoadControl() ([]Script, error) { return load(controlScripts) }
@@ -108,15 +104,8 @@ func load(dir string) ([]Script, error) {
 	return out, nil
 }
 
-// Apply brings ONE TENANT's schema up to the latest embedded version.
-//
-// Per tenant, not per database. The schema is the hard boundary, so migrating is something that
-// happens to a tenant — and a tenant provisioned tomorrow gets the same statements as one
-// provisioned today rather than a schema assembled from whatever migrations existed at the time.
-//
-// Each migration runs in ITS OWN transaction with its version recorded in the same transaction, so
-// a failure half way leaves the database at the last version that fully applied rather than in a
-// state no version describes.
+// Apply upgrades an instance memory namespace. Each migration and its version marker commit in
+// one transaction, so failure leaves the last fully applied version. Project creation never calls it.
 func Apply(ctx context.Context, pool *pgxpool.Pool, schema Schema) (applied []int, err error) {
 	all, err := Load()
 	if err != nil {
@@ -125,11 +114,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, schema Schema) (applied []in
 	return apply(ctx, pool, schema, all)
 }
 
-// ApplyControl brings the registry's schema up to the latest embedded version.
-//
-// Separate from Apply because the registry is not a tenant. It is migrated once for the deployment
-// rather than once per customer, and running it through the tenant path would create a tenant that
-// is really the registry — which is exactly the confusion the boundary exists to prevent.
+// ApplyControl upgrades the fixed instance credential namespace using its separate migration set.
 func ApplyControl(ctx context.Context, pool *pgxpool.Pool) ([]int, error) {
 	all, err := LoadControl()
 	if err != nil {

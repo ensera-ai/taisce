@@ -1423,6 +1423,42 @@ the constraints needs a migration and weakens integrity; invalidated generated r
 restored by reversing DDL. General rebuild/formation/erasure concurrency remains part of #100's
 open acceptance until the generation lifecycle exists.
 
+### D69 — One instance memory namespace, with separate control privileges
+
+Runtime, bootstrap and operator commands resolve the same instance-wide namespace. Its default is
+`memory`; the control namespace remains `control`. Projects are rows and storage partitions inside
+that memory namespace. Project creation does not call schema provisioning, run memory migrations,
+or consult a tenant registry. `ProvisionMemorySchema` names what provisioning actually does.
+
+`TAISCE_SCHEMA` remains an optional deployment setting for installations already using another name
+and for isolated database fixtures. It is fixed when the service starts; no credential, observation,
+project or HTTP request can choose it. Changing it does not relocate existing data. Upgrades must
+retain an existing explicit value. The identifier validator still rejects unsafe/truncated names;
+its purpose is SQL correctness, not a claim of confidentiality through schema naming.
+
+The memory login cannot read credential secrets or provision schemas. Bootstrap explicitly removes
+superuser, database/role-creation, replication and RLS-bypass attributes from existing service logins,
+not only from newly created ones. The administrative connection owns schema changes. These grants
+do not isolate projects from a compromised application that already holds the deployment's memory
+login; authenticated project predicates remain required. Arbitrary pre-existing role memberships or
+ownership changes made by an administrator are outside the baseline bootstrap guarantee.
+
+**Evidence.** A disposable database initialized with the shipped extension script supports default
+bootstrap, repeated bootstrap with one credential, and a second project without a new namespace.
+Version-22 data in an explicitly named namespace upgrades in place, preserves observation identity,
+and supports repeat provisioning. Runtime-role tests prove credential/schema restrictions; a
+disposable pre-existing privileged login loses its elevated flags when reconciled.
+
+**Rejected:** schema creation per project; retaining tenant-routing language in runtime entry points;
+requiring a namespace setting for an ordinary install; silently switching existing custom namespaces
+to `memory`; renaming historical migration files merely to change their commentary.
+
+**Impact and undo cost.** No data migration is introduced for terminology or defaults. Missing
+`TAISCE_SCHEMA` now selects `memory` instead of stopping startup. Existing explicit namespaces keep
+their behavior. The override remains because removing it would require an operator-controlled data
+migration and would complicate isolated fixtures. Undoing the default is a configuration change;
+restoring elevated login attributes weakens the documented privilege boundary.
+
 ### D1 — PostgreSQL is the only required dependency
 
 Not a vector database, graph engine, message broker, cache or object store.

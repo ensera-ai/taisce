@@ -43,7 +43,7 @@ func freshTenant(t *testing.T, pool *pgxpool.Pool) string {
 		`DROP SCHEMA IF EXISTS `+pgx.Identifier{tenant}.Sanitize()+` CASCADE`); err != nil {
 		t.Fatalf("drop schema: %v", err)
 	}
-	if err := ProvisionTenant(context.Background(), pool, tenant); err != nil {
+	if err := ProvisionMemorySchema(context.Background(), pool, tenant); err != nil {
 		t.Fatalf("provision tenant: %v", err)
 	}
 	return tenant
@@ -251,7 +251,7 @@ func TestOneTenantCannotAddressAnother(t *testing.T) {
 			`DROP SCHEMA IF EXISTS `+pgx.Identifier{tenant}.Sanitize()+` CASCADE`); err != nil {
 			t.Fatalf("drop %s: %v", tenant, err)
 		}
-		if err := ProvisionTenant(ctx, pool, tenant); err != nil {
+		if err := ProvisionMemorySchema(ctx, pool, tenant); err != nil {
 			t.Fatalf("provision %s: %v", tenant, err)
 		}
 		// The SAME project name in both tenants, which is legal and must stay isolated.
@@ -361,12 +361,12 @@ func TestProvisioningATenantIsRepeatableAndRefusesABadName(t *testing.T) {
 	tenant := freshTenant(t, pool)
 
 	// Again, which is what a chart does on every start.
-	if err := ProvisionTenant(ctx, pool, tenant); err != nil {
+	if err := ProvisionMemorySchema(ctx, pool, tenant); err != nil {
 		t.Fatalf("provisioning twice failed: %v", err)
 	}
 
 	for _, bad := range []string{"has spaces", "Uppercase", "1leading", "drop; --", ""} {
-		if err := ProvisionTenant(ctx, pool, bad); err == nil {
+		if err := ProvisionMemorySchema(ctx, pool, bad); err == nil {
 			t.Fatalf("provisioned a tenant named %q", bad)
 		}
 	}

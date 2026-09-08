@@ -46,7 +46,7 @@ func establish(t *testing.T, pool *pgxpool.Pool, tenant string) string {
 	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS `+tenant+` CASCADE`); err != nil {
 		t.Fatalf("drop: %v", err)
 	}
-	if err := ProvisionTenant(ctx, pool, tenant); err != nil {
+	if err := ProvisionMemorySchema(ctx, pool, tenant); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
 	return password
@@ -130,14 +130,10 @@ func TestTheMemoryServiceCannotChangeTheSchemaOrMakeANewOne(t *testing.T) {
 
 // ── The limit of this boundary, asserted so nobody claims more than it gives ──────────────────
 //
-// The memory service CAN see that other tenants exist. Every role reads the system catalogue and
-// that cannot be revoked without breaking the tools everybody uses.
-//
-// It is not a shortfall, and this test exists so the claim stays accurate. One process serves every
-// tenant, so it necessarily holds privilege on every tenant schema — hiding the list of names from a
-// component that already holds all of their memory protects nothing. What the grant protects is a
-// different category: credentials, subscriptions, the people behind the accounts. Separation BETWEEN
-// tenants is, and remains, the schema name in the statement.
+// System catalogs expose namespace names. These fixtures create several instance namespaces in
+// one test database; that is test isolation, not a multi-tenant service contract. Runtime privileges
+// protect control credentials, and application project grants protect memory reads. A schema name
+// itself does not stop a role granted access to it from issuing a query against it.
 func TestTheMemoryServiceCanStillSeeThatOtherTenantsExist(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)

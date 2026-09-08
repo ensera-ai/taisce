@@ -114,7 +114,7 @@ func world(t *testing.T, name string, turns ...domain.Turn) (*pgxpool.Pool, pg.S
 	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS `+name+` CASCADE`); err != nil {
 		t.Fatalf("drop: %v", err)
 	}
-	if err := migrate.ProvisionTenant(ctx, pool, name); err != nil {
+	if err := migrate.ProvisionMemorySchema(ctx, pool, name); err != nil {
 		t.Fatalf("provision tenant: %v", err)
 	}
 	schema, err := pg.NewSchema(name)

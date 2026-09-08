@@ -39,7 +39,7 @@ import (
 const (
 	envMemoryDSN   = "TAISCE_MEMORY_DSN"
 	envRegistryDSN = "TAISCE_REGISTRY_DSN"
-	envTenant      = "TAISCE_SCHEMA"
+	envSchema      = "TAISCE_SCHEMA"
 	envAddr        = "TAISCE_ADDR"
 	// The bundle budget, in CHARACTERS. Not tokens: a token count is a property of the caller's
 	// tokeniser, not ours, and one computed with the wrong tokeniser is wrong in a way they cannot
@@ -115,11 +115,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("%s is not set; the registry connection is separate from the memory one "+
 			"so that a memory query cannot read a credential", envRegistryDSN)
 	}
-	tenant := strings.TrimSpace(os.Getenv(envTenant))
-	if tenant == "" {
-		return fmt.Errorf("%s is not set", envTenant)
-	}
-	schema, err := pg.NewSchema(tenant)
+	schema, err := configuredMemorySchema()
 	if err != nil {
 		return fmt.Errorf("schema: %w", err)
 	}
@@ -317,4 +313,14 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 		}
 	}()
 	return nil
+}
+
+// One namespace is selected for the entire instance at startup, never by a request or project.
+// The optional setting preserves existing installations and isolated database test fixtures.
+func configuredMemorySchema() (pg.Schema, error) {
+	name := strings.TrimSpace(os.Getenv(envSchema))
+	if name == "" {
+		name = "memory"
+	}
+	return pg.NewSchema(name)
 }

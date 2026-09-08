@@ -1,8 +1,8 @@
 -- Runs once, at cluster bring-up, from /docker-entrypoint-initdb.d.
 --
 -- Extensions are registered HERE rather than by the migrator, for two reasons: CREATE EXTENSION needs
--- privileges the per-tenant migration role is not granted, and a missing extension should fail while
--- the cluster is coming up rather than halfway through a tenant's migration.
+-- privileges the memory runtime is not granted, and a missing extension should fail while
+-- the cluster is coming up rather than halfway through an instance migration.
 --
 -- Three, and each has a reader in this codebase. See the Dockerfile for what was removed and why.
 

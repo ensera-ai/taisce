@@ -26,18 +26,20 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 | Speaker binding [#84](https://github.com/althunibat/taisce/issues/84) | Core implemented; `651cf61`. Stored subject/user-role binding, separate named/speaker identities, subject-filtered recursive recall, multilingual formation, corrections, export and erasure. | Existing-data generation/rebuild workflow and complete nonlocal profile verification. Issue remains open. |
 | Report input identity [#108](https://github.com/althunibat/taisce/issues/108) | Closed; `651cf61`. Opaque entity references distinguish equal speaker labels in model context and child substitution. | Generated prose quality remains subject to inference corpus evaluation. |
 | Quickstart contract [#107](https://github.com/althunibat/taisce/issues/107) | Closed; `651cf61`. Examples use credential-bound project and explicit subject attribution. | None in this issue. |
-| Database integrity [#100](https://github.com/althunibat/taisce/issues/100) | Implemented and tested in this batch. Deferred project-consistent references, runtime catalog restrictions, exact report/child provenance, concurrent report retry fix, shared retention and source-evidence removal. | General rebuild/formation/erasure concurrency. No RLS confidentiality claim; D68 records the assessment. |
+| Database integrity [#100](https://github.com/althunibat/taisce/issues/100) | Core implemented; `d66537a`. Deferred project-consistent references, runtime catalog restrictions, exact report/child provenance, concurrent report retry fix, shared retention and source-evidence removal. | General rebuild/formation/erasure concurrency. No RLS confidentiality claim; D68 records the assessment. |
 
-The complete real-PostgreSQL suite for `651cf61` and an uncached repeat pass at **88.8%** coverage;
-the integrity batch passes an uncached repeat at **88.9%**, now the enforced floor. Targeted race checks
-and `go vet ./...` pass. These are correctness checks, not production latency or scaling measurements.
+| Single-tenant provisioning [#99](https://github.com/althunibat/taisce/issues/99) | Implemented and tested in this batch. One default memory namespace, compatible instance-wide override, explicit provisioning names, fresh/restart/upgrade tests, reconciled service-role flags. | Effective privilege drift from existing grants/memberships/ownership is tracked in [#109](https://github.com/althunibat/taisce/issues/109). |
+
+The complete real-PostgreSQL suite and uncached repeat for single-tenant provisioning pass at
+**89.1%**, now the enforced floor. Integrity's targeted race checks and `go vet ./...` pass. These
+are correctness checks, not production latency or scaling measurements.
 
 Inference profiles are tracked separately. The local English/Arabic speaker/correction corpus passed
 with real inference (five fixtures, 96.75 seconds). Its full inference suite is running. The
 OpenRouter speaker run passed its first fixture, then stopped on upstream HTTP 429; that is incomplete,
 not a pass. The GPU profile has no endpoint/model/allowlist configured and awaits operator details.
 
-Next: finish database integrity validation in #100, then fixed single-tenant provisioning (#99),
+Next: effective database privilege validation (#109), then
 indexed/bounded anchoring, admission controls and operational measurements under their existing
 issues. The generation/rebuild lifecycle is required before closing #84 or #100. Product and adapter
 journeys retain their acceptance criteria and remain in the execution order below.

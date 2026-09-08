@@ -19,31 +19,24 @@ import (
 // fails closed on what it did not anticipate, an escape routine fails open.
 var scopePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
-// ProvisionTenant creates a tenant's schema and brings it to the latest version.
-//
-// This is where the hard boundary is established. After it, every statement about this tenant names
-// the schema and no other tenant's data is addressable from it.
-func ProvisionTenant(ctx context.Context, pool *pgxpool.Pool, tenant string) error {
-	schema, err := NewSchema(tenant)
+// ProvisionMemorySchema creates and upgrades an instance's memory namespace. Production binds one
+// namespace for its lifetime; parameterization supports existing names and isolated test fixtures.
+// The schema name prevents identifier injection. Database privileges, not naming, protect secrets.
+func ProvisionMemorySchema(ctx context.Context, pool *pgxpool.Pool, name string) error {
+	schema, err := NewSchema(name)
 	if err != nil {
 		return err
 	}
-	if _, err := pool.Exec(ctx,
-		fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %s`, pgx.Identifier{schema.String()}.Sanitize())); err != nil {
-		return fmt.Errorf("create tenant schema %q: %w", tenant, err)
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %s`, pgx.Identifier{schema.String()}.Sanitize())); err != nil {
+		return fmt.Errorf("create memory namespace %q: %w", name, err)
 	}
 	if _, err := Apply(ctx, pool, schema); err != nil {
-		return fmt.Errorf("migrate tenant %q: %w", tenant, err)
+		return fmt.Errorf("migrate memory namespace %q: %w", name, err)
 	}
-	// After the migrations, so that tables a migration adds later are covered rather than being
-	// unreachable to the memory service until somebody notices.
-	if err := grantTenantToDataPlane(ctx, pool, schema); err != nil {
-		return err
-	}
-	return nil
+	return grantMemoryToDataPlane(ctx, pool, schema)
 }
 
-// ProvisionScope creates a project's chunk partition and its ANN index, inside a tenant's schema.
+// ProvisionScope creates a project's chunk partition and its ANN index, inside the instance memory namespace.
 //
 // Called once when a project is created. Until it runs, writes for that project land in the default
 // partition — visible, erasable, and slow to search, which is the right failure: losing a customer's
@@ -51,8 +44,8 @@ func ProvisionTenant(ctx context.Context, pool *pgxpool.Pool, tenant string) err
 //
 // IF NOT EXISTS throughout, so re-provisioning is a no-op. This is the kind of step an operator
 // retries when unsure whether it ran.
-func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, tenant, scope string) error {
-	schema, err := NewSchema(tenant)
+func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, namespace, scope string) error {
+	schema, err := NewSchema(namespace)
 	if err != nil {
 		return err
 	}
@@ -64,7 +57,7 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, tenant, scope strin
 
 	// The partition, then the index INSIDE it.
 	//
-	// An index on the partitioned parent would be built across every project in the tenant, and a
+	// An index on the partitioned parent would be built across every project in the instance, and a
 	// single graph behind a scope predicate is unreachable: the planner prefers an exact sort, and
 	// post-filtering an approximate result loses recall in proportion to how little of the corpus
 	// belongs to the caller. Per partition, pruning happens first and the walk covers only that
@@ -76,7 +69,7 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, tenant, scope strin
 			index, partition),
 	} {
 		if _, err := pool.Exec(ctx, statement); err != nil {
-			return fmt.Errorf("provision project %q in tenant %q: %w", scope, tenant, err)
+			return fmt.Errorf("provision project %q in memory namespace %q: %w", scope, namespace, err)
 		}
 	}
 
@@ -90,7 +83,7 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, tenant, scope strin
 	if _, err := pool.Exec(ctx, fmt.Sprintf(
 		`INSERT INTO %s.project (scope, label) VALUES ($1, $1) ON CONFLICT (scope) DO NOTHING`,
 		schema), scope); err != nil {
-		return fmt.Errorf("record project %q in tenant %q: %w", scope, tenant, err)
+		return fmt.Errorf("record project %q in memory namespace %q: %w", scope, namespace, err)
 	}
 	return nil
 }

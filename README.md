@@ -133,6 +133,12 @@ highest accepted offset so an old write receipt does not become indistinguishabl
 erasure and export call nothing at all — so a slow or absent provider costs you formation, never an
 answer.
 
+Each deployment uses one memory namespace (`memory` by default) and the fixed `control` credential
+namespace. `TAISCE_SCHEMA` is an optional instance-wide override for an existing installation; keep
+its value during upgrades. Changing it selects different storage and does not migrate data. Project
+creation adds a project row and partition inside the existing memory namespace. Database grants
+protect credential secrets; authenticated project filters control memory reads.
+
 Migration 0023 validates project-consistent database relationships and refuses inconsistent existing
 rows atomically. It also invalidates previously generated community reports because their source
 registrations may be incomplete; the worker regenerates them from retained facts. Observations,
