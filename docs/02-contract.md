@@ -30,7 +30,7 @@ POST `/v1/observations` → 201
 |---|---|
 | `data_subject_id` | string |
 | `occurred_at` | timestamp (RFC 3339), optional |
-| `messages` | array of {role: string, content: string, occurred_at: timestamp (RFC 3339), optional} |
+| `messages` | array of {group_ordinal: integer, optional, role: string, content: string, occurred_at: timestamp (RFC 3339), optional} |
 
 ### Response
 

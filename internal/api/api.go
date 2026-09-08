@@ -297,9 +297,12 @@ type observeRequest struct {
 }
 
 type messagePayload struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	OccurredAt *time.Time `json:"occurred_at"`
+	// If supplied, every message supplies one. Omitted groups mean standalone ordinary messages;
+	// tool exchanges require explicit boundaries because roles cannot reconstruct call identity.
+	GroupOrdinal *int       `json:"group_ordinal"`
+	Role         string     `json:"role"`
+	Content      string     `json:"content"`
+	OccurredAt   *time.Time `json:"occurred_at"`
 }
 
 type observeResponse struct {
@@ -326,13 +329,25 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 	} else {
 		turn.OccurredAt = time.Now().UTC()
 	}
+	explicitGroups := len(req.Messages) > 0 && req.Messages[0].GroupOrdinal != nil
 	for i, m := range req.Messages {
+		if (m.GroupOrdinal != nil) != explicitGroups {
+			writeError(w, http.StatusBadRequest, codeInvalidTurn, "group_ordinal must be supplied for every message or omitted for all")
+			return
+		}
+		group := i
+		if explicitGroups {
+			group = *m.GroupOrdinal
+		} else if m.Role == string(domain.RoleTool) {
+			writeError(w, http.StatusBadRequest, codeInvalidTurn, "turns containing tool messages require explicit group ordinals")
+			return
+		}
 		occurred := turn.OccurredAt
 		if m.OccurredAt != nil {
 			occurred = m.OccurredAt.UTC()
 		}
 		turn.Messages = append(turn.Messages, domain.Message{
-			Ordinal: i, Role: domain.Role(m.Role), Content: m.Content, OccurredAt: occurred,
+			Ordinal: i, Role: domain.Role(m.Role), Content: m.Content, OccurredAt: occurred, GroupOrdinal: group,
 		})
 	}
 

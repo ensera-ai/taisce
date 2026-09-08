@@ -10,8 +10,10 @@ package domain
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -93,9 +95,8 @@ type Turn struct {
 
 // Validate reports why a turn cannot be stored, or nil.
 //
-// Called before anything is written, so a rejected turn leaves nothing behind. Every rule here is
-// also a database constraint; this exists so the caller gets a sentence rather than a
-// constraint-violation error naming a table they have never heard of.
+// Called before anything is written, so a rejected turn leaves nothing behind. Scalar fields also
+// have database constraints; group ordering spans rows and is checked here for every append path.
 func (t Turn) Validate() error {
 	if strings.TrimSpace(t.Scope) == "" {
 		return fmt.Errorf("turn has no scope")
@@ -123,6 +124,17 @@ func (t Turn) Validate() error {
 		if m.GroupOrdinal < 0 {
 			return fmt.Errorf("message %d has group ordinal %d", i, m.GroupOrdinal)
 		}
+	}
+	// Callers may supply messages out of ordinal order. Validate the logical sequence without
+	// changing their slice; a group cannot disappear and resume later or refer to a missing group.
+	ordered := slices.Clone(t.Messages)
+	slices.SortFunc(ordered, func(a, b Message) int { return cmp.Compare(a.Ordinal, b.Ordinal) })
+	previous := 0
+	for _, m := range ordered {
+		if m.GroupOrdinal != previous && m.GroupOrdinal != previous+1 || m.Ordinal == ordered[0].Ordinal && m.GroupOrdinal != 0 {
+			return fmt.Errorf("message %d has a noncontiguous group ordinal %d", m.Ordinal, m.GroupOrdinal)
+		}
+		previous = m.GroupOrdinal
 	}
 	return nil
 }

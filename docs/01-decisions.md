@@ -1227,6 +1227,27 @@ amplification); a counter per token or IP (unbounded cardinality and additional 
 which remains identical for missing, malformed, unknown and revoked credentials. Authentication
 admission and fleet-wide resource limits remain development issue #93; this resolves #88.
 
+### D64 — Atomic message groups are explicit on the observation wire
+
+`group_ordinal` is supplied for every message or omitted for all. Explicit groups begin at zero,
+occupy contiguous runs in message order and advance by one. The domain enforces this for HTTP and
+internal append callers, including callers that supply their messages out of ordinal order.
+
+When groups are omitted, each ordinary message is a separate unit. A turn containing tool messages
+must supply groups explicitly: roles alone cannot reconstruct which result answers which call.
+The caller supplies the boundaries; this contract does not validate tool-call IDs or completeness of
+the tool protocol. Export carries both observation identity and group ordinals, because group zero
+in two different turns is two different units.
+
+**Rejected:** silently collapsing all messages into group zero (unrelated messages become inseparable);
+guessing tool groups from text or roles (no defensible call/result identity); allowing a group to
+resume after another group (a contiguous history slice would split it).
+
+**How hard to undo.** No storage migration: the group field already exists. This tightens admission of
+ambiguous tool turns and adds the optional wire field. Existing stored group-zero turns retain their
+original conservative boundaries. Development issue #86 covers the wire journey; compaction safety
+and cross-adapter replay remain acceptance obligations under #22 and #26.
+
 ---
 
 ## Substrate

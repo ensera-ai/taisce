@@ -68,7 +68,7 @@ func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubject
 		// projection derives from. Not a projection kind — projections are what was DERIVED, and an
 		// export that returned only derivations would omit the messages they came from.
 		messages, err := exportRows(ctx, tx, schema, `
-			SELECT to_jsonb(m) - 'observation_id'
+			SELECT to_jsonb(m)
 			  FROM {schema}.turn_message m
 			  JOIN {schema}.observation o ON o.observation_id = m.observation_id
 			 WHERE o.scope = $1 AND o.data_subject_id = $2

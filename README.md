@@ -113,6 +113,11 @@ somebody's words — generation sends a message, embedding sends text written fr
 that, and it cannot be arrived at by default: it is closed when unset and it names every host, so
 permitting one is always somebody writing the host down.
 
+Observation messages may carry `group_ordinal`: use the same number for an assistant tool call and
+its results, starting at zero and increasing by one between groups. Supply it on every message or
+omit it on all. Omitted groups make ordinary messages independent; turns with tool messages require
+explicit groups. Export preserves each message's observation ID, ordinal, and group ordinal.
+
 A newly created project's freshness response has `stored: null` and `formed: null`. After its first
 observation, `stored` is `0`; `formed` stays null until formation finishes. Erasure preserves the
 highest accepted offset so an old write receipt does not become indistinguishable from a new project.
