@@ -9,6 +9,36 @@ New development work is tracked in private `althunibat/taisce`. Fully qualified 
 organization issues preserve their original meaning; their numbers are not interchangeable with
 the development tracker.
 
+## Delivery progress — 2026-09-08
+
+Private implementation branch: `codex/backlog-hardening`. The assessment and capability table below
+record the original review; this section records subsequent delivery. A server-side implementation
+does not complete an issue whose adapter, recovery or operational acceptance remains unproved.
+
+| Work | Delivery and evidence | Remaining scope |
+|---|---|---|
+| Strict request parsing [#87](https://github.com/althunibat/taisce/issues/87) | Closed; `62c931c`. Complete-object decoding, duplicate/case-alias rejection, UTF-8/surrogate validation and nesting/body bounds. HTTP/PostgreSQL refusal tests prove no writes. | None in this issue. |
+| Refused-auth audit [#88](https://github.com/althunibat/taisce/issues/88) | Closed; `16582d4`. No supplied credential text enters the ledger; bounded per-process sampling, suppression counts and race tests. | Fleet-wide admission remains [#93](https://github.com/althunibat/taisce/issues/93). |
+| Empty-project freshness [#105](https://github.com/althunibat/taisce/issues/105) | Closed; `9438cba`. Absent stored watermark is null; the first accepted offset is zero. Full lifecycle tested. | None in this issue. |
+| Observation retries [#85](https://github.com/althunibat/taisce/issues/85) | Server implemented; `2ad0a16`. Project-scoped UUID keys, stable receipt, conflict refusal, atomic persistence and erased-key tombstones. Twenty-four concurrent HTTP attempts produce one observation and one extraction call. | Stable keys in actual adapters and shared conformance. Issue remains open. |
+| Atomic message groups [#86](https://github.com/althunibat/taisce/issues/86) | Server implemented; `33b1d44`. Explicit contiguous groups, safe ordinary-message defaults, tool-group requirement and export identity. | Compaction and adapter conformance. Issue remains open. |
+| Public snapshot ancestry [#104](https://github.com/althunibat/taisce/issues/104) | Closed; `a18394a`. Separate preparation/publish phases, exact destinations, atomic compare-and-swap publication, independent private version markers. Disposable Git tests include a concurrent push race. | Signing, artifacts and release readiness remain [#37](https://github.com/althunibat/taisce/issues/37). No public release or visibility change was performed. |
+
+The complete real-PostgreSQL suite after these changes passes with **88.7%** coverage, and an uncached
+repeat measures **88.8%**. The enforced floor is **88.7%**. Targeted retry/authentication race tests,
+`go vet ./...`, contract generation and the publisher's disposable-Git tests pass. These are
+correctness checks, not production latency or scaling measurements.
+
+Next: complete the explicit speaker binding and subject-scoped recall in
+[#84](https://github.com/althunibat/taisce/issues/84), then project-consistent database relationships
+in [#100](https://github.com/althunibat/taisce/issues/100). The identity change must reconcile the
+production extractor's rejection of first-person terms with lower-level name-based entity merging;
+neither a uniqueness change alone nor a prompt change alone meets the acceptance criteria. Preserve
+named shared entities, prove multilingual formation and correction, and re-prove erasure before
+closing it. Fixed single-tenant provisioning, indexed/bounded anchoring, admission controls and
+operational measurements follow under the existing database and security issues. Product and adapter
+journeys retain their acceptance criteria and remain in the execution order below.
+
 ## Assessment
 
 The service has a working PostgreSQL-backed memory spine, with five public operations: observations,
