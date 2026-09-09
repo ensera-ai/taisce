@@ -3660,3 +3660,35 @@ project refusal, conflicting data/pipeline refusal, failed-audit rollback, size 
 ambiguity and restart, embedding preservation, concurrent recovery and erasure. CLI tests cover
 validation, metadata-only progress, cancellation and failed output. This completes #128's repair
 scope; other projection rebuilds remain #58.
+
+## D102 — Entity inspection is bounded project-authorized identity access
+
+**Decision.** `/v1/entities/list` exposes retained entity IDs, identity kind, canonical-name preview,
+name byte count, truncation flag, alias count and first-seen time. `/v1/entities/get` resolves one ID
+to its canonical name, bounded aliases and optional speaker subject binding. Both operations use the
+credential's project and permit read-only credentials. A foreign ID and an absent ID produce the same
+404 response; supplied cursors grant no authority. The database and Go audit vocabularies include the
+two operations. Audit rows contain the operation, principal, project, result and magnitude, not names,
+subject IDs or caller-supplied entity IDs.
+
+**Bounds and access.** Inventory pages contain 1–100 entities with at most 512 Unicode characters
+per name preview. UUID ordering uses the existing `(scope, entity_id)` index. Deleting the cursor row
+does not shift the next page; this is a live inventory and inserts behind the cursor require restarting.
+Exact lookup admits canonical names/aliases of at most 4096 UTF-8 bytes, at most 64 aliases and a
+speaker subject ID of at most 1 MiB, matching the source contracts. SQL bounds transferred fields
+before Go allocation and rejects unsupported stored identities rather than presenting a clipped value
+as the identity. Generated descriptions, embeddings and unbounded fact/support lists are excluded.
+
+**Alternatives.** Expanding entities through recall makes a simple identity lookup depend on retrieval
+selection and a question's wording. Returning complete identity/support content for every inventory
+row would amplify page size with source history. Separate bounded inventory and exact lookup give a
+client stable navigation from record endpoint IDs without inference. Project credentials authorize
+project content (D90); this operation does not introduce per-subject confidentiality or perform merging,
+correction or purging. Those mutations require their own provenance and version policy under #89.
+Reversal is removal of these read operations and their ledger names; retained identity data is unchanged.
+
+**Proof.** HTTP/database tests cover endpoint resolution, speaker attribution, read-only authorization,
+strict input validation, indistinguishable cross-project refusal, content-free auditing and erasure.
+Database tests cover Unicode preview bounds, deletion between pages, oversized stored identities,
+shared alias removal and an actual project/UUID index scan without an intermediate sort. Race checks
+pass. These plans establish the access shape, not controlled-host latency or capacity (#103).

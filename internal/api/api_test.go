@@ -810,6 +810,8 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		body map[string]any
 		want int
 	}{
+		domain.AuditEntityList:      {map[string]any{}, http.StatusOK},
+		domain.AuditEntityGet:       {map[string]any{}, http.StatusOK},
 		domain.AuditSubjectRegister: {map[string]any{"idempotency_key": "de8bf4fa-5b6b-4310-a781-a58c46cc5bbd", "external_reference": "ledger-account"}, http.StatusOK},
 		domain.AuditSubjectGet:      {map[string]any{"external_reference": "ledger-account"}, http.StatusOK},
 		domain.AuditSubjectList:     {map[string]any{}, http.StatusOK},
@@ -878,6 +880,9 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	run(domain.AuditFreshness)
 	h.form(t)
 	run(domain.AuditRecall)
+	exercise[domain.AuditEntityGet].body["id"] = entityIDForInspection(t, h)
+	run(domain.AuditEntityList)
+	run(domain.AuditEntityGet)
 	var citationID string
 	if err := h.pool.QueryRow(ctx, h.schema.SQL(`SELECT fact_id::text FROM {schema}.fact WHERE scope='p1' ORDER BY fact_id LIMIT 1`)).Scan(&citationID); err != nil {
 		t.Fatal(err)

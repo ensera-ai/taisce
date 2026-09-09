@@ -31,6 +31,8 @@ func permitted(access credential.Access, operation string) bool {
 		return false
 	}
 	switch operation {
+	case domain.AuditEntityList, domain.AuditEntityGet:
+		return true
 	case domain.AuditFreshness, domain.AuditRecall, domain.AuditExport, domain.AuditCitationResolve, domain.AuditRecordList, domain.AuditRecordHistory, domain.AuditArtifactGet, domain.AuditArtifactList, domain.AuditSubjectGet, domain.AuditSubjectList:
 		return true
 	default:

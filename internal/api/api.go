@@ -162,6 +162,8 @@ type route struct {
 }
 
 var operations = []route{
+	{Operation{domain.AuditEntityList, http.MethodPost, "/entities/list", http.StatusOK}, func(s *Server) grantedHandler { return s.listEntities }, entityListRequest{}, pg.EntityPage{}},
+	{Operation{domain.AuditEntityGet, http.MethodPost, "/entities/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getEntity }, entityGetRequest{}, pg.EntityIdentity{}},
 	{Operation{domain.AuditSubjectRegister, http.MethodPost, "/subjects/register", http.StatusOK}, func(s *Server) grantedHandler { return s.registerSubject }, pg.SubjectRegistration{}, pg.SubjectWrite{}},
 	{Operation{domain.AuditSubjectGet, http.MethodPost, "/subjects/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getSubject }, subjectGetRequest{}, pg.ManagedSubject{}},
 	{Operation{domain.AuditSubjectList, http.MethodPost, "/subjects/list", http.StatusOK}, func(s *Server) grantedHandler { return s.listSubjects }, subjectListRequest{}, pg.SubjectPage{}},
@@ -888,6 +890,7 @@ const (
 	codeNotFound              errorCode = "not_found"
 	codeForbidden             errorCode = "forbidden"
 	codeInvalidRecordPage     errorCode = "invalid_record_page"
+	codeInvalidEntityPage     errorCode = "invalid_entity_page"
 	codeInvalidRecallControls errorCode = "invalid_recall_controls"
 	codeInvalidRecordMutation errorCode = "invalid_record_mutation"
 	codeRecordConflict        errorCode = "record_conflict"
@@ -912,6 +915,7 @@ const (
 // change, so it would be wrong before it was useful. The honest statement is that any operation can
 // return any of these, and that is what the contract says.
 var errorCodes = []errorCode{
+	codeInvalidEntityPage,
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
 	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity, codeInvalidSubject, codeSubjectConflict,

@@ -41,6 +41,8 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 		t.Fatal(err)
 	}
 	bodies := map[string]map[string]any{
+		domain.AuditEntityList:      {},
+		domain.AuditEntityGet:       {"id": entityIDForInspection(t, h)},
 		domain.AuditSubjectRegister: {"private": "unauthorized mutation"},
 		domain.AuditSubjectUpdate:   {"id": subject.ID, "expected_version": subject.Version},
 		domain.AuditSubjectGet:      {"id": subject.ID},

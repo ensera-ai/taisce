@@ -905,6 +905,8 @@ const (
 	AuditRebuildCancel     = "formation.rebuild.cancel"
 	AuditCitationResolve   = "citation.resolve"
 	AuditRecordList        = "record.list"
+	AuditEntityList        = "entity.list"
+	AuditEntityGet         = "entity.get"
 	AuditRecordHistory     = "record.history"
 	AuditRecordRetract     = "record.retract"
 	AuditRecordCorrect     = "record.correct"
@@ -934,6 +936,8 @@ const (
 // becomes servable and a name removed stops being servable, without a second list agreeing to it.
 func RecordableOperation(name string) bool {
 	switch name {
+	case AuditEntityList, AuditEntityGet:
+		return true
 	case AuditRebuildStart, AuditRebuildCancel:
 		return true
 	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,

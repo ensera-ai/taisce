@@ -32,6 +32,8 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 
 | Operation | Method | Path | On success |
 |---|---|---|---|
+| `entity.list` | POST | `/v1/entities/list` | 200 |
+| `entity.get` | POST | `/v1/entities/get` | 200 |
 | `subject.register` | POST | `/v1/subjects/register` | 200 |
 | `subject.get` | POST | `/v1/subjects/get` | 200 |
 | `subject.list` | POST | `/v1/subjects/list` | 200 |
@@ -53,6 +55,47 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 | `record.retract` | POST | `/v1/records/retract` | 200 |
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
+
+## `entity.list`
+
+POST `/v1/entities/list` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `after` | {id: string}, optional |
+| `limit` | integer, optional |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `entities` | array of {id: string, identity_kind: string, name_preview: string, name_bytes: integer, name_truncated: boolean, alias_count: integer, first_seen_at: timestamp (RFC 3339)} |
+| `next` | {id: string}, optional |
+
+
+## `entity.get`
+
+POST `/v1/entities/get` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `identity_kind` | string |
+| `canonical_name` | string |
+| `aliases` | array of string |
+| `speaker_subject_id` | string, optional |
+| `first_seen_at` | timestamp (RFC 3339) |
+
 
 ## `subject.register`
 
@@ -506,6 +549,7 @@ Any operation may answer with any of these.
 
 | Code |
 |---|
+| `invalid_entity_page` |
 | `unauthenticated` |
 | `invalid_body` |
 | `invalid_turn` |
