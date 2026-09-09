@@ -65,17 +65,19 @@ func (m EmbeddingModel) Identity() string {
 }
 
 type EmbeddingGeneration struct {
-	ID            string              `json:"id"`
-	Project       string              `json:"project"`
-	Key           string              `json:"operation_key"`
-	Model         EmbeddingModel      `json:"model"`
-	ThroughOffset int64               `json:"through_offset"`
-	After         ChunkRecoveryCursor `json:"after"`
-	State         string              `json:"state"`
-	Active        bool                `json:"active"`
-	Examined      int64               `json:"examined"`
-	Stored        int64               `json:"stored"`
-	CreatedAt     time.Time           `json:"created_at"`
+	ID                   string              `json:"id"`
+	Project              string              `json:"project"`
+	Key                  string              `json:"operation_key"`
+	Model                EmbeddingModel      `json:"model"`
+	ThroughOffset        int64               `json:"through_offset"`
+	InitialThroughOffset int64               `json:"initial_through_offset"`
+	CoveredThroughOffset int64               `json:"covered_through_offset"`
+	After                ChunkRecoveryCursor `json:"after"`
+	State                string              `json:"state"`
+	Active               bool                `json:"active"`
+	Examined             int64               `json:"examined"`
+	Stored               int64               `json:"stored"`
+	CreatedAt            time.Time           `json:"created_at"`
 }
 
 type MessageEmbeddingStore struct {

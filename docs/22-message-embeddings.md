@@ -8,8 +8,9 @@ cosine metric and `message-text/v1` input contract. A dimension match alone does
 interchangeable. The revision must change when model weights or provider behavior change; an
 OpenAI-compatible endpoint cannot attest unchanged weights. No endpoint credential is persisted.
 
-This is a bounded operator workflow over a captured observation-log boundary. It does **not**
-automatically embed messages received after that boundary. A later generation captures those messages.
+The initial build captures a finite observation-log boundary. An explicitly started `follow` worker
+can incrementally embed later messages under the same active model; ordinary API startup does not
+start background embedding work.
 Entity descriptions and report embeddings remain separate work under #10/#19. Message matches are
 source evidence, not extracted assertions and not a replacement for structured recall.
 
@@ -90,7 +91,9 @@ Content-Type: application/json
 {"question":"Which database did we choose?","limit":10,"data_subject_id":"subject-1","source_role":"user"}
 ```
 
-The result contains `generation_id`, `through_offset`, `build_state`, `approximate`, and `passages`.
+The result contains `generation_id`, `through_offset`, `covered_through_offset`, `build_state`,
+`approximate`, and `passages`. The first offset is the current target; the second is the last fully
+processed boundary. A partially processed range can already contribute passages above that boundary.
 Each passage contains `chunk_id`, `source_id`, `ordinal`, `role`, `occurred_at`, `similarity`, `preview`,
 `message_bytes`, `preview_byte_end` and `preview_complete`. The source id identifies the observation;
 the chunk id identifies its message. These are source references, not asserted-fact citation ids.
@@ -103,9 +106,33 @@ reranking. Filtering happens after ANN candidate selection, so filtered ANN can 
 `source_role` accepts user, assistant, system or tool. A missing subject filter searches the entire
 credential project. The question is limited to 8192 UTF-8 bytes; subject filters to 1024 bytes.
 
-This is source evidence, not a factual answer or safe merge decision. The generation covers only its
-captured observation offset. New messages require operator generation work; continuous indexing is
-still tracked separately. A missing active generation, configuration mismatch or unavailable provider
+This is source evidence, not a factual answer or safe merge decision. New messages enter the active
+generation only when an explicit follower processes them. A missing active generation, configuration
+mismatch or unavailable provider
 returns `503 passage_unavailable`; invalid controls return `400 invalid_passage_query`. Read requests
 share API admission and the 30-second request deadline. Read audit is content-free and best-effort,
 matching other application reads; operator search keeps its own transactional audit. See D106.
+
+
+## Incremental catch-up
+
+After initial build and activation, use the runtime memory connection (`TAISCE_MEMORY_DSN`) to process
+one page of new messages or keep an explicitly selected generation current:
+
+```sh
+taisce embeddings follow --project example --generation <generation-uuid> --revision weights-v1 --limit 32
+taisce embeddings follow --project example --generation <generation-uuid> --revision weights-v1 --limit 32 --watch --interval 2s
+```
+
+The follower checks the configured model before inference and stops when its selected generation is
+no longer active. It cannot allocate or activate a model. Each sequence captures a finite target;
+later arrivals wait for the next sequence. Completed ranges are not re-embedded. Provider failures
+leave progress retryable; watch mode backs off to at most one minute and stops promptly on cancellation.
+Every page has a two-minute deadline and retains the existing 64-message/1-MiB text limits. Interval
+is bounded to 100ms–1m; the default is 2s even with backlog, making resource use an operator choice.
+
+Status is JSON with generation/audit identifiers, page counts, current target and completed coverage.
+Unchanged idle polls do not print repeatedly. `retrying` with offsets -1 means that attempt could not
+verify progress; provider error bodies and source content are omitted. The original build boundary
+is retained as `initial_through_offset` in operator generation status. `repair` covers the current
+captured target and conservatively clears completed coverage until its scan finishes. See D107/#134.

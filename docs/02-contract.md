@@ -77,6 +77,7 @@ POST `/v1/passages/search` → 200
 |---|---|
 | `generation_id` | string |
 | `through_offset` | integer |
+| `covered_through_offset` | integer |
 | `build_state` | string |
 | `approximate` | boolean |
 | `passages` | array of {chunk_id: string, source_id: string, ordinal: integer, role: string, preview: string, similarity: number, occurred_at: timestamp (RFC 3339), message_bytes: integer, preview_complete: boolean, preview_byte_end: integer} |

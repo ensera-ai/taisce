@@ -3843,3 +3843,61 @@ and storage refusal. The configured-provider test exercises the same authenticat
 The local configured-provider HTTP journey passes at its actual 2560 dimensions. The full uncached
 PostgreSQL suite passes at 91.9% cross-package coverage after correcting the independent clock-sensitive
 inspection fixture (#135); the unchanged floor is 91.6%. Targeted race and contract checks pass.
+
+## D107 — Active message embeddings advance through bounded, explicit catch-up
+
+**Decision.** An operator may follow an explicitly selected active message generation with the
+unprivileged memory identity. Each catch-up sequence captures the transactionally serialized append
+watermark and processes bounded pages after the preceding completed range. New observations arriving
+while that range is processed wait for the next sequence. Model identity and the original generation
+boundary remain immutable operator policy; mutable worker progress holds the current target separately.
+
+`through_offset` is the finite target, `covered_through_offset` is the last fully processed boundary,
+and `initial_through_offset` in operator status records the original build boundary. Completed coverage
+is conservative: a page can publish useful evidence above it before the whole range completes. Erased
+and non-message observations consume offsets but require no embedding. A ready range with inconsistent
+coverage refuses catch-up rather than skipping it. Repair resets coverage and scans the current target
+range with the same model; it does not extend the target itself.
+
+**Concurrency and authority.** Catch-up reuses the bounded source reader, session advisory lock,
+persisted lease and atomic source-owned publication. A disconnected worker cannot publish an old
+lease. Publication serializes with activation using the existing project policy advisory lock and
+refuses if the selected generation is no longer active. The runtime worker never receives UPDATE
+permission on model identity or activation policy. Source erasure or expiry during inference wins;
+provider failure does not advance the source cursor or completed coverage. A suspended project refuses
+new catch-up work. Administrative source corruption requires repair; a past coverage marker cannot
+prove that an operator has not subsequently changed storage directly.
+
+**Operator process and cost.** `taisce embeddings follow` uses `TAISCE_MEMORY_DSN`, explicit project,
+generation and revision, and an allowlisted embedding provider. One invocation performs at most one
+page. `--watch` repeats pages with a configured 100ms–1m wait (default 2s), per-page two-minute deadline,
+exponential failure backoff capped at one minute, cancellation and content-free status. Unchanged idle
+state stays quiet. Provider payloads never enter watch status; offsets of -1 with `retrying` mean no
+coverage was verified for that attempt. Invalid model/state/policy stops the worker; transient storage
+or provider failures retry visibly. No model switch is selected automatically.
+
+This is incremental work in new source messages, with bounded per-page source text and vectors. The
+first bottleneck is provider throughput; each worker also holds one database connection during a model
+call for its session lock. Operators control the number of worker processes and their intervals.
+There is no laptop-derived latency/capacity claim. Automatic orchestration, deployment health for the
+standalone follower, and entity/report embedding targets remain separate work.
+
+**Alternatives and reversal.** Rebuilding a full replacement generation on every append repeats old
+inference and requires index allocation/cutover for unchanged weights. Mutating the identity table
+would grant a worker authority to redefine a vector space. Capturing an ever-moving maximum during
+one build can prevent completion under sustained ingestion. The chosen finite targets preserve an
+observable completed frontier while allowing the active generation to stay useful. A dedicated
+watch command makes background inference an explicit operator action; ordinary API startup does not
+silently consume inference capacity. Stopping the follower restores finite snapshot operation without
+rewriting vectors. Removing the added progress columns is a migration; immutable model policy is intact.
+
+**Evidence.** PostgreSQL tests cover finite pages, late arrivals, model/activation refusal, retries,
+concurrent workers, erasure/expiry, empty and non-message ranges, and repair. HTTP tests distinguish
+partial from completed coverage and return newly embedded messages under the same generation. CLI
+tests use the runtime role, verify policy writes are refused, and exercise recovery, cancellation and
+content-free output. The actual configured-provider journey includes post-activation catch-up.
+
+The local provider passes authenticated incremental retrieval with 2560-dimensional vectors. The full
+uncached PostgreSQL suite passes at 91.9% cross-package coverage against the unchanged 91.6% floor.
+PostgreSQL, HTTP and CLI race checks pass, including allocation rollback after updating the SQL fault
+injector to recognize the added target column. These are correctness results, not capacity measurements.

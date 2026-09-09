@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"github.com/ensera-ai/taisce/internal/api"
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/domain"
 	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
@@ -69,5 +70,18 @@ func TestConfiguredPassageProviderServesAuthenticatedEvidence(t *testing.T) {
 			t.Fatalf("HTTP evidence: %+v", result)
 		}
 	}
-	t.Logf("authenticated exact and ANN source retrieval with %d-dimensional actual provider vectors", model.Dimensions)
+	const laterText = "Session messages arriving after activation must enter the active index incrementally."
+	later, err := pg.NewObservationStore(h.pool).Append(ctx, h.schema, domain.Turn{Scope: "p1", DataSubjectID: "subject-1", OccurredAt: time.Now(), Messages: []domain.Message{{Role: domain.RoleUser, Content: laterText}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page, err := store.CatchUpPage(ctx, "p1", generation.ID, actor, model, 64, embedder.Embed); err != nil || !page.Complete || page.Stored != 1 {
+		t.Fatalf("actual provider catch-up %+v %v", page, err)
+	}
+	var result passage.Page
+	h.do(t, http.MethodPost, "/v1/passages/search", map[string]any{"question": laterText, "limit": 1}, 200, &result)
+	if len(result.Passages) != 1 || result.Passages[0].SourceID != later.ID || result.CoveredThroughOffset != later.LogOffset || result.GenerationID != generation.ID {
+		t.Fatalf("actual provider incremental evidence %+v", result)
+	}
+	t.Logf("authenticated exact/ANN and incremental source retrieval with %d-dimensional actual provider vectors", model.Dimensions)
 }

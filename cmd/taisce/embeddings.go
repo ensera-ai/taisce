@@ -22,9 +22,12 @@ import (
 // building a candidate never changes which model answers a read.
 func embeddingsCommand(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taisce embeddings <start|build|status|activate|cancel|prune|repair|search> --project <name>")
+		return fmt.Errorf("usage: taisce embeddings <start|build|follow|status|activate|cancel|prune|repair|search> --project <name>")
 	}
 	operation := args[0]
+	if operation == "follow" {
+		return embeddingFollowCommand(ctx, args[1:], out)
+	}
 	switch operation {
 	case "start", "build", "status", "activate", "cancel", "prune", "repair", "search":
 	default:

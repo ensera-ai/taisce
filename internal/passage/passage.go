@@ -42,11 +42,12 @@ type Query struct {
 	Subject, Role     string
 }
 type Page struct {
-	GenerationID  string            `json:"generation_id"`
-	ThroughOffset int64             `json:"through_offset"`
-	BuildState    string            `json:"build_state"`
-	Approximate   bool              `json:"approximate"`
-	Passages      []pg.MessageMatch `json:"passages"`
+	GenerationID         string            `json:"generation_id"`
+	ThroughOffset        int64             `json:"through_offset"`
+	CoveredThroughOffset int64             `json:"covered_through_offset"`
+	BuildState           string            `json:"build_state"`
+	Approximate          bool              `json:"approximate"`
+	Passages             []pg.MessageMatch `json:"passages"`
 }
 type Retriever struct {
 	store    Store
@@ -108,5 +109,5 @@ func (r *Retriever) Search(ctx context.Context, scope string, query Query) (Page
 	if err != nil {
 		return Page{}, err
 	}
-	return Page{GenerationID: result.Generation.ID, ThroughOffset: result.Generation.ThroughOffset, BuildState: result.Generation.State, Approximate: result.Approximate, Passages: result.Matches}, nil
+	return Page{GenerationID: result.Generation.ID, ThroughOffset: result.Generation.ThroughOffset, CoveredThroughOffset: result.Generation.CoveredThroughOffset, BuildState: result.Generation.State, Approximate: result.Approximate, Passages: result.Matches}, nil
 }

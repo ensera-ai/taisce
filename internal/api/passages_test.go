@@ -281,3 +281,35 @@ func TestPassageSearchRechecksMemoryAfterProviderReturns(t *testing.T) {
 		})
 	}
 }
+
+func TestCatchUpPassagesExposeNewEvidenceAndConservativeCoverage(t *testing.T) {
+	h := newHarness(t, "api_passage_catchup")
+	fixture := attachPassages(t, h, nil)
+	generation := fixture.activate(t, "p1", "v1")
+	var source struct {
+		LogOffset int64 `json:"log_offset"`
+	}
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "PostgreSQL is our database."}, {"role": "assistant", "content": "It supports the project boundary."}}}, 201, &source)
+	embed := func(_ context.Context, texts []string) ([][]float32, error) {
+		vectors := make([][]float32, len(texts))
+		for i, text := range texts {
+			vectors[i] = passageVector(text)
+		}
+		return vectors, nil
+	}
+	if page, err := fixture.store.CatchUpPage(context.Background(), "p1", generation.ID, uuid.NewString(), fixture.model, 1, embed); err != nil || page.Complete {
+		t.Fatalf("partial catch-up %+v %v", page, err)
+	}
+	var result passage.Page
+	h.do(t, http.MethodPost, "/v1/passages/search", map[string]any{"question": "PostgreSQL", "limit": 1}, 200, &result)
+	if len(result.Passages) != 1 || result.Passages[0].Preview != "PostgreSQL is our database." || result.CoveredThroughOffset != -1 || result.BuildState != "building" {
+		t.Fatalf("partial evidence %+v", result)
+	}
+	if page, err := fixture.store.CatchUpPage(context.Background(), "p1", generation.ID, uuid.NewString(), fixture.model, 1, embed); err != nil || !page.Complete {
+		t.Fatalf("complete catch-up %+v %v", page, err)
+	}
+	h.do(t, http.MethodPost, "/v1/passages/search", map[string]any{"question": "PostgreSQL"}, 200, &result)
+	if len(result.Passages) != 2 || result.CoveredThroughOffset != result.ThroughOffset || result.CoveredThroughOffset < 0 || result.GenerationID != generation.ID {
+		t.Fatalf("completed evidence %+v", result)
+	}
+}

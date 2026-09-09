@@ -14,7 +14,7 @@ import (
 )
 
 const embeddingGenerationSQL = `SELECT g.generation_id::text,g.scope,g.operation_key::text,
- g.model_name,g.model_revision,g.endpoint_hash,g.dimensions,g.through_offset,
+ g.model_name,g.model_revision,g.endpoint_hash,g.dimensions,b.through_offset,g.through_offset,b.covered_through_offset,
  b.after_offset,b.after_ordinal,b.state,coalesce(a.generation_id=g.generation_id,false),b.examined,b.stored,g.created_at
  FROM {schema}.embedding_generation g JOIN {schema}.embedding_build b USING(scope,generation_id)
  LEFT JOIN {schema}.embedding_active a USING(scope)`
@@ -22,7 +22,7 @@ const embeddingGenerationSQL = `SELECT g.generation_id::text,g.scope,g.operation
 func scanEmbeddingGeneration(row pgx.Row) (EmbeddingGeneration, error) {
 	var out EmbeddingGeneration
 	err := row.Scan(&out.ID, &out.Project, &out.Key, &out.Model.Name, &out.Model.Revision, &out.Model.EndpointHash, &out.Model.Dimensions, &out.ThroughOffset,
-		&out.After.Offset, &out.After.Ordinal, &out.State, &out.Active, &out.Examined, &out.Stored, &out.CreatedAt)
+		&out.InitialThroughOffset, &out.CoveredThroughOffset, &out.After.Offset, &out.After.Ordinal, &out.State, &out.Active, &out.Examined, &out.Stored, &out.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return EmbeddingGeneration{}, ErrEmbeddingNotFound
 	}
@@ -107,7 +107,7 @@ func (s *MessageEmbeddingStore) Start(ctx context.Context, scope, key, actor str
    VALUES($1::uuid,$2,$3::uuid,$4,$5,$6,$7,$8,$9)`), id, scope, key, model.Name, model.Revision, model.EndpointHash, model.Identity(), model.Dimensions, through); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, s.schema.SQL(`INSERT INTO {schema}.embedding_build(scope,generation_id) VALUES($1,$2::uuid)`), scope, id); err != nil {
+		if _, err := tx.Exec(ctx, s.schema.SQL(`INSERT INTO {schema}.embedding_build(scope,generation_id,through_offset) VALUES($1,$2::uuid,$3)`), scope, id, through); err != nil {
 			return err
 		}
 		table := pgx.Identifier{s.schema.String(), embeddingPartitionName(id)}.Sanitize()

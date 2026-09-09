@@ -101,7 +101,7 @@ func TestEmbeddingAllocationFailureIsAtomicAtEveryStorageBoundary(t *testing.T) 
 	store := pg.NewMessageEmbeddingStore(owner, schema)
 	actor := uuid.NewString()
 	model := pg.EmbeddingModel{Name: "test", Revision: "v1", EndpointHash: strings.Repeat("a", 64), Dimensions: 3}
-	for _, point := range []string{"pg_advisory_xact_lock", "g.operation_key=$2", "suspended_at IS NULL", "state<>'discarded'", "coalesce(max(log_offset)", "embedding_generation\n", "embedding_build(scope,generation_id)", "CREATE TABLE", "CREATE INDEX", "g.generation_id=$2"} {
+	for _, point := range []string{"pg_advisory_xact_lock", "g.operation_key=$2", "suspended_at IS NULL", "state<>'discarded'", "coalesce(max(log_offset)", "embedding_generation\n", "embedding_build(scope,generation_id,", "CREATE TABLE", "CREATE INDEX", "g.generation_id=$2"} {
 		t.Run(point, func(t *testing.T) {
 			key := uuid.NewString()
 			fault := &embeddingQueryFault{match: point}

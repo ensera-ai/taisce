@@ -36,6 +36,10 @@ type EmbeddingBuildPage struct {
 // BuildPage keeps a session lock across the provider call but no database transaction. A persisted
 // lease fences a disconnected worker: holding an old result never grants permission to publish it.
 func (s *MessageEmbeddingStore) BuildPage(ctx context.Context, scope, id, actor string, model EmbeddingModel, limit int, embed EmbeddingBatch) (EmbeddingBuildPage, error) {
+	return s.buildPage(ctx, scope, id, actor, model, limit, embed, false)
+}
+
+func (s *MessageEmbeddingStore) buildPage(ctx context.Context, scope, id, actor string, model EmbeddingModel, limit int, embed EmbeddingBatch, activeOnly bool) (EmbeddingBuildPage, error) {
 	var out EmbeddingBuildPage
 	if err := validEmbeddingIDs(scope, id, actor); err != nil {
 		return out, err
@@ -81,7 +85,7 @@ func (s *MessageEmbeddingStore) BuildPage(ctx context.Context, scope, id, actor 
 		if e != nil {
 			return e
 		}
-		if generation.Model.Identity() != model.Identity() {
+		if generation.Model.Identity() != model.Identity() || (activeOnly && !generation.Active) {
 			return ErrEmbeddingConflict
 		}
 		if generation.State == "ready" {
@@ -120,6 +124,20 @@ func (s *MessageEmbeddingStore) BuildPage(ctx context.Context, scope, id, actor 
 		return EmbeddingBuildPage{}, err
 	}
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		// Serialize publication against operator activation. Runtime workers cannot lock the
+		// read-only activation row FOR SHARE, so use the same policy lock as the operator paths.
+		if activeOnly {
+			if err := embeddingProjectLock(ctx, tx, s.schema, scope); err != nil {
+				return err
+			}
+			var active bool
+			if err := tx.QueryRow(ctx, s.schema.SQL(`SELECT EXISTS(SELECT 1 FROM {schema}.embedding_active WHERE scope=$1 AND generation_id=$2::uuid)`), scope, id).Scan(&active); err != nil {
+				return err
+			}
+			if !active {
+				return ErrEmbeddingConflict
+			}
+		}
 		var state, currentLease string
 		var after ChunkRecoveryCursor
 		if err := tx.QueryRow(ctx, s.schema.SQL(`SELECT state,coalesce(lease_id::text,''),after_offset,after_ordinal FROM {schema}.embedding_build WHERE scope=$1 AND generation_id=$2::uuid FOR UPDATE`), scope, id).Scan(&state, &currentLease, &after.Offset, &after.Ordinal); err != nil {
@@ -142,7 +160,7 @@ func (s *MessageEmbeddingStore) BuildPage(ctx context.Context, scope, id, actor 
 		if complete {
 			nextState = "ready"
 		}
-		if _, err := tx.Exec(ctx, s.schema.SQL(`UPDATE {schema}.embedding_build SET after_offset=$3,after_ordinal=$4,state=$5,examined=examined+$6,stored=stored+$7,lease_id=NULL,updated_at=clock_timestamp() WHERE scope=$1 AND generation_id=$2::uuid`), scope, id, out.After.Offset, out.After.Ordinal, nextState, out.Examined, out.Stored); err != nil {
+		if _, err := tx.Exec(ctx, s.schema.SQL(`UPDATE {schema}.embedding_build SET after_offset=$3,after_ordinal=$4,state=$5,examined=examined+$6,stored=stored+$7,lease_id=NULL,covered_through_offset=CASE WHEN $5='ready' THEN through_offset ELSE covered_through_offset END,updated_at=clock_timestamp() WHERE scope=$1 AND generation_id=$2::uuid`), scope, id, out.After.Offset, out.After.Ordinal, nextState, out.Examined, out.Stored); err != nil {
 			return err
 		}
 		return embeddingAudit(ctx, tx, s.schema, scope, actor, "embedding.build", int64(out.Stored))
@@ -415,7 +433,7 @@ func (s *MessageEmbeddingStore) Repair(ctx context.Context, scope, id, actor str
 		if g.State == "discarded" {
 			return ErrEmbeddingConflict
 		}
-		if _, err := tx.Exec(ctx, s.schema.SQL(`UPDATE {schema}.embedding_build SET state='building',after_offset=-1,after_ordinal=-1,examined=0,stored=0,lease_id=NULL,updated_at=clock_timestamp() WHERE scope=$1 AND generation_id=$2::uuid`), scope, id); err != nil {
+		if _, err := tx.Exec(ctx, s.schema.SQL(`UPDATE {schema}.embedding_build SET state='building',after_offset=-1,after_ordinal=-1,examined=0,stored=0,lease_id=NULL,covered_through_offset=-1,updated_at=clock_timestamp() WHERE scope=$1 AND generation_id=$2::uuid`), scope, id); err != nil {
 			return err
 		}
 		return embeddingAudit(ctx, tx, s.schema, scope, actor, "embedding.repair", 1)
