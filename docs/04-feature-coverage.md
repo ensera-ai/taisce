@@ -29,6 +29,7 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 
 | Work | Delivery and evidence | Remaining scope |
 |---|---|---|
+| Disposable GPU qualification [#138](https://github.com/althunibat/taisce/issues/138) | D109 deploys PostgreSQL, API/worker and pinned vLLM models through Compose on a fresh eight-A100 node. The deployed lifecycle and all seven gates pass; coverage is 92.0%. Logical wipe and provider termination were verified. | Workload-specific quality, capacity and failover acceptance remain separate; OpenRouter verification is still incomplete. |
 | Saved message references [#136](https://github.com/althunibat/taisce/issues/136) | D108 adds digest-bound UTF-8 source windows, a unique authoritative UUID index, read-only access and content-free audit. HTTP/PostgreSQL tests cover generation-independent lookup, source changes, projection loss and deletion. | Full regression passes at 91.9% coverage, targeted race checks and configured-provider regression pass. Document segmentation and ingestion remain #91. |
 | Incremental message embeddings [#134](https://github.com/althunibat/taisce/issues/134) | D107 adds bounded catch-up and an explicit runtime-role watch process, separates target from completed coverage, and fences publication against activation and source deletion. PostgreSQL/HTTP/CLI journey checks pass. | Full regression passes at 91.9% coverage, targeted race checks pass, and the local 2560-dimensional provider serves newly indexed evidence. Deployment orchestration and entity/report targets remain separate scope. |
 | Authenticated passage search [#133](https://github.com/althunibat/taisce/issues/133) | D106 exposes bounded source evidence through project credentials, explicit model binding, read-only authorization and content-free audit. PostgreSQL/HTTP tests cover erasure and generation changes during provider calls. | Local provider exact/ANN HTTP compatibility passes at 2560 dimensions; the full suite passes at 91.9% coverage. Incremental indexing is tracked in #134; general source lookup and semantic/capacity qualification remain separate scope. |
@@ -99,7 +100,10 @@ Inference profiles are tracked separately. The full local inference suite at `d9
 provider with its actual 2560-dimensional output, including exact and approximate retrieval. The targeted description/thematic/speaker rerun
 against `17ac077` passed in 462.482 seconds. Known semantic separation limitations remain explicit
 in the tests. OpenRouter stopped on upstream HTTP 429; a later bounded retry was also rate-limited.
-Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist configuration.
+Its verification is incomplete. The disposable eight-A100 GPU profile now passes the full inference suite and persisted
+embedding/passage journeys with both vLLM models deployed through Compose (#138, D109).
+Its complete regression passes at 92.0% coverage; see `docs/23-gpu-qualification.md`. A running
+GPU endpoint is provisioned for each run and terminated afterward, rather than kept as a prerequisite.
 
 Operator observability (#94) now includes bounded readiness, worker progress, local probes and
 content-free operator aggregates. Compose consumes the probe contract; Helm integration awaits #76.

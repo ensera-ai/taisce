@@ -22,3 +22,6 @@ coverage.out
 
 # Local overrides for the compose stack.
 .env.local
+# Disposable GPU qualification credentials and evidence.
+/qualification-tls/
+/results/

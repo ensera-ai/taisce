@@ -6,3 +6,6 @@
 coverage.out
 *.test
 docs/
+# Disposable GPU qualification secrets and generated evidence never enter an image layer.
+qualification-tls/
+results/

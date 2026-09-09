@@ -1,0 +1,114 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+# Disposable qualification override. Run only on an owned eight-A100 test node.
+# Models and application traffic stay on the Compose network; host access is loopback-only.
+services:
+  generation:
+    image: vllm/vllm-openai:v0.28.0
+    command:
+      - Qwen/Qwen3.6-35B-A3B
+      - --revision=995ad96eacd98c81ed38be0c5b274b04031597b0
+      - --dtype=bfloat16
+      - --tensor-parallel-size=4
+      - --max-model-len=32768
+      - --max-num-seqs=8
+      - --gpu-memory-utilization=0.85
+      - --reasoning-parser=qwen3
+      - --default-chat-template-kwargs={"enable_thinking":false}
+      - --ssl-keyfile=/tls/server.key
+      - --ssl-certfile=/tls/server.crt
+    shm_size: 16g
+    environment:
+      HF_HOME: /models
+    volumes: ["gpu-models:/models", "./qualification-tls:/tls:ro"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0", "1", "2", "3"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8000/health',context=ssl.create_default_context(cafile='/tls/ca.crt'),timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 120
+      start_period: 20m
+  embedding:
+    image: vllm/vllm-openai:v0.28.0
+    command:
+      - Qwen/Qwen3-Embedding-4B
+      - --revision=5cf2132abc99cad020ac570b19d031efec650f2b
+      - --runner=pooling
+      - --dtype=bfloat16
+      - --max-model-len=8192
+      - --gpu-memory-utilization=0.5
+      - --ssl-keyfile=/tls/server.key
+      - --ssl-certfile=/tls/server.crt
+    shm_size: 4g
+    environment:
+      HF_HOME: /models
+    volumes: ["gpu-models:/models", "./qualification-tls:/tls:ro"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["4"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8000/health',context=ssl.create_default_context(cafile='/tls/ca.crt'),timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 120
+      start_period: 20m
+  postgres:
+    shm_size: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d taisce"]
+  # Integration fixtures deliberately alter cluster-wide roles. A second cluster keeps those
+  # tests from changing credentials beneath the deployed API and worker.
+  test-postgres:
+    build: ./deploy/postgres
+    shm_size: 2g
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: taisce
+    volumes: ["gpu-test-postgres:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d taisce"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api:
+    volumes: ["./qualification-tls/ca.crt:/tls/ca.crt:ro"]
+    environment:
+      SSL_CERT_FILE: /tls/ca.crt
+      TAISCE_REQUIRE_FORMATION: "true"
+      TAISCE_INFERENCE_EMBEDDING_REVISION: 5cf2132abc99cad020ac570b19d031efec650f2b
+  worker:
+    volumes: ["./qualification-tls/ca.crt:/tls/ca.crt:ro"]
+    environment:
+      SSL_CERT_FILE: /tls/ca.crt
+  test:
+    image: golang:1.27.1-bookworm
+    profiles: [qualification]
+    working_dir: /src
+    volumes:
+      - .:/src
+      - gpu-go-cache:/go
+      - ./qualification-tls/ca.crt:/tls/ca.crt:ro
+    environment:
+      SSL_CERT_FILE: /tls/ca.crt
+      TAISCE_TEST_DSN: postgres://postgres:${POSTGRES_PASSWORD:?required}@test-postgres:5432/taisce?sslmode=disable
+      TAISCE_INFERENCE_ENDPOINT: https://generation:8000/v1
+      TAISCE_INFERENCE_EXTRACTOR_MODEL: Qwen/Qwen3.6-35B-A3B
+      TAISCE_INFERENCE_EMBEDDING_ENDPOINT: https://embedding:8000/v1
+      TAISCE_INFERENCE_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-4B
+      TAISCE_INFERENCE_ALLOWLIST: generation:8000,embedding:8000
+      GOMAXPROCS: "16"
+    command: [bash, deploy/gpu/tests.sh]
+volumes:
+  gpu-models:
+  gpu-go-cache:
+  gpu-test-postgres:

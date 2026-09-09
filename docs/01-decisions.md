@@ -3946,3 +3946,42 @@ coverage against the unchanged 91.6% floor. Targeted HTTP/PostgreSQL race checks
 source windows, source-reference identity, authorization and audit. The configured local-provider
 passage regression passes at 2560 dimensions. Vet, contract and license checks pass. These establish
 correctness and model compatibility, not production latency or scaling.
+
+## D109 — GPU qualification owns provisioning, models and teardown
+
+**Decision.** A GPU qualification run is a disposable deployment lifecycle: create an explicitly
+selected eight-A100 80-GB node, deploy the application and its vLLM generation/embedding services
+with Docker Compose, run both deployed journeys and repository tests, retain sanitized evidence,
+remove the run's data and resources, terminate the instance, and verify termination. A successful
+test without verified teardown is an incomplete run. A failed test still requires teardown.
+
+The operator-local controller retains the create operation and instance identity, uses a unique
+run name to reconcile ambiguous responses, caps the offered hourly price and requests a provider-side
+runtime limit. The provider key and SSH private key stay local; the remote stack receives fresh
+application/database credentials. Only the run's registered SSH key and owned instance are removed.
+A remote wipe watchdog is scheduled before the provider deadline. The provider runtime limit covers
+controller loss; it does not replace normal cleanup.
+
+The Compose override pins the vLLM version and both model revisions, captures the resolved image
+digest, and keeps model endpoints and PostgreSQL on the internal network. Native vLLM TLS uses
+a temporary CA trusted explicitly by the clients; plaintext admission is not widened. The CA signing
+key is removed after issuance, and TLS secrets are excluded from build contexts and Git. Integration
+fixtures use a separate PostgreSQL cluster because they alter cluster-wide roles. Generation uses four
+A100s with tensor parallelism and embeddings use one. This avoids the small KV-cache margin of
+placing the full BF16 generation weights on one 80-GB card. The remaining cards are unused in this
+functional run; eight rented cards do not imply eight-card utilization or a scaling result.
+
+**Alternatives and limits.** Models hosted on a developer laptop would leave the deployment path
+untested. Copying a developer's complete environment would disclose unrelated credentials. Leaving
+cleanup to a later manual step could continue billing after a failed test. Removing containers,
+volumes and files is a logical wipe; it cannot establish forensic overwrite of provider storage.
+This profile establishes functional compatibility, not agreed latency, throughput, availability or
+recovery targets. Removing the qualification override and scripts reverses this test infrastructure
+without changing the production memory schema or deployment defaults. Tracking: #138.
+
+**Verification.** The disposable eight-A100 run passed the deployed API/worker observation,
+formation, recall and erasure journey, all seven runner gates, and 92.0% cross-package coverage
+against the unchanged 91.6% floor. Initial qualification configuration failures were corrected and
+retained as evidence. See `docs/23-gpu-qualification.md` for model identities and lifecycle evidence.
+The remote logical wipe returned zero and provider termination was verified before closing the run.
+The ephemeral SSH key was removed; the account-level GPU credential remains only in the operator environment.
