@@ -83,7 +83,7 @@ SELECT * FROM (
       FROM terms t JOIN %s.legacy_entity e
         ON e.scope=ANY($1) AND e.normalized_aliases @> ARRAY[t.term]
        AND e.normalized_name<>t.term
- ) candidates LIMIT $4
+ ) candidates WHERE $3::text IS NULL LIMIT $4
 ) anchors ORDER BY length(term) DESC,canonical_name,entity_id`
 
 const relationAnchorSQL = `
@@ -99,7 +99,7 @@ SELECT * FROM (
         ON a.scope=ANY($1) AND a.normalized_name=t.term
       JOIN %s.entity e ON e.scope=a.scope AND e.entity_id=a.entity_id
        AND e.normalized_name<>t.term
- ) candidates LIMIT $4
+ ) candidates WHERE $3::text IS NULL LIMIT $4
 ) anchors ORDER BY length(term) DESC,canonical_name,entity_id`
 
 func TestAnchorLayoutOperatingEnvelope(t *testing.T) {
