@@ -133,13 +133,13 @@ func TestVectorLayoutOperatingEnvelope(t *testing.T) {
 	layouts := []string{"ordinary", "generation", "hash"}
 	measurements := make([]vectorLayoutMeasurement, 0, len(layouts))
 	for _, layout := range layouts {
-		measurement, err := qualifyVectorLayout(ctx, pool, quotedSchema, layout, projects)
+		measurement, err := qualifyVectorLayout(ctx, pool, schema, layout, projects)
 		if err != nil {
 			t.Fatalf("%s layout: %v", layout, err)
 		}
 		measurements = append(measurements, measurement)
 	}
-	catalog, err := qualifyVectorLayoutCatalog(ctx, pool, quotedSchema)
+	catalog, err := qualifyVectorLayoutCatalog(ctx, pool, schema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,6 +251,10 @@ func qualifyVectorLayout(ctx context.Context, pool *pgxpool.Pool, schema, layout
 	if err != nil {
 		return measurement, err
 	}
+	if measurement.Relations == 0 || measurement.Bytes == 0 {
+		return measurement, fmt.Errorf("storage measurement is empty: relations=%d bytes=%d",
+			measurement.Relations, measurement.Bytes)
+	}
 	measurement.ExactLatency, measurement.ANN, err = measureVectorLayoutQueries(ctx, pool, schema, layout, projects)
 	if err != nil {
 		return measurement, err
@@ -348,7 +352,7 @@ objects AS (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnames
 tables AS (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
  WHERE n.nspname=$1 AND c.relkind IN ('p','r')
    AND (c.relname=$2 OR c.relname LIKE $2||'\_%' ESCAPE '\'))
-SELECT (SELECT count(*)-1 FROM tree),(SELECT count(*) FROM objects),
+SELECT greatest((SELECT count(*)-1 FROM tree),0),(SELECT count(*) FROM objects),
  coalesce((SELECT sum(pg_total_relation_size(oid)) FROM tables),0)`, schema, layout).Scan(&partitions, &relations, &bytes)
 	return partitions, relations, bytes, err
 }
@@ -662,6 +666,10 @@ func qualifyVectorLayoutCatalog(ctx context.Context, pool *pgxpool.Pool, schema 
  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
  WHERE n.nspname=$1 AND c.relname LIKE 'catalog_generation%'`, schema).Scan(&measurement.Relations, &measurement.Bytes); err != nil {
 			return nil, err
+		}
+		if measurement.Relations == 0 || measurement.Bytes == 0 {
+			return nil, fmt.Errorf("catalog measurement is empty at %d generations: relations=%d bytes=%d",
+				count, measurement.Relations, measurement.Bytes)
 		}
 		planning := make([]time.Duration, 0, 9)
 		for iteration := 0; iteration < 9; iteration++ {

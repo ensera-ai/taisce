@@ -12,6 +12,7 @@ services:
       - --tensor-parallel-size=1
       - --pipeline-parallel-size=7
       - --distributed-executor-backend=mp
+      - --structured-outputs-config.backend=guidance
       - --max-model-len=32768
       - --max-num-seqs=8
       - --gpu-memory-utilization=0.85

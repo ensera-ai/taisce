@@ -17,6 +17,9 @@ Qwen3.6 has 16 attention heads and 2 key/value heads, so a seven-way tensor spli
 vLLM's uneven pipeline split assigns the complete seven-card generation allocation without changing
 model precision. Allocation alone is not evidence of sustained utilization or a scaling result; the
 captured per-card measurements describe the exercised workload.
+The generation server selects the Guidance structured-output backend because vLLM's xgrammar backend
+can desynchronize its finite-state matcher under pipeline parallelism and return HTTP 500 for a valid
+schema-constrained request. The live structured-output gates qualify this compatibility choice.
 The vLLM image version is fixed and its resolved digest is captured in the results.
 
 The qualification test PostgreSQL container is constrained to the documented eight-vCPU, 32-GiB
@@ -39,14 +42,14 @@ scheduled ahead of the provider deadline, so losing the local controller does no
 test data until termination. Never delete unrelated instances
 or reuse an existing application environment for this run.
 
-On a prepared disposable node, install the source snapshot at `/root/taisce-qualification`, copy
-`deploy/gpu/wipe.sh` to `/root/taisce-qualification/wipe.sh`, then run:
+On a prepared disposable node, install the source snapshot at `/root/taisce-qualification`, then run:
 
 ```sh
 bash deploy/gpu/run.sh
 ```
 
-The runner verifies eight visible A100s and Docker, pulls the model/test images, waits for both
+The runner first installs its root-level cleanup entry point, then verifies eight visible A100s and
+Docker, pulls the model/test images, waits for both
 models and PostgreSQL, and starts the API and worker. The deployed journey checks observation,
 actual asynchronous formation, recall, erasure and empty post-erasure recall. The test container
 runs the complete Go regression suite, coverage gate, vet, live inference corpus, persisted

@@ -6,6 +6,7 @@
 set -euo pipefail
 cd /root/taisce-qualification
 umask 077
+install -m 700 deploy/gpu/wipe.sh wipe.sh
 mkdir -p results
 trap 'status=$?; printf "%s\n" "$status" > results/run-exit; exit "$status"' EXIT
 echo 'Checking node hardware'
@@ -67,12 +68,14 @@ while true; do
 done ) > results/gpu-stats.csv 2>&1 &
 gpu_monitor_pid=$!
 set +e
-timeout 7200 "${dc[@]}" --profile qualification run --rm test > results/test-runner.log 2>&1
+timeout 7200 "${dc[@]}" --profile qualification run --rm -T test > results/test-runner.log 2>&1
 result=$?
 kill "$container_monitor_pid" "$gpu_monitor_pid" 2>/dev/null
 wait "$container_monitor_pid" 2>/dev/null
 wait "$gpu_monitor_pid" 2>/dev/null
 set -e
+"${dc[@]}" logs --no-color generation > results/generation.log 2>&1 || true
+"${dc[@]}" logs --no-color embedding > results/embedding.log 2>&1 || true
 "${dc[@]}" ps --format json > results/services-after.json
 nvidia-smi --query-gpu=name,memory.used,utilization.gpu --format=csv > results/gpus-after.csv
 exit "$result"
