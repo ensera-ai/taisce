@@ -4112,3 +4112,34 @@ in #19/#101/#103.
 passage 0.8180, entity 0.6017 and report 0.6662; the alias question scores 0.7119, 0.7941 and 0.6680;
 the aggregate question scores 0.5210, 0.5228 and 0.6154. All three intended surfaces win, and either
 substitution fails its fixture.
+
+## D114 — Report quality and ANN fidelity are measured against exact truth
+
+**Decision.** `report-themes-v1` is the named qualification corpus for the first community-report
+retrieval measurement. It contains 1,152 reports: 24 themes with 48 independently identified
+variants per theme. Each theme has one natural-language question. Exact topic recall at rank 1
+measures whether the intended report theme wins. Filtered HNSW recall at rank 10 measures overlap
+with the exact cosine top ten at explicit candidate bounds 32, 64 and 128. Query vectors, generation
+identity, project filtering and stored vectors use the production provider and PostgreSQL paths.
+
+The run fixes the corpus, model revision, vector width, cache state, page size, concurrency and
+warm-up count before provisioning. It records observed build time and p50/p95/p99 latency without
+inventing a target after seeing the result. Semantic topic recall and ANN fidelity remain separate
+metrics: a faithful approximate index cannot rescue a semantically poor representation.
+
+**Alternatives and limits.** Synthetic vectors test index plumbing but cannot establish semantic
+retrieval. Comparing HNSW to theme labels alone can hide divergence from exact ordering, so every
+ANN result is compared to the exact top ten. This first corpus is balanced English aggregate prose,
+uses one project and one sequential client, and fits in memory. It does not establish multilingual
+quality, concurrent throughput, saturation, large-corpus scaling or a production service objective.
+Those remain controlled workload work under #101/#103.
+
+**Verification.** On a fresh eight-A100 GPU.ai VM, pinned
+`Qwen/Qwen3-Embedding-4B` revision `5cf2132abc99cad020ac570b19d031efec650f2b` produced 2,560
+dimensional vectors. Exact topic recall@1 was 1.0 (24/24), and ANN recall@10 versus exact was 1.0 at
+all three candidate bounds. Building and activating 1,152 vectors took 13.325 seconds. Exact warm
+sequential latency was 45.492/47.234/52.153 ms p50/p95/p99; ANN latency ranged from 95.857 to
+102.018 ms across the measured bounds. All eight regression/provider/race gates passed at the
+unchanged 91.6% coverage floor. The remote logical wipe returned zero, provider termination was
+verified, and a fresh paginated inventory contained zero active instances. Full evidence and method
+are in `docs/26-report-quality-qualification.md`.

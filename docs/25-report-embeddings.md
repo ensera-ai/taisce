@@ -36,3 +36,18 @@ least the result limit. The HTTP equivalent is POST /v1/reports/candidates; it a
 project credentials and returns bounded report previews. Similarity is a retrieval score, not a claim
 that a report is true or complete. Follow the report's provenance to source evidence before presenting
 an attributed answer.
+
+## Verification
+
+PostgreSQL tests cover deterministic bounded input, exact and optional ANN results, multi-source
+ownership, export, erasure, retention, repair, finite-snapshot invalidation, model cutover and stale
+model refusal. HTTP tests cover authentication, read-only access, input bounds and the generated
+contract. CLI tests cover generation management without printing provider input. The configured
+provider profile checks its actual vector width separately from quality claims.
+
+The named `report-themes-v1` qualification exercised 1,152 reports across 24 topics against the
+pinned `Qwen/Qwen3-Embedding-4B` revision on disposable GPU.ai infrastructure. Exact search put the
+correct topic first for all 24 questions. Filtered HNSW search reproduced every member of the exact
+top ten at candidate bounds 32, 64 and 128. The measured warm, sequential query latencies and build
+time are recorded in `docs/26-report-quality-qualification.md`; they describe this corpus and host
+rather than a production capacity target.
