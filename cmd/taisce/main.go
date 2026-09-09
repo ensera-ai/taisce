@@ -97,6 +97,10 @@ func main() {
 	defer stop()
 
 	if err := dispatch(ctx, log, os.Args[1:]); err != nil {
+		if len(os.Args) > 1 && os.Args[1] != "serve" && fancyOutput(os.Stderr) {
+			_, _ = fmt.Fprint(os.Stderr, renderFailure(currentTheme(), err))
+			os.Exit(1)
+		}
 		log.Error("taisce failed", "error", err)
 		os.Exit(1)
 	}

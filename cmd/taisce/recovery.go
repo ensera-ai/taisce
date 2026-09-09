@@ -57,6 +57,8 @@ func recoveryCommand(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	principal := uuid.NewString()
+	stopActivity := startCLIActivity(ctx, "recovering retained facts")
+	defer stopActivity()
 	page, err := pg.NewFactStore(pool).RecoverFacts(ctx, schema, *scope, *source, *after, principal, *limit)
 	if err != nil {
 		return err

@@ -99,7 +99,11 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 		fmt.Println(version)
 		return nil
 	case "help", "-h", "--help":
-		fmt.Print(usage)
+		if fancyOutput(os.Stdout) {
+			fmt.Print(renderHelp(currentTheme()))
+		} else {
+			fmt.Print(usage)
+		}
 		return nil
 	default:
 		// The error alone, not the usage text. A wrong command is a message on stderr; printing a

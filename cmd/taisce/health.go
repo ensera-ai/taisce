@@ -79,6 +79,10 @@ func healthCommand(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if fancyOutput(out) {
+		_, err = io.WriteString(out, renderHealth(currentTheme(), status, inferenceIsConfigured()))
+		return err
+	}
 	return json.NewEncoder(out).Encode(status)
 }
 

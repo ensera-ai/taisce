@@ -4027,3 +4027,31 @@ unchanged 91.6% floor; focused PostgreSQL, HTTP and CLI race checks pass. These 
 and concurrency correctness. The configured local provider persists and retrieves entity candidates
 at its actual 2560 dimensions. These results do not establish semantic quality, latency, throughput
 or production capacity.
+
+## D111 — Terminal graphics are a view over stable command results
+
+**Decision.** Interactive help, operator health, project rebuild status and command failures use a
+compact Taisce terminal vocabulary: amber identity, blue navigation, health-only green/red, a memory
+path motif and bordered operational panels. The layout collapses by width and has a Unicode-aware
+ASCII fallback. Long project rebuild and fact recovery operations use a ten-Hz indeterminate spinner
+with elapsed time on stderr because their total work may not yet be known. Final measured progress is
+derived only from the durable result.
+
+Redirected stdout and `TAISCE_OUTPUT=json` preserve the existing JSON contracts exactly. ANSI color is
+limited to an interactive terminal and respects `NO_COLOR`; `TERM=dumb` selects the non-decorative
+path. Dynamic values have control characters removed and are clipped by terminal display width.
+Decorative status contains only already-authorized aggregate or operation metadata. It never renders
+credentials, source memory, provider replies or raw provider/database errors.
+
+**Alternatives and limits.** A full-screen TUI would add state, resize and terminal-restoration risk to
+one-shot operator commands. Replacing JSON with a human table would break scripts. The chosen renderer
+is dependency-free and keeps presentation at the process edge. Aggregate health cannot show project
+names, and configured inference is not a provider-health assertion. Details and controls are in
+`docs/24-cli-presentation.md`. Tracking: #126.
+
+**Verification.** Focused output tests cover wide/color, narrow/ASCII, healthy/degraded, active,
+completed, cancelled and failure rendering; control-sequence removal; wide and combining rune widths;
+and explicit fancy/JSON selection. The existing command suite proves buffered output remains JSON.
+The full repository suite passes at 91.7% cross-package coverage against the unchanged 91.6% floor;
+the CLI package passes under the race detector. Representative 48- and 110-column renders were
+reviewed without color, including the ASCII fallback.

@@ -50,6 +50,11 @@ func projectRebuildCommand(ctx context.Context, args []string, out io.Writer) er
 	}
 	jobs := pg.NewRebuildJobStore(pool)
 	var job pg.RebuildJob
+	stopActivity := func() {}
+	if args[0] == "project" {
+		stopActivity = startCLIActivity(ctx, "rebuilding retained sources")
+	}
+	defer stopActivity()
 	switch args[0] {
 	case "status":
 		job, err = jobs.Status(ctx, schema, *scope, *key)
@@ -69,6 +74,10 @@ func projectRebuildCommand(ctx context.Context, args []string, out io.Writer) er
 		job, err = formation.NewProjectRebuilder(rebuilder, jobs).RunPage(ctx, schema, *scope, *key, uuid.NewString(), *limit)
 	}
 	if err != nil {
+		return err
+	}
+	if fancyOutput(out) {
+		_, err = io.WriteString(out, renderRebuild(currentTheme(), job))
 		return err
 	}
 	return json.NewEncoder(out).Encode(job)
