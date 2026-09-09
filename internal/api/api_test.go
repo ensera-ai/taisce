@@ -833,6 +833,7 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		domain.AuditFreshness:       {nil, http.StatusOK},
 		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
 		domain.AuditEmbeddingSearch: {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
+		domain.AuditMessageGet:      {map[string]any{}, http.StatusOK},
 		domain.AuditExport:          {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
 		domain.AuditErase: {map[string]any{
 			"data_subject_id": "subject-1", "reason": "the ledger test",
@@ -881,6 +882,8 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	run(domain.AuditFreshness)
 	h.form(t)
 	run(domain.AuditRecall)
+	exercise[domain.AuditMessageGet].body["chunk_id"] = sourceChunkForInspection(t, h)
+	run(domain.AuditMessageGet)
 	attachPassages(t, h, nil).activate(t, "p1", "v1")
 	run(domain.AuditEmbeddingSearch)
 	exercise[domain.AuditEntityGet].body["id"] = entityIDForInspection(t, h)

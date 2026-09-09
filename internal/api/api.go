@@ -166,6 +166,7 @@ type route struct {
 }
 
 var operations = []route{
+	{Operation{domain.AuditMessageGet, http.MethodPost, "/messages/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getMessage }, messageRequest{}, pg.SourceMessageWindow{}},
 	{Operation{domain.AuditEmbeddingSearch, http.MethodPost, "/passages/search", http.StatusOK}, func(s *Server) grantedHandler { return s.searchPassages }, passageRequest{}, passage.Page{}},
 	{Operation{domain.AuditEntityList, http.MethodPost, "/entities/list", http.StatusOK}, func(s *Server) grantedHandler { return s.listEntities }, entityListRequest{}, pg.EntityPage{}},
 	{Operation{domain.AuditEntityGet, http.MethodPost, "/entities/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getEntity }, entityGetRequest{}, pg.EntityIdentity{}},
@@ -897,6 +898,8 @@ const (
 	codeInvalidRecordPage     errorCode = "invalid_record_page"
 	codeInvalidEntityPage     errorCode = "invalid_entity_page"
 	codeInvalidPassageQuery   errorCode = "invalid_passage_query"
+	codeInvalidMessageWindow  errorCode = "invalid_message_window"
+	codeSourceChanged         errorCode = "source_changed"
 	codePassageUnavailable    errorCode = "passage_unavailable"
 	codeInvalidRecallControls errorCode = "invalid_recall_controls"
 	codeInvalidRecordMutation errorCode = "invalid_record_mutation"
@@ -922,6 +925,7 @@ const (
 // change, so it would be wrong before it was useful. The honest statement is that any operation can
 // return any of these, and that is what the contract says.
 var errorCodes = []errorCode{
+	codeInvalidMessageWindow, codeSourceChanged,
 	codeInvalidPassageQuery, codePassageUnavailable,
 	codeInvalidEntityPage,
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,

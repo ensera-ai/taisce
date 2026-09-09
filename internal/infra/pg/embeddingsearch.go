@@ -34,6 +34,7 @@ type MessageMatch struct {
 	MessageBytes    int       `json:"message_bytes"`
 	PreviewComplete bool      `json:"preview_complete"`
 	PreviewByteEnd  int       `json:"preview_byte_end"`
+	ContentDigest   string    `json:"content_digest"`
 }
 
 type MessageSearchResult struct {
@@ -84,12 +85,12 @@ func (s *MessageEmbeddingStore) Search(ctx context.Context, scope, actor string,
 		}
 		query := `WITH candidates AS MATERIALIZED (` + candidates + `), eligible AS MATERIALIZED (
    SELECT v.chunk_id,o.observation_id,m.ordinal,m.role,substring(m.content FOR 512) AS preview,v.embedding,
-     m.occurred_at,octet_length(m.content) AS message_bytes,char_length(m.content)<=512 AS preview_complete
+     m.occurred_at,octet_length(m.content) AS message_bytes,char_length(m.content)<=512 AS preview_complete,encode(v.input_digest,'hex') AS content_digest
    FROM candidates v JOIN {schema}.observation o ON o.scope=v.scope AND o.observation_id=v.source_observation_id
    JOIN {schema}.turn_message m ON m.observation_id=o.observation_id AND m.chunk_id=v.chunk_id
    WHERE ($4::text='' OR o.data_subject_id=$4) AND ($5::text='' OR m.role=$5)
    AND v.input_digest=sha256(convert_to(m.content,'UTF8')))
-   SELECT chunk_id::text,observation_id::text,ordinal,role,preview,1-(embedding <=> $3::vector),occurred_at,message_bytes,preview_complete
+   SELECT chunk_id::text,observation_id::text,ordinal,role,preview,1-(embedding <=> $3::vector),occurred_at,message_bytes,preview_complete,content_digest
    FROM eligible ORDER BY embedding <=> $3::vector,chunk_id LIMIT $6`
 		args := []any{scope, generation.ID, string(encoded), options.Subject, options.Role, options.Limit}
 		if options.Candidates > 0 {
@@ -101,7 +102,7 @@ func (s *MessageEmbeddingStore) Search(ctx context.Context, scope, actor string,
 		}
 		for rows.Next() {
 			var match MessageMatch
-			if err := rows.Scan(&match.ChunkID, &match.SourceID, &match.Ordinal, &match.Role, &match.Preview, &match.Similarity, &match.OccurredAt, &match.MessageBytes, &match.PreviewComplete); err != nil {
+			if err := rows.Scan(&match.ChunkID, &match.SourceID, &match.Ordinal, &match.Role, &match.Preview, &match.Similarity, &match.OccurredAt, &match.MessageBytes, &match.PreviewComplete, &match.ContentDigest); err != nil {
 				rows.Close()
 				return err
 			}

@@ -3901,3 +3901,48 @@ The local provider passes authenticated incremental retrieval with 2560-dimensio
 uncached PostgreSQL suite passes at 91.9% cross-package coverage against the unchanged 91.6% floor.
 PostgreSQL, HTTP and CLI race checks pass, including allocation rollback after updating the SQL fault
 injector to recognize the added target column. These are correctness results, not capacity measurements.
+
+## D108 — Saved message references resolve through digest-bound UTF-8 windows
+
+**Decision.** `POST /v1/messages/get` reads the authoritative message named by a chunk UUID under the
+credential's project. It is a read-only operation with the existing credential audit policy and shared
+HTTP admission/deadline. It uses the provenance store, with no provider call, fact requirement or active
+embedding dependency. A unique index on the authoritative message UUID makes the reference unambiguous
+and gives its new reader a direct access path. Losing a derived chunk does not change the source id.
+
+The request supplies `chunk_id`, optional zero-based `byte_start`, `byte_limit` (4–4096, default 4096),
+and `expected_digest`. The response names the observation, message ordinal, role and occurrence time,
+returns at most the requested UTF-8 bytes, and includes total message bytes, exclusive window end,
+SHA-256 content digest and optional next byte offset. `complete` means the window contains the entire
+message from byte zero; a missing next offset means it has reached the end. The window ends on a
+code-point boundary; a requested start within a code point is refused. These are byte offsets, not
+grapheme, character or token counts.
+
+Any nonzero start requires the digest from a previous window or passage preview. A changed source
+returns 409 rather than silently assembling pages from different versions. Search results include the
+same digest for direct preview continuation. Digest verification and the byte window come from one
+PostgreSQL statement snapshot. Source messages remain limited to the 64-KiB ingestion contract even
+if privileged direct storage writes bypass ingestion validation; oversized storage refuses the read
+before returning content. SQL bounds the returned slice, so the API never loads an unbounded message.
+
+**Boundary and limits.** Authorization is project-wide, not a data-subject grant. Foreign, erased and
+missing source references all return the same 404. Retention and erasure remove the authoritative
+source; subsequent reads cannot resolve it. A response already read or delivered cannot be recalled
+by a later deletion. Audit records the credential, operation, project, outcome and count, never the
+source UUID, digest, text or subject. Audit remains best-effort as defined for other application reads.
+A digest binds content consistency; it is neither a signature nor an authorization credential.
+
+**Alternatives and reversal.** Repeating semantic search to resolve a saved reference makes identity
+lookup depend on model availability and ranking. Returning an unbounded full message would lose the
+read-path bound. An unversioned byte offset could silently combine different content after privileged
+source repair. UTF-8 code-point boundaries preserve exact reconstructability; token offsets would
+couple source identity to a caller's tokenizer. The index adds write/storage cost for a real reader;
+its fixture establishes index eligibility, not a latency or corpus-scaling claim. Removing the route
+and its dedicated index reverses the addition without rewriting source text; existing source UUIDs
+and projection recovery remain unchanged. General document segmentation remains #91.
+
+**Verification.** The full uncached PostgreSQL regression suite passes at 91.9% cross-package
+coverage against the unchanged 91.6% floor. Targeted HTTP/PostgreSQL race checks pass, including
+source windows, source-reference identity, authorization and audit. The configured local-provider
+passage regression passes at 2560 dimensions. Vet, contract and license checks pass. These establish
+correctness and model compatibility, not production latency or scaling.

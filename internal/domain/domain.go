@@ -911,6 +911,7 @@ const (
 	AuditRebuildStart      = "formation.rebuild.start"
 	AuditRebuildCancel     = "formation.rebuild.cancel"
 	AuditCitationResolve   = "citation.resolve"
+	AuditMessageGet        = "message.get"
 	AuditRecordList        = "record.list"
 	AuditEntityList        = "entity.list"
 	AuditEntityGet         = "entity.get"
@@ -945,7 +946,7 @@ func RecordableOperation(name string) bool {
 	switch name {
 	case AuditEmbeddingStart, AuditEmbeddingBuild, AuditEmbeddingActivate, AuditEmbeddingCancel, AuditEmbeddingPrune, AuditEmbeddingRepair, AuditEmbeddingSearch:
 		return true
-	case AuditEntityList, AuditEntityGet:
+	case AuditEntityList, AuditEntityGet, AuditMessageGet:
 		return true
 	case AuditRebuildStart, AuditRebuildCancel:
 		return true

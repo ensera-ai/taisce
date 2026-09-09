@@ -32,6 +32,7 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 
 | Operation | Method | Path | On success |
 |---|---|---|---|
+| `message.get` | POST | `/v1/messages/get` | 200 |
 | `embedding.search` | POST | `/v1/passages/search` | 200 |
 | `entity.list` | POST | `/v1/entities/list` | 200 |
 | `entity.get` | POST | `/v1/entities/get` | 200 |
@@ -57,6 +58,37 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
 
+## `message.get`
+
+POST `/v1/messages/get` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `chunk_id` | string |
+| `byte_start` | integer |
+| `byte_limit` | integer, optional |
+| `expected_digest` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `chunk_id` | string |
+| `source_id` | string |
+| `ordinal` | integer |
+| `role` | string |
+| `occurred_at` | timestamp (RFC 3339) |
+| `content_digest` | string |
+| `message_bytes` | integer |
+| `byte_start` | integer |
+| `byte_end` | integer |
+| `text` | string |
+| `complete` | boolean |
+| `next_byte_start` | integer, optional |
+
+
 ## `embedding.search`
 
 POST `/v1/passages/search` → 200
@@ -80,7 +112,7 @@ POST `/v1/passages/search` → 200
 | `covered_through_offset` | integer |
 | `build_state` | string |
 | `approximate` | boolean |
-| `passages` | array of {chunk_id: string, source_id: string, ordinal: integer, role: string, preview: string, similarity: number, occurred_at: timestamp (RFC 3339), message_bytes: integer, preview_complete: boolean, preview_byte_end: integer} |
+| `passages` | array of {chunk_id: string, source_id: string, ordinal: integer, role: string, preview: string, similarity: number, occurred_at: timestamp (RFC 3339), message_bytes: integer, preview_complete: boolean, preview_byte_end: integer, content_digest: string} |
 
 
 ## `entity.list`
@@ -576,6 +608,8 @@ Any operation may answer with any of these.
 
 | Code |
 |---|
+| `invalid_message_window` |
+| `source_changed` |
 | `invalid_passage_query` |
 | `passage_unavailable` |
 | `invalid_entity_page` |

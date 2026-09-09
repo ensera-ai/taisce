@@ -42,6 +42,7 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 	}
 	attachPassages(t, h, nil).activate(t, "p1", "v1")
 	bodies := map[string]map[string]any{
+		domain.AuditMessageGet:      {"chunk_id": sourceChunkForInspection(t, h)},
 		domain.AuditEmbeddingSearch: {"question": "Where does the user live?"},
 		domain.AuditEntityList:      {},
 		domain.AuditEntityGet:       {"id": entityIDForInspection(t, h)},

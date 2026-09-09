@@ -97,8 +97,9 @@ processed boundary. A partially processed range can already contribute passages 
 Each passage contains `chunk_id`, `source_id`, `ordinal`, `role`, `occurred_at`, `similarity`, `preview`,
 `message_bytes`, `preview_byte_end` and `preview_complete`. The source id identifies the observation;
 the chunk id identifies its message. These are source references, not asserted-fact citation ids.
-There is no general message-download endpoint implied by these references. Previews start at byte
-zero and include at most 512 Unicode characters; the exclusive end offset is in UTF-8 bytes.
+`POST /v1/messages/get` resolves these references directly; see the source lookup section below.
+Previews start at byte zero and include at most 512 Unicode characters; the exclusive end offset
+is in UTF-8 bytes. `content_digest` binds a preview to the exact source version for continuation.
 
 `limit` defaults to 10 and is bounded to 1–32. `candidates` defaults to zero (exact retrieval); a
 positive value, at least the limit and at most 1000, opts into approximate candidates with exact
@@ -136,3 +137,32 @@ Unchanged idle polls do not print repeatedly. `retrying` with offsets -1 means t
 verify progress; provider error bodies and source content are omitted. The original build boundary
 is retained as `initial_through_offset` in operator generation status. `repair` covers the current
 captured target and conservatively clears completed coverage until its scan finishes. See D107/#134.
+
+
+## Reading a saved source reference
+
+A project credential can resolve a message without an active embedding generation or a provider call:
+
+```http
+POST /v1/messages/get
+Authorization: Bearer <project-credential>
+Content-Type: application/json
+
+{"chunk_id":"<message-uuid>","byte_limit":4096}
+```
+
+The response contains source/chunk identity, ordinal, role, occurrence time, `content_digest`,
+`message_bytes`, `byte_start`, exclusive `byte_end`, `text`, `complete` and optional `next_byte_start`.
+`complete` means this window holds the whole message from byte zero. No next offset means the window
+has reached the end; it does not imply that an earlier prefix was included.
+
+To continue a window, send its next byte offset and digest as `byte_start` and `expected_digest`.
+To continue a truncated search preview, use its `preview_byte_end` and `content_digest` instead.
+Nonzero starts require the digest. Byte limits are 4–4096 (default 4096); starts must be UTF-8 code-point
+boundaries. The returned text ends on a code-point boundary and can therefore be shorter than the byte
+limit. A changed source returns `409 source_changed`; restart at zero to read the new version.
+
+Foreign, erased and missing references return the same `404 not_found`. Invalid controls return
+`400 invalid_message_window`; oversized or unavailable authoritative storage fails without source text.
+The 64-KiB message ingestion bound still applies. Read-only credentials may use this operation. It
+shares the API admission/deadline and best-effort content-free audit policy. See D108/#136.
