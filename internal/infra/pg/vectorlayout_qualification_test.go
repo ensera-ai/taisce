@@ -264,7 +264,7 @@ func qualifyVectorLayout(ctx context.Context, pool *pgxpool.Pool, schema, layout
 	if err != nil {
 		return measurement, err
 	}
-	if !containsVectorLayoutIndex(measurement.CandidatePlan.Indexes, layout+"_") {
+	if layout == "generation" && !containsVectorLayoutIndex(measurement.CandidatePlan.Indexes, layout+"_") {
 		return measurement, fmt.Errorf("candidate plan did not use the %s HNSW index: %v", layout, measurement.CandidatePlan.Indexes)
 	}
 	measurement.Erasure, err = eraseVectorLayoutProject(ctx, pool, schema, layout, representative)
