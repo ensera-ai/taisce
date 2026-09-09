@@ -3692,3 +3692,32 @@ strict input validation, indistinguishable cross-project refusal, content-free a
 Database tests cover Unicode preview bounds, deletion between pages, oversized stored identities,
 shared alias removal and an actual project/UUID index scan without an intermediate sort. Race checks
 pass. These plans establish the access shape, not controlled-host latency or capacity (#103).
+
+## D103 — Embedding work is bounded and cosine requires finite directions
+
+**Decision.** The embedding adapter accepts at most 64 nonblank UTF-8 inputs, 64 KiB per input and
+1 MiB of input text per call. It refuses before JSON serialization or HTTP work when those bounds
+fail. A reply is at most 64 MiB, checked with one extra byte so a valid JSON prefix at the ceiling
+cannot hide an oversized response. Each vector has 1–16,000 finite components and a nonzero norm;
+index alignment and equal dimensions within the batch remain required. Failure returns no partial
+vector batch and never quotes source text or the provider response.
+
+**Numeric boundary.** The shared cosine function refuses non-finite components, zero directions,
+different dimensions, empty vectors and dimensions above the same ceiling. Float64 accumulation
+handles finite float32 extremes; the result is clamped to [-1,1] for floating-point endpoint error.
+Zero is a valid similarity score and must not be used as a substitute for an invalid comparison.
+
+**Alternatives and scope.** An HTTP response byte ceiling alone leaves request serialization
+unbounded. Relying on downstream ranking to reject zero vectors delays a provider defect until after
+a caller may have persisted it. Returning NaN makes ordering undefined. These are rejected at the
+adapter/numeric boundary. The ceilings are initial defensive memory/work limits, not provider token
+limits, throughput targets or a measured operating envelope. They preserve the current small batched
+semantic callers; larger jobs must page their inputs. They neither fix a persisted vector dimension
+nor claim that differently versioned models share a space. Persistent model/dimension identity,
+index selection and generation cutover remain #101/#19. Reversal is a code change; it restores the
+unbounded-input and invalid-direction failure modes without changing stored data.
+
+**Proof.** Regressions reproduced accepted zero embeddings and successful NaN comparisons before
+the fix. Adapter tests now cover refusal before network work, exact count/byte/dimension boundaries,
+valid order, a response whose oversized prefix is valid JSON and finite extreme cosine inputs.
+The full adapter suite passes under the race detector. This closes #130's boundary-hardening scope.

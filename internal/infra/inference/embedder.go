@@ -11,7 +11,19 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
+)
+
+// Defensive ceilings bound serialization, response allocation and numeric work. They are not a
+// claim about provider throughput or the dimension/index contract of a persisted corpus.
+const (
+	MaxEmbeddingInputs     = 64
+	MaxEmbeddingInputBytes = 64 << 10
+	MaxEmbeddingBatchBytes = 1 << 20
+	MaxEmbeddingDimensions = 16000
+	MaxEmbeddingReplyBytes = 64 << 20
 )
 
 // Embedder turns text into a vector over the OpenAI-compatible embeddings interface.
@@ -60,8 +72,19 @@ func (e *Embedder) Embed(ctx context.Context, inputs []string) ([][]float32, err
 	if len(inputs) == 0 {
 		return nil, nil
 	}
+	if len(inputs) > MaxEmbeddingInputs {
+		return nil, fmt.Errorf("embedding batch exceeds %d inputs", MaxEmbeddingInputs)
+	}
+	inputBytes := 0
 	for i, in := range inputs {
-		if in == "" {
+		if len(in) > MaxEmbeddingInputBytes || !utf8.ValidString(in) {
+			return nil, fmt.Errorf("input %d is not bounded UTF-8 text", i)
+		}
+		inputBytes += len(in)
+		if inputBytes > MaxEmbeddingBatchBytes {
+			return nil, fmt.Errorf("embedding batch exceeds %d input bytes", MaxEmbeddingBatchBytes)
+		}
+		if strings.TrimSpace(in) == "" {
 			// An empty input embeds to whatever the model does with nothing, which is a vector that
 			// sits somewhere in the space and matches things for no reason. Refused rather than sent.
 			return nil, fmt.Errorf("input %d is empty, and an empty surface is not a thing to find", i)
@@ -95,12 +118,15 @@ func (e *Embedder) Embed(ctx context.Context, inputs []string) ([][]float32, err
 	// Bounded like every other reply: a remote system does not decide how much memory this process
 	// spends. Larger than a chat reply's because a batch of vectors is genuinely large — a thousand
 	// inputs at 1024 dimensions is several megabytes of JSON.
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxEmbeddingReplyBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read reply: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("embedder returned %d", resp.StatusCode)
+	}
+	if len(raw) > MaxEmbeddingReplyBytes {
+		return nil, fmt.Errorf("embedding reply exceeds %d bytes", MaxEmbeddingReplyBytes)
 	}
 
 	var reply embeddingResponse
@@ -122,6 +148,20 @@ func (e *Embedder) Embed(ctx context.Context, inputs []string) ([][]float32, err
 		}
 		if len(item.Embedding) == 0 {
 			return nil, fmt.Errorf("the embedder returned an empty vector for input %d", item.Index)
+		}
+		if len(item.Embedding) > MaxEmbeddingDimensions {
+			return nil, fmt.Errorf("embedding %d exceeds %d dimensions", item.Index, MaxEmbeddingDimensions)
+		}
+		var norm float64
+		for _, value := range item.Embedding {
+			v := float64(value)
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				return nil, fmt.Errorf("embedding %d contains a non-finite component", item.Index)
+			}
+			norm += v * v
+		}
+		if norm == 0 {
+			return nil, fmt.Errorf("embedding %d has no direction", item.Index)
 		}
 		out[item.Index] = item.Embedding
 	}
@@ -157,8 +197,14 @@ func Similarity(a, b []float32) (float64, error) {
 	if len(a) == 0 {
 		return 0, fmt.Errorf("an empty vector has no direction")
 	}
+	if len(a) > MaxEmbeddingDimensions {
+		return 0, fmt.Errorf("comparison exceeds %d dimensions", MaxEmbeddingDimensions)
+	}
 	var dot, na, nb float64
 	for i := range a {
+		if math.IsNaN(float64(a[i])) || math.IsInf(float64(a[i]), 0) || math.IsNaN(float64(b[i])) || math.IsInf(float64(b[i]), 0) {
+			return 0, fmt.Errorf("a non-finite component has no comparable direction")
+		}
 		dot += float64(a[i]) * float64(b[i])
 		na += float64(a[i]) * float64(a[i])
 		nb += float64(b[i]) * float64(b[i])
@@ -166,7 +212,8 @@ func Similarity(a, b []float32) (float64, error) {
 	if na == 0 || nb == 0 {
 		return 0, fmt.Errorf("a zero vector has no direction")
 	}
-	return dot / (math.Sqrt(na) * math.Sqrt(nb)), nil
+	// Floating-point accumulation can overshoot an endpoint by a few ulps even for a valid vector.
+	return max(-1, min(1, dot/(math.Sqrt(na)*math.Sqrt(nb)))), nil
 }
 
 type embeddingRequest struct {
