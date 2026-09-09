@@ -896,6 +896,7 @@ const (
 	AuditEmbeddingRepair       = "embedding.repair"
 	AuditEmbeddingSearch       = "embedding.search"
 	AuditEntityEmbeddingSearch = "entity_embedding.search"
+	AuditReportEmbeddingSearch = "report_embedding.search"
 	AuditObserve               = "observe"
 	AuditRecall                = "recall"
 	AuditErase                 = "erase"
@@ -945,7 +946,7 @@ const (
 // becomes servable and a name removed stops being servable, without a second list agreeing to it.
 func RecordableOperation(name string) bool {
 	switch name {
-	case AuditEmbeddingStart, AuditEmbeddingBuild, AuditEmbeddingActivate, AuditEmbeddingCancel, AuditEmbeddingPrune, AuditEmbeddingRepair, AuditEmbeddingSearch, AuditEntityEmbeddingSearch:
+	case AuditEmbeddingStart, AuditEmbeddingBuild, AuditEmbeddingActivate, AuditEmbeddingCancel, AuditEmbeddingPrune, AuditEmbeddingRepair, AuditEmbeddingSearch, AuditEntityEmbeddingSearch, AuditReportEmbeddingSearch:
 		return true
 	case AuditEntityList, AuditEntityGet, AuditMessageGet:
 		return true

@@ -116,3 +116,47 @@ func TestConfiguredEmbeddingProviderPersistsEntityCandidatesAtActualDimensions(t
 	}
 	t.Logf("persisted and retrieved entity candidates with %d-dimensional provider vectors", model.Dimensions)
 }
+
+// Community reports are the third model space. The configured provider must preserve its actual
+// width while report provenance and retrieval remain independent from messages and entities.
+func TestConfiguredEmbeddingProviderPersistsReportThemesAtActualDimensions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	config, err := inference.ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	embedder := inference.NewEmbedder(config)
+	query, err := embedder.Embed(ctx, []string{"What themes indicate organizational growth?"})
+	if err != nil || len(query) != 1 {
+		t.Fatalf("query embedding count=%d err=%v", len(query), err)
+	}
+	endpoint, _ := config.EmbeddingsAt()
+	digest := sha256.Sum256([]byte(endpoint))
+	model := pg.EmbeddingModel{Name: config.EmbeddingModel, Revision: "report-integration-fixture-v1",
+		EndpointHash: hex.EncodeToString(digest[:]), Dimensions: len(query[0])}
+	pool := testPool(t)
+	schema := tenant(t, pool, "report_embedding_live_provider")
+	defer pool.Exec(context.Background(), "DROP SCHEMA "+schema.String()+" CASCADE")
+	storedReport(t, pool, schema, "Growth plan", "Hiring, facilities and demand form one expansion theme.", "owner")
+	store := pg.NewReportEmbeddingStore(pool, schema)
+	actor := uuid.NewString()
+	generation, err := store.Start(ctx, "p1", uuid.NewString(), actor, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.BuildPage(ctx, "p1", generation.ID, actor, model, 64, embedder.Embed)
+	if err != nil || !page.Complete || page.Stored != 1 {
+		t.Fatalf("actual provider report persistence: %+v %v", page, err)
+	}
+	if err := store.Activate(ctx, "p1", generation.ID, actor); err != nil {
+		t.Fatal(err)
+	}
+	for _, candidates := range []int{0, 32} {
+		result, err := store.Search(ctx, "p1", actor, model, query[0], pg.ReportCandidateOptions{Limit: 1, Candidates: candidates})
+		if err != nil || len(result.Candidates) != 1 || result.Candidates[0].TitlePreview != "Growth plan" {
+			t.Fatalf("actual provider report retrieval %+v %v", result, err)
+		}
+	}
+	t.Logf("persisted and retrieved report themes with %d-dimensional provider vectors", model.Dimensions)
+}

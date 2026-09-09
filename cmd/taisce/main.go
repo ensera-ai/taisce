@@ -34,6 +34,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/ensera-ai/taisce/internal/passage"
 	"github.com/ensera-ai/taisce/internal/recall"
+	"github.com/ensera-ai/taisce/internal/reportcandidate"
 )
 
 // Environment. Prefixed, because a process reading a bare DATABASE_URL picks up whatever the shell
@@ -182,12 +183,17 @@ func run(ctx context.Context, log *slog.Logger) error {
 	}()
 	var passages *passage.Retriever
 	var entityCandidates *entitycandidate.Retriever
+	var reportCandidates *reportcandidate.Retriever
 	if role != roleWorker {
 		passages, err = configuredPassages(memory, schema)
 		if err != nil {
 			return err
 		}
 		entityCandidates, err = configuredEntityCandidates(memory, schema)
+		if err != nil {
+			return err
+		}
+		reportCandidates, err = configuredReportCandidates(memory, schema)
 		if err != nil {
 			return err
 		}
@@ -206,6 +212,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 			Subjects:         pg.NewSubjectStore(memory, schema),
 			Passages:         passages,
 			EntityCandidates: entityCandidates,
+			ReportCandidates: reportCandidates,
 		}, schema,
 		log,
 		admission,

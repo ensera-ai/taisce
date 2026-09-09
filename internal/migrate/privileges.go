@@ -102,7 +102,8 @@ SELECT CASE
  WHEN $3='memory' AND EXISTS(SELECT 1 FROM reachable r CROSS JOIN objects o WHERE o.nspname=$2
    AND o.relname IN ('projection_kind','predicate','speaker_term','unresolvable_term','schema_migration',
                     'ingestion_budget','ingestion_project_usage','ingestion_reservation','agent_storage_policy',
-                    'embedding_generation','embedding_active','entity_embedding_generation','entity_embedding_active')
+                    'embedding_generation','embedding_active','entity_embedding_generation','entity_embedding_active',
+                    'report_embedding_generation','report_embedding_active')
    AND (has_table_privilege(r.oid,o.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
      OR has_any_column_privilege(r.oid,o.oid,'INSERT,UPDATE,REFERENCES')))
    THEN 'memory policy catalogs are writable'

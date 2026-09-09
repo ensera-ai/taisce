@@ -44,10 +44,14 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 	passages.activate(t, "p1", "v1")
 	entities := attachEntityCandidatesWithPassages(t, h, passages.retriever)
 	entities.activate(t, "p1")
+	insertAPIReport(t, h)
+	reports := attachReportCandidates(t, h, passages.retriever, entities.retriever)
+	reports.activate(t, "p1")
 	bodies := map[string]map[string]any{
 		domain.AuditMessageGet:            {"chunk_id": sourceChunkForInspection(t, h)},
 		domain.AuditEmbeddingSearch:       {"question": "Where does the user live?"},
 		domain.AuditEntityEmbeddingSearch: {"question": "Ensera"},
+		domain.AuditReportEmbeddingSearch: {"question": "growth"},
 		domain.AuditEntityList:            {},
 		domain.AuditEntityGet:             {"id": entityIDForInspection(t, h)},
 		domain.AuditSubjectRegister:       {"private": "unauthorized mutation"},

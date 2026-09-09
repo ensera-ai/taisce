@@ -58,6 +58,8 @@ func TestRuntimePoolRefusesPrivilegeDriftAndAcceptsRemediation(t *testing.T) {
 		{"embedding activation write", `GRANT INSERT ON SCHEMA.embedding_active TO {role}`, `REVOKE INSERT ON SCHEMA.embedding_active FROM {role}`, MemoryPlane},
 		{"entity embedding identity write", `GRANT UPDATE(model_revision) ON SCHEMA.entity_embedding_generation TO {role}`, `REVOKE UPDATE(model_revision) ON SCHEMA.entity_embedding_generation FROM {role}`, MemoryPlane},
 		{"entity embedding activation write", `GRANT INSERT ON SCHEMA.entity_embedding_active TO {role}`, `REVOKE INSERT ON SCHEMA.entity_embedding_active FROM {role}`, MemoryPlane},
+		{"report embedding identity write", `GRANT UPDATE(model_revision) ON SCHEMA.report_embedding_generation TO {role}`, `REVOKE UPDATE(model_revision) ON SCHEMA.report_embedding_generation FROM {role}`, MemoryPlane},
+		{"report embedding activation write", `GRANT INSERT ON SCHEMA.report_embedding_active TO {role}`, `REVOKE INSERT ON SCHEMA.report_embedding_active FROM {role}`, MemoryPlane},
 		{"registry credential write", `GRANT UPDATE ON control.credential TO {role}`, `REVOKE UPDATE ON control.credential FROM {role}`, RegistryPlane},
 		{"registry memory read", `GRANT SELECT ON SCHEMA.observation TO {role}`, `REVOKE SELECT ON SCHEMA.observation FROM {role}`, RegistryPlane},
 	} {

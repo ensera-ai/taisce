@@ -31,6 +31,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/passage"
 	"github.com/ensera-ai/taisce/internal/recall"
+	"github.com/ensera-ai/taisce/internal/reportcandidate"
 )
 
 // Version is the contract version, and it is in the path.
@@ -56,6 +57,7 @@ type Server struct {
 	subjects         *pg.SubjectStore
 	passages         *passage.Retriever
 	entityCandidates *entitycandidate.Retriever
+	reportCandidates *reportcandidate.Retriever
 	schema           pg.Schema
 	log              *slog.Logger
 	authAudits       refusedAuthBudget
@@ -76,6 +78,7 @@ type Stores struct {
 	Subjects         *pg.SubjectStore
 	Passages         *passage.Retriever
 	EntityCandidates *entitycandidate.Retriever
+	ReportCandidates *reportcandidate.Retriever
 }
 
 // NewServer keeps the credential store separate because it uses the protected registry connection.
@@ -97,7 +100,7 @@ func NewServer(credentials *credential.Store, stores Stores, schema pg.Schema, l
 		credentials: credentials, audit: stores.Audit, exporter: stores.Exporter, projects: stores.Projects,
 		observations: stores.Observations, eraser: stores.Eraser, recaller: stores.Recaller,
 		citations: stores.Citations, records: stores.Records, artifacts: stores.Artifacts, subjects: stores.Subjects,
-		passages: stores.Passages, entityCandidates: stores.EntityCandidates,
+		passages: stores.Passages, entityCandidates: stores.EntityCandidates, reportCandidates: stores.ReportCandidates,
 		schema: schema, log: log, admission: gate,
 	}
 }
@@ -172,6 +175,7 @@ var operations = []route{
 	{Operation{domain.AuditMessageGet, http.MethodPost, "/messages/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getMessage }, messageRequest{}, pg.SourceMessageWindow{}},
 	{Operation{domain.AuditEmbeddingSearch, http.MethodPost, "/passages/search", http.StatusOK}, func(s *Server) grantedHandler { return s.searchPassages }, passageRequest{}, passage.Page{}},
 	{Operation{domain.AuditEntityEmbeddingSearch, http.MethodPost, "/entities/candidates", http.StatusOK}, func(s *Server) grantedHandler { return s.searchEntityCandidates }, entityCandidateRequest{}, entitycandidate.Page{}},
+	{Operation{domain.AuditReportEmbeddingSearch, http.MethodPost, "/reports/candidates", http.StatusOK}, func(s *Server) grantedHandler { return s.searchReportCandidates }, reportCandidateRequest{}, reportcandidate.Page{}},
 	{Operation{domain.AuditEntityList, http.MethodPost, "/entities/list", http.StatusOK}, func(s *Server) grantedHandler { return s.listEntities }, entityListRequest{}, pg.EntityPage{}},
 	{Operation{domain.AuditEntityGet, http.MethodPost, "/entities/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getEntity }, entityGetRequest{}, pg.EntityIdentity{}},
 	{Operation{domain.AuditSubjectRegister, http.MethodPost, "/subjects/register", http.StatusOK}, func(s *Server) grantedHandler { return s.registerSubject }, pg.SubjectRegistration{}, pg.SubjectWrite{}},
@@ -903,10 +907,12 @@ const (
 	codeInvalidEntityPage           errorCode = "invalid_entity_page"
 	codeInvalidPassageQuery         errorCode = "invalid_passage_query"
 	codeInvalidEntityCandidateQuery errorCode = "invalid_entity_candidate_query"
+	codeInvalidReportCandidateQuery errorCode = "invalid_report_candidate_query"
 	codeInvalidMessageWindow        errorCode = "invalid_message_window"
 	codeSourceChanged               errorCode = "source_changed"
 	codePassageUnavailable          errorCode = "passage_unavailable"
 	codeEntityCandidatesUnavailable errorCode = "entity_candidates_unavailable"
+	codeReportCandidatesUnavailable errorCode = "report_candidates_unavailable"
 	codeInvalidRecallControls       errorCode = "invalid_recall_controls"
 	codeInvalidRecordMutation       errorCode = "invalid_record_mutation"
 	codeRecordConflict              errorCode = "record_conflict"
@@ -934,6 +940,7 @@ var errorCodes = []errorCode{
 	codeInvalidMessageWindow, codeSourceChanged,
 	codeInvalidPassageQuery, codePassageUnavailable,
 	codeInvalidEntityCandidateQuery, codeEntityCandidatesUnavailable,
+	codeInvalidReportCandidateQuery, codeReportCandidatesUnavailable,
 	codeInvalidEntityPage,
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,

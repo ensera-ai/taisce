@@ -4055,3 +4055,38 @@ and explicit fancy/JSON selection. The existing command suite proves buffered ou
 The full repository suite passes at 91.7% cross-package coverage against the unchanged 91.6% floor;
 the CLI package passes under the race detector. Representative 48- and 110-column renders were
 reviewed without color, including the ASCII fallback.
+
+## D112 — Community reports occupy the third semantic model space
+
+**Decision.** A community report is embedded from its bounded title, summary, importance reason and
+whole findings. Report vectors use their own immutable generation identity, even when their provider,
+revision and dimensions equal a message or entity generation. Search returns a stable report and
+community ID with bounded title and summary previews. It does not substitute a report for evidence;
+the report's existing source registrations remain the route to the underlying observations.
+
+Start captures a finite set of current report IDs under the project lock. Any report insert, update or
+delete makes retained report generations stale, and a stale active generation is refused before
+provider egress. Provider calls run without a database transaction. Publication locks every source,
+then re-reads the report input and source revisions under a per-report lock before accepting a vector.
+Every vector is registered to every contributing observation, with a 4096-source cap. Source erasure,
+retention, report invalidation and community replacement therefore remove the vector by cascade.
+Repair is bounded when its target report still exists; a changed report set requires a replacement
+generation. At most two nondiscarded generations and one million captured targets remain per project.
+
+Exact cosine ordering is the default. A caller may opt into a bounded HNSW candidate set; the result
+states that it is approximate. The authenticated HTTP route and operator CLI use the configured
+embedding provider, enforce the active generation's model identity and record content-free audit.
+
+**Alternatives and limits.** Message vectors cannot represent a theme no single passage states.
+Entity vectors represent identities and their verbatim context, not aggregate subjects. Folding all
+three into one generation would let an equal model name hide incompatible input contracts. The
+stored report is model-written aggregate prose, so its source registrations and revision checks are
+part of the vector's ownership rather than optional metadata. The implementation establishes
+functional and lifecycle correctness; semantic quality, filtered ANN recall and capacity still need
+named-corpus measurement under #19/#101/#103.
+
+**Verification.** PostgreSQL tests cover deterministic bounded input, exact and optional ANN results,
+multi-source ownership, export, erasure, retention, repair, finite-snapshot invalidation, model
+cutover and stale-model refusal. HTTP tests cover authentication, read-only access, input bounds and
+the generated contract. CLI tests cover generation management without printing provider input. The
+configured-provider inference profile checks its actual vector width separately from quality claims.

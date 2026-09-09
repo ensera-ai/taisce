@@ -35,6 +35,7 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 | `message.get` | POST | `/v1/messages/get` | 200 |
 | `embedding.search` | POST | `/v1/passages/search` | 200 |
 | `entity_embedding.search` | POST | `/v1/entities/candidates` | 200 |
+| `report_embedding.search` | POST | `/v1/reports/candidates` | 200 |
 | `entity.list` | POST | `/v1/entities/list` | 200 |
 | `entity.get` | POST | `/v1/entities/get` | 200 |
 | `subject.register` | POST | `/v1/subjects/register` | 200 |
@@ -137,6 +138,29 @@ POST `/v1/entities/candidates` → 200
 | `build_state` | string |
 | `approximate` | boolean |
 | `candidates` | array of {entity_id: string, identity_kind: string, name_preview: string, name_bytes: integer, name_truncated: boolean, similarity: number} |
+
+
+## `report_embedding.search`
+
+POST `/v1/reports/candidates` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `question` | string |
+| `limit` | integer, optional |
+| `candidates` | integer |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `generation_id` | string |
+| `target_count` | integer |
+| `build_state` | string |
+| `approximate` | boolean |
+| `candidates` | array of {report_id: string, community_id: string, title_preview: string, title_bytes: integer, title_truncated: boolean, summary_preview: string, summary_bytes: integer, summary_truncated: boolean, importance: number, similarity: number} |
 
 
 ## `entity.list`
@@ -638,6 +662,8 @@ Any operation may answer with any of these.
 | `passage_unavailable` |
 | `invalid_entity_candidate_query` |
 | `entity_candidates_unavailable` |
+| `invalid_report_candidate_query` |
+| `report_candidates_unavailable` |
 | `invalid_entity_page` |
 | `unauthenticated` |
 | `invalid_body` |

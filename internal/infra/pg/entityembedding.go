@@ -529,11 +529,11 @@ func (s *EntityEmbeddingStore) Activate(ctx context.Context, scope, id, actor st
 		if err != nil {
 			return err
 		}
-		if generation.Active {
-			return nil
-		}
 		if generation.State != "ready" {
 			return ErrEmbeddingIncomplete
+		}
+		if generation.Active {
+			return nil
 		}
 		var missing bool
 		if err := tx.QueryRow(ctx, s.schema.SQL(`SELECT EXISTS(SELECT 1 FROM {schema}.entity_embedding_target t
