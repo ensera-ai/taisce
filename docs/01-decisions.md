@@ -3563,3 +3563,27 @@ separate work under #58.
 exclusion, cancellation with live and disconnected runners, erasure before/during inference, lost
 progress after publication, stale-runner refusal, concurrent admission, configuration mismatch and
 audit/storage rollback. CLI tests prove status/cancellation remain available without a provider.
+
+## D99 — Recovery verifies the identity behind a retained endpoint UUID
+
+**Decision.** A saved entity snapshot must match the fact endpoint and the retained entity's project,
+canonical/normalized name, identity kind and speaker subject. Recovery holds a shared entity row
+lock through commit so another writer cannot change those fields after validation. Missing entities
+retain their original IDs; incompatible retained identities refuse the whole recovery transaction.
+The same check applies when repairing support on a retained fact.
+
+**Alternatives.** Reusing any row with the same UUID silently changes the identity attached to
+recovered memory. Overwriting that row would change every other fact using it. Neither is acceptable.
+Entity type and resolution metadata are not identity keys and are not overwritten on retained rows.
+Aliases are excluded: the current snapshot deliberately omits them and cannot establish their source
+ownership. Faithful alias reconstruction remains #102/#58; no alias is inferred from a canonical name.
+
+**Impact and reversal.** This protects recovery integrity, including generation replay and curated
+recovery. It adds at most two entity checks per recovered record and holds shared locks until the
+bounded page commits. This is not controlled-host performance evidence. Reversal requires only code,
+but would restore the demonstrated identity-confusion defect (#125).
+
+**Proof.** Real PostgreSQL regressions first reproduced silent conflicting-identity reuse for both
+missing and retained facts. They now refuse without partial facts, evidence or registrations.
+Additional checks cover damaged endpoint snapshots, faithful reconstruction, compatible shared
+entities and preservation of existing alias arrays; generation/recovery race tests cover shared callers.

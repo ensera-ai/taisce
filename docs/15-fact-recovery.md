@@ -38,6 +38,11 @@ are registered. Existing conflicting evidence, history, ownership or pipeline st
 refusal rather than being overwritten. Restoring evidence advances its source revision and invalidates
 reports through the normal database mechanism; repeating a complete page does not invalidate them.
 
+Entity endpoints must match the saved identity, including project, canonical/normalized name and
+named/speaker attribution (D99). A conflicting retained UUID refuses the page; it is never silently
+reused or overwritten. Compatible retained entities keep their current metadata and aliases. Alias
+arrays are not in the receipts and cannot be faithfully reconstructed by this operation.
+
 Recovery preserves original extraction and pipeline stamps. It does not run newer extraction rules,
 restore a lost receipt, regenerate summaries or embeddings, restore unrecorded additional evidence or
 entity-only loss, or recover unsupported direct SQL inserts. Back up observations, authored input,

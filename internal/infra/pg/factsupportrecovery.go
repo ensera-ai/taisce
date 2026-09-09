@@ -16,15 +16,15 @@ import (
 // missing component is recoverable; an existing conflicting component is an integrity refusal,
 // never an invitation to rewrite a caller-visible record or guess at authoritative source bytes.
 func repairFactSupportTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, id string) (bool, error) {
-	var evidence []byte
+	var evidence, state, left, right []byte
 	var source, text, owner string
 	var factOwner *string
 	var ordinal int
-	err := tx.QueryRow(ctx, schema.SQL(`SELECT r.evidence,r.source_observation_id::text,r.source_ordinal,m.content,coalesce(o.data_subject_id,''),f.data_subject_id
+	err := tx.QueryRow(ctx, schema.SQL(`SELECT r.evidence,r.source_observation_id::text,r.source_ordinal,m.content,coalesce(o.data_subject_id,''),f.data_subject_id,to_jsonb(f),r.subject_identity,r.object_identity
         FROM {schema}.fact_receipt r JOIN {schema}.fact f ON f.scope=r.scope AND f.fact_id=r.fact_id
         JOIN {schema}.observation o ON o.scope=r.scope AND o.observation_id=r.source_observation_id
         JOIN {schema}.turn_message m ON m.observation_id=o.observation_id AND m.ordinal=r.source_ordinal
-        WHERE r.scope=$1 AND r.fact_id=$2::uuid FOR UPDATE OF f,r FOR KEY SHARE OF o,m`), scope, id).Scan(&evidence, &source, &ordinal, &text, &owner, &factOwner)
+        WHERE r.scope=$1 AND r.fact_id=$2::uuid FOR UPDATE OF f,r FOR KEY SHARE OF o,m`), scope, id).Scan(&evidence, &source, &ordinal, &text, &owner, &factOwner, &state, &left, &right)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -47,6 +47,9 @@ func repairFactSupportTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, i
 		return false, ErrInvalidReceipt
 	}
 	var conflict bool
+	if err := validateReceiptEntitiesTx(ctx, tx, schema, scope, state, left, right); err != nil {
+		return false, err
+	}
 	var evidenceAdded int
 	err = tx.QueryRow(ctx, schema.SQL(`WITH expected AS (
         SELECT * FROM jsonb_populate_record(NULL::{schema}.fact_evidence,$1::jsonb)
