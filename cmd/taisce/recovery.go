@@ -18,6 +18,9 @@ import (
 // One page per invocation bounds transaction lifetime. The operator can persist the returned cursor;
 // if the process dies or stdout fails after commit, replaying the same page is safe.
 func recoveryCommand(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) > 0 && args[0] == "chunks" {
+		return chunkRecoveryCommand(ctx, args[1:], out)
+	}
 	if len(args) == 0 || args[0] != "facts" {
 		return fmt.Errorf("usage: taisce recover facts --project <name> [--source <observation-uuid>] [--after <fact-uuid>] [--limit <1..100>]")
 	}

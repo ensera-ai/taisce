@@ -44,6 +44,7 @@ const usage = `taisce — memory for agents
   taisce formation unpark          retry one parked turn (--project required)
   taisce artifact limits           inspect or replace project artifact storage allowances
   taisce recover facts             restore a bounded page of missing facts (--project required)
+  taisce recover chunks            restore message chunks with stable IDs (--project required)
   taisce rebuild facts             reinterpret one source atomically (--project, --source, --key required)
   taisce rebuild project           run a resumable page of fact rebuilds (--project, --key required)
   taisce rebuild status            inspect a project rebuild (--project, --key required)

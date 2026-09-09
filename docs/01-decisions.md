@@ -3627,3 +3627,36 @@ cache repair counts, concurrent insertion, size/cardinality limits, project mism
 HTTP assertions/corrections expose bounded-input refusals with no partial sources. General entity
 resolution generations and independent projection rebuilding remain #58; this completes #127's
 source-owned spelling lifecycle.
+
+## D101 — A message owns its chunk identity and recovery uses bounded source pages
+
+**Decision.** The authoritative `turn_message` retains its chunk UUID. Ingestion returns that UUID
+from the message insert and uses it for the derived chunk and erasure registration. A deferred
+composite foreign key binds each message chunk to that exact source and ordinal. Migration 0044
+retains existing IDs and refuses ambiguous multiple-chunk mappings. A message whose chunk was
+already missing receives a new ID: an identity lost before this boundary cannot be reconstructed.
+The retained message column is part of the source backup and subject export, and disappears with
+its source on erasure or expiry.
+
+**Recovery.** `taisce recover chunks --project NAME` repairs one page, optionally restricted by
+`--source UUID`. A `(log_offset, ordinal)` cursor orders messages within the project. Each transaction
+selects at most 100 messages plus one lookahead, locks those sources/messages, checks a 16 MiB source
+text budget, and reconstructs missing chunks and registrations. Existing incompatible source, text,
+time, role, owner or registration pipeline causes the entire page to refuse. Existing embeddings
+are preserved; lost embeddings remain absent until an explicit embedding workflow supplies them.
+Audit and recovery commit together. A lost acknowledgement is safe to retry with the same cursor.
+
+**Alternatives and limits.** Generating IDs during recovery would break stable references on each
+repair. Inferring a missing UUID from an erasure registration would fail if that derived registration
+was also lost. Keeping the UUID with the message gives one source of identity with no additional
+inference or database round trip on ingestion. The FK costs a composite source index. Documents,
+changed segmentation, semantic generations and embedding model changes have separate contracts;
+this operation covers the actual one-chunk-per-message representation. Bounds limit page contents
+and locks, not a proven constant database query cost. Controlled-host plan and workload qualification
+remain #103. Reversal requires removing the FK and source column and loses stable repair identities.
+
+**Proof.** PostgreSQL tests cover exact IDs/content across pages, registration-only repair, wrong
+project refusal, conflicting data/pipeline refusal, failed-audit rollback, size bounds, migration
+ambiguity and restart, embedding preservation, concurrent recovery and erasure. CLI tests cover
+validation, metadata-only progress, cancellation and failed output. This completes #128's repair
+scope; other projection rebuilds remain #58.

@@ -66,3 +66,19 @@ records lineage. Project fact orchestration is available through `taisce rebuild
 projection rebuilds remain #58. Response caching is tracked in
 [ensera-ai/taisce#108](https://github.com/ensera-ai/taisce/issues/108). D96
 defines the fingerprint inputs and the limits of model aliases and routing.
+
+## Message chunk recovery
+
+`taisce recover chunks --project p1 --limit 100` restores message chunks from retained messages and
+their source-owned UUIDs (D101). Add `--source UUID` to restrict it to one observation. Output contains
+`examined`, `restored`, `repaired`, an audit principal and, when another page exists, `next` with
+`log_offset` and `ordinal`. Resume with both `--after-offset` and `--after-ordinal`. Without those
+flags the command starts before the first message. Each invocation requires the operator database
+configuration; it does not need an inference endpoint.
+
+A page permits 1–100 messages and at most 16 MiB of source text. Reduce `--limit` on a size refusal.
+The page commits atomically with its audit entry; retry the same cursor if the process loses its
+output. Existing conflicting data refuses the whole page. `repaired` counts compatible retained
+chunks with missing erasure registrations. Existing embeddings survive; missing embeddings are not
+regenerated. Erased/expired messages are never recovered. Back up the message `chunk_id` alongside
+the message content; a UUID lost before migration 0044 recorded it is not recoverable.

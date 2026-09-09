@@ -80,12 +80,12 @@ func appendTurnTx(ctx context.Context, tx pgx.Tx, schema Schema, turn domain.Tur
 		if occurred.IsZero() {
 			occurred = turn.OccurredAt
 		}
-		if _, err := tx.Exec(ctx, schema.SQL(insertMessageSQL),
-			id, m.Ordinal, string(m.Role), m.Content, m.GroupOrdinal, occurred); err != nil {
+		var chunkID string
+		if err := tx.QueryRow(ctx, schema.SQL(insertMessageSQL+` RETURNING chunk_id::text`),
+			id, m.Ordinal, string(m.Role), m.Content, m.GroupOrdinal, occurred).Scan(&chunkID); err != nil {
 			return domain.Observation{}, fmt.Errorf("insert message %d: %w", m.Ordinal, err)
 		}
 
-		chunkID := uuid.New()
 		if _, err := tx.Exec(ctx, schema.SQL(insertChunkSQL),
 			chunkID, turn.Scope, id, m.Ordinal, m.Content, occurred,
 			string(m.Role), nullIfEmpty(turn.DataSubjectID)); err != nil {
@@ -95,7 +95,7 @@ func appendTurnTx(ctx context.Context, tx pgx.Tx, schema Schema, turn domain.Tur
 		// and registered afterwards is a projection erasure cannot see for as long as the gap
 		// lasts, and the gap is exactly the window in which a process dies.
 		if _, err := tx.Exec(ctx, schema.SQL(registerProjectionSQL),
-			id, turn.Scope, ProjectionChunk, chunkID.String(),
+			id, turn.Scope, ProjectionChunk, chunkID,
 			nullIfEmpty(turn.DataSubjectID)); err != nil {
 			return domain.Observation{}, fmt.Errorf("register chunk projection: %w", err)
 		}
