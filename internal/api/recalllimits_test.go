@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/recall"
 )
 
 func TestRecallAdmissionLimitsAreClientRefusalsOverHTTP(t *testing.T) {
@@ -38,11 +39,20 @@ func TestRecallAdmissionLimitsAreClientRefusalsOverHTTP(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("boundary refused %d %s", status, body)
 	}
-	if _, err := h.pool.Exec(context.Background(), h.schema.SQL(`INSERT INTO {schema}.entity(entity_id,scope,canonical_name,normalized_name,normalized_aliases)
-SELECT gen_random_uuid(),'p1','name '||n,'name '||n,ARRAY['common'] FROM generate_series(1,$1::int) n`), domain.MaxRecallMatches+1); err != nil {
+	words = words[:0]
+	for i := 0; i < 87; i++ {
+		words = append(words, fmt.Sprintf("anchor%d", i))
+	}
+	question := strings.Join(words, " ")
+	terms := recall.Terms(question)
+	if len(terms) <= domain.MaxRecallMatches || len(terms) > domain.MaxRecallTerms {
+		t.Fatalf("overflow fixture has %d terms", len(terms))
+	}
+	if _, err := h.pool.Exec(context.Background(), h.schema.SQL(`INSERT INTO {schema}.entity(entity_id,scope,canonical_name,normalized_name)
+SELECT gen_random_uuid(),'p1',term,term FROM unnest($1::text[]) term`), terms); err != nil {
 		t.Fatal(err)
 	}
-	status, body = h.raw(t, http.MethodPost, "/v1/recalls", map[string]any{"question": "common"}, h.token)
+	status, body = h.raw(t, http.MethodPost, "/v1/recalls", map[string]any{"question": question}, h.token)
 	if status != http.StatusBadRequest || !strings.Contains(string(body), "invalid_question") || strings.Contains(string(body), "anchors") {
 		t.Fatalf("overflow must refuse without partial bundle: %d %s", status, body)
 	}

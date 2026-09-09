@@ -19,7 +19,7 @@ func TestEntityNameBoundsRefuseAuthoredWritesWithoutPartialSources(t *testing.T)
 	var batch pg.AssertionBatch
 	h.do(t, http.MethodPost, "/v1/records/assert", map[string]any{"records": []pg.RecordAssertion{request}}, 200, &batch)
 	// Fill the bounded cache to exercise transport mapping independently of model behavior.
-	if _, err := h.pool.Exec(ctx, h.schema.SQL(`UPDATE {schema}.entity SET aliases=ARRAY(SELECT repeat(' ',n)||'Ensera' FROM generate_series(1,64) n),normalized_aliases=ARRAY['ensera'] WHERE normalized_name='ensera'`)); err != nil {
+	if _, err := h.pool.Exec(ctx, h.schema.SQL(`UPDATE {schema}.entity SET aliases=ARRAY(SELECT repeat(' ',n)||'Ensera' FROM generate_series(1,64) n) WHERE normalized_name='ensera'`)); err != nil {
 		t.Fatal(err)
 	}
 	request.IdempotencyKey = uuid.NewString()

@@ -88,15 +88,6 @@ SELECT * FROM (
          WHERE d.scope=e.scope AND d.projection_kind='entity' AND d.projection_id=e.entity_id::text
            AND d.data_subject_id=$3)
     UNION ALL
-    SELECT e.entity_id::text, e.scope, e.canonical_name, e.normalized_name, e.entity_type, t.term
-      FROM terms t
-      JOIN {schema}.entity e ON e.scope=ANY($1) AND e.identity_kind='named'
-       AND e.normalized_aliases @> ARRAY[t.term] AND e.normalized_name<>t.term
-     WHERE $3::text IS NULL OR EXISTS (
-        SELECT 1 FROM {schema}.projection_dependency d
-         WHERE d.scope=e.scope AND d.projection_kind='entity' AND d.projection_id=e.entity_id::text
-           AND d.data_subject_id=$3)
-    UNION ALL
     SELECT e.entity_id::text,e.scope,e.canonical_name,e.normalized_name,e.entity_type,'speaker'
       FROM {schema}.entity e
      WHERE e.scope=ANY($1) AND e.identity_kind='speaker' AND e.speaker_subject_id=$3

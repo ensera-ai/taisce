@@ -81,7 +81,7 @@ func TestEntityNameCacheRepairIsReportedAndExpiryRemovesVariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.entity SET aliases='{}',normalized_aliases='{}'`)); err != nil {
+	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.entity SET aliases='{}'`)); err != nil {
 		t.Fatal(err)
 	}
 	page, err := pg.NewFactStore(pool).RecoverFacts(ctx, schema, "p1", "", "", uuid.NewString(), 100)

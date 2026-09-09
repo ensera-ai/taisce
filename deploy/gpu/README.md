@@ -68,6 +68,12 @@ small, medium and large projects at the production 2,560-dimensional representat
 exact and ANN recall, query plans, catalog/planning cost, build time, WAL, disk and erasure/vacuum
 behavior. It records observations without creating a target after seeing them.
 
+`anchor-layout-v1` compares the production canonical identity lookup with the retired array/GIN
+shape and a normalized project-keyed relation. Its fixed corpus includes small, medium and large
+projects, cross-project noise, 64 raw spelling variants and 128-term misses. It records warm latency,
+plans, scanned rows, buffers, layout build time, WAL and storage. Raw spelling variants remain
+source-owned evidence and semantic input; exact anchoring follows their one normalized canonical key.
+
 Collect `results/` and the runner status before cleanup. Redact credentials from any diagnostic
 logs; never copy `.env` or bootstrap logs. Run the root `wipe.sh` even after failure, then request
 GPU.ai termination and verify both terminal status and absence from the active instance list.

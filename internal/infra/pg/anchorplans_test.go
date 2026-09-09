@@ -22,9 +22,9 @@ func TestAnchorQueryPlans(t *testing.T) {
 	defer pool.Exec(ctx, "DROP SCHEMA "+schema.String()+" CASCADE")
 	if _, err := pool.Exec(ctx, schema.SQL(`
 INSERT INTO {schema}.project(scope,label) VALUES('p2','p2');
-INSERT INTO {schema}.entity(entity_id,scope,canonical_name,normalized_name,normalized_aliases)
+INSERT INTO {schema}.entity(entity_id,scope,canonical_name,normalized_name,aliases)
 SELECT gen_random_uuid(),p,'entity '||n,'entity '||n,
- ARRAY(SELECT 'alias '||n||' '||a FROM generate_series(1,16) a)
+ ARRAY(SELECT repeat(' ',a)||'Entity '||n FROM generate_series(1,16) a)
 FROM unnest(ARRAY['p1','p2']) p CROSS JOIN generate_series(1,10000) n;
 ANALYZE {schema}.entity`)); err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ ANALYZE {schema}.entity`)); err != nil {
 		want  int
 	}{
 		{"canonical", []string{"entity 9000"}, 1},
-		{"alias", []string{"alias 9000 16"}, 1},
+		{"many_spelling_variants", []string{"entity 9000"}, 1},
 		{"miss", []string{"absent"}, 0},
 		{"large_question", many, 0},
 	} {
@@ -68,7 +68,7 @@ ANALYZE {schema}.entity`)); err != nil {
 				}
 			}
 			inspect(explained[0].Plan)
-			if !indexes["entity_named_identity_uniq"] || !indexes["entity_aliases_idx"] {
+			if !indexes["entity_named_identity_uniq"] {
 				t.Fatalf("missing lookup indexes: %v", indexes)
 			}
 			anchors, err := pg.NewRecallStore(pool, schema).Anchors(ctx, []string{"p1"}, tc.terms)

@@ -51,7 +51,7 @@ func retainEntityNameTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, so
 	}
 	aliases = append(aliases, name)
 	sort.Strings(aliases)
-	_, err = tx.Exec(ctx, schema.SQL(`UPDATE {schema}.entity SET aliases=$3,normalized_aliases=ARRAY[$4::text] WHERE scope=$1 AND entity_id=$2::uuid`), scope, entity, aliases, normalized)
+	_, err = tx.Exec(ctx, schema.SQL(`UPDATE {schema}.entity SET aliases=$3 WHERE scope=$1 AND entity_id=$2::uuid`), scope, entity, aliases)
 	return err
 }
 
@@ -72,7 +72,7 @@ func refreshEntityNamesTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, 
 	if err != nil {
 		return false, err
 	}
-	aliases, norms := []string{}, []string{}
+	aliases := []string{}
 	for rows.Next() {
 		var name, norm string
 		if err := rows.Scan(&name, &norm); err != nil {
@@ -92,11 +92,8 @@ func refreshEntityNamesTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, 
 	if len(aliases) > MaxEntityNameVariants {
 		return false, ErrEntityNameLimit
 	}
-	if len(aliases) > 0 {
-		norms = append(norms, normalized)
-	}
-	tag, err := tx.Exec(ctx, schema.SQL(`UPDATE {schema}.entity SET aliases=$3,normalized_aliases=$4 WHERE scope=$1 AND entity_id=$2::uuid
-        AND (aliases,normalized_aliases) IS DISTINCT FROM ($3::text[],$4::text[])`), scope, entity, aliases, norms)
+	tag, err := tx.Exec(ctx, schema.SQL(`UPDATE {schema}.entity SET aliases=$3 WHERE scope=$1 AND entity_id=$2::uuid
+        AND aliases IS DISTINCT FROM $3::text[]`), scope, entity, aliases)
 	return tag.RowsAffected() > 0, err
 }
 
