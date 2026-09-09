@@ -286,7 +286,7 @@ func createVectorLayout(ctx context.Context, pool *pgxpool.Pool, schema, layout 
 		if _, err := pool.Exec(ctx, "CREATE TABLE "+table+base); err != nil {
 			return err
 		}
-		return index(table, schema+".ordinary_ann")
+		return index(table, "ordinary_ann")
 	case "generation":
 		parent := schema + ".generation"
 		if _, err := pool.Exec(ctx, "CREATE TABLE "+parent+base+" PARTITION BY LIST(generation_id)"); err != nil {
@@ -298,7 +298,7 @@ func createVectorLayout(ctx context.Context, pool *pgxpool.Pool, schema, layout 
 				child, parent, project.Generation)); err != nil {
 				return err
 			}
-			if err := index(child, fmt.Sprintf("%s.generation_p_%04d_ann", schema, i)); err != nil {
+			if err := index(child, fmt.Sprintf("generation_p_%04d_ann", i)); err != nil {
 				return err
 			}
 		}
@@ -314,7 +314,7 @@ func createVectorLayout(ctx context.Context, pool *pgxpool.Pool, schema, layout 
  FOR VALUES WITH (MODULUS %d,REMAINDER %d)`, child, parent, vectorLayoutHashParts, remainder)); err != nil {
 				return err
 			}
-			if err := index(child, fmt.Sprintf("%s.hash_p_%02d_ann", schema, remainder)); err != nil {
+			if err := index(child, fmt.Sprintf("hash_p_%02d_ann", remainder)); err != nil {
 				return err
 			}
 		}
@@ -644,9 +644,9 @@ func qualifyVectorLayoutCatalog(ctx context.Context, pool *pgxpool.Pool, schema 
 		child := fmt.Sprintf("catalog_generation_p_%04d", count)
 		index := child + "_ann"
 		if _, err := pool.Exec(ctx, fmt.Sprintf(`CREATE TABLE %s.%s PARTITION OF %s FOR VALUES IN ('%s');
- CREATE INDEX %s.%s ON %s.%s USING hnsw
+ CREATE INDEX %s ON %s.%s USING hnsw
  ((l2_normalize(embedding)::halfvec(%d)) halfvec_cosine_ops)`, schema, child, parent, generation,
-			schema, index, schema, child, vectorLayoutDimensions)); err != nil {
+			index, schema, child, vectorLayoutDimensions)); err != nil {
 			return nil, err
 		}
 		if !checkpoints[count] {
