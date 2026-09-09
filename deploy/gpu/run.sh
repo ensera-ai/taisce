@@ -60,7 +60,8 @@ echo 'Starting vLLM model services and PostgreSQL'
 timeout 3600 "${dc[@]}" up -d --build --wait --wait-timeout 3000 \
     generation generation-{0..6} embedding postgres test-postgres > results/model-start.log 2>&1
 echo 'Starting application components'
-timeout 1800 "${dc[@]}" up -d --build --wait --wait-timeout 300 api worker > results/application-start.log 2>&1
+timeout 1800 "${dc[@]}" up -d --build --scale worker=7 --wait --wait-timeout 300 \
+    api worker > results/application-start.log 2>&1
 "${dc[@]}" ps --format json > results/services.json
 docker image inspect vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8 \
     --format '{{json .RepoDigests}}' > results/generation-image-digest.json

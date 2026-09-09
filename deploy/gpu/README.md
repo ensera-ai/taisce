@@ -16,7 +16,9 @@ TLS-verifying nginx service distributes generation requests by least active conn
 Taisce one stable internal endpoint. The pinned BF16 Qwen3-Embedding-4B revision uses GPU 7.
 Qwen3.8-27B needs 51.1 GiB for weights and fits one complete 32K-context replica on an A100 80 GB;
 replication therefore uses every generation card without imposing a tensor or pipeline topology on
-the model. Allocation alone is not evidence of sustained utilization or a scaling result; the
+the model. The deployed application uses seven worker replicas so independent scopes can keep all
+seven generation replicas busy; the database advisory lock still serializes formation within one
+scope. Allocation alone is not evidence of sustained utilization or a scaling result; the
 captured per-card measurements describe the exercised workload.
 Each generation server selects the Guidance structured-output backend. The live structured-output
 gates and bounded concurrent benchmark qualify this compatibility choice. Generation and embedding
