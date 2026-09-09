@@ -104,18 +104,6 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 		if err := eraseGenerationMetadataTx(ctx, tx, schema, scope, dataSubjectID, &out); err != nil {
 			return err
 		}
-		names, err := removeEntityNamesTx(ctx, tx, schema, scope, dataSubjectID, nil)
-		if err != nil {
-			return err
-		}
-		out.Deleted["entity_name_receipt"] = names
-		var nameResidual int
-		if err := tx.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.entity_name_receipt r JOIN {schema}.observation o
-            ON o.scope=r.scope AND o.observation_id=r.source_observation_id WHERE o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID).Scan(&nameResidual); err != nil {
-			return err
-		}
-		out.Residual["entity_name_receipt"] = nameResidual
-
 		for _, k := range kinds {
 			tag, err := tx.Exec(ctx, deleteProjectionSQL(schema, k), scope, dataSubjectID)
 			if err != nil {
@@ -129,6 +117,21 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 			}
 			out.Residual[k.kind] = residual
 		}
+
+		// Registered aggregate projections must be deleted and counted before changing their
+		// source-owned name inputs. Otherwise the invalidation trigger removes the same vector
+		// first and the erasure receipt understates what this request deleted.
+		names, err := removeEntityNamesTx(ctx, tx, schema, scope, dataSubjectID, nil)
+		if err != nil {
+			return err
+		}
+		out.Deleted["entity_name_receipt"] = names
+		var nameResidual int
+		if err := tx.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.entity_name_receipt r JOIN {schema}.observation o
+            ON o.scope=r.scope AND o.observation_id=r.source_observation_id WHERE o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID).Scan(&nameResidual); err != nil {
+			return err
+		}
+		out.Residual["entity_name_receipt"] = nameResidual
 
 		// A shared fact may survive on another observation's support. Its erased source's quote
 		// must not survive with it, even though the semantic fact still has lawful evidence.

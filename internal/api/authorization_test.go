@@ -40,24 +40,28 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	attachPassages(t, h, nil).activate(t, "p1", "v1")
+	passages := attachPassages(t, h, nil)
+	passages.activate(t, "p1", "v1")
+	entities := attachEntityCandidatesWithPassages(t, h, passages.retriever)
+	entities.activate(t, "p1")
 	bodies := map[string]map[string]any{
-		domain.AuditMessageGet:      {"chunk_id": sourceChunkForInspection(t, h)},
-		domain.AuditEmbeddingSearch: {"question": "Where does the user live?"},
-		domain.AuditEntityList:      {},
-		domain.AuditEntityGet:       {"id": entityIDForInspection(t, h)},
-		domain.AuditSubjectRegister: {"private": "unauthorized mutation"},
-		domain.AuditSubjectUpdate:   {"id": subject.ID, "expected_version": subject.Version},
-		domain.AuditSubjectGet:      {"id": subject.ID},
-		domain.AuditSubjectList:     {},
-		domain.AuditArtifactPut:     {"private": "unauthorized mutation"},
-		domain.AuditArtifactDelete:  {"id": artifact.ID, "expected_version": artifact.Version},
-		domain.AuditArtifactGet:     {"id": artifact.ID},
-		domain.AuditArtifactList:    {},
-		domain.AuditObserve:         {"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "private unauthorized mutation"}}},
-		domain.AuditErase:           {"data_subject_id": "subject-1", "reason": "private unauthorized mutation"},
-		domain.AuditRecall:          {"question": "Where does the user live?", "data_subject_id": "subject-1"},
-		domain.AuditExport:          {"data_subject_id": "subject-1"}, domain.AuditCitationResolve: {"id": id}, domain.AuditFreshness: nil,
+		domain.AuditMessageGet:            {"chunk_id": sourceChunkForInspection(t, h)},
+		domain.AuditEmbeddingSearch:       {"question": "Where does the user live?"},
+		domain.AuditEntityEmbeddingSearch: {"question": "Ensera"},
+		domain.AuditEntityList:            {},
+		domain.AuditEntityGet:             {"id": entityIDForInspection(t, h)},
+		domain.AuditSubjectRegister:       {"private": "unauthorized mutation"},
+		domain.AuditSubjectUpdate:         {"id": subject.ID, "expected_version": subject.Version},
+		domain.AuditSubjectGet:            {"id": subject.ID},
+		domain.AuditSubjectList:           {},
+		domain.AuditArtifactPut:           {"private": "unauthorized mutation"},
+		domain.AuditArtifactDelete:        {"id": artifact.ID, "expected_version": artifact.Version},
+		domain.AuditArtifactGet:           {"id": artifact.ID},
+		domain.AuditArtifactList:          {},
+		domain.AuditObserve:               {"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "private unauthorized mutation"}}},
+		domain.AuditErase:                 {"data_subject_id": "subject-1", "reason": "private unauthorized mutation"},
+		domain.AuditRecall:                {"question": "Where does the user live?", "data_subject_id": "subject-1"},
+		domain.AuditExport:                {"data_subject_id": "subject-1"}, domain.AuditCitationResolve: {"id": id}, domain.AuditFreshness: nil,
 		domain.AuditRecordList: {}, domain.AuditRecordHistory: {"id": id},
 		domain.AuditRecordCorrect: {"records": []pg.RecordCorrection{{RecordMutation: pg.RecordMutation{ID: id, ExpectedVersion: id}, Object: "private unauthorized mutation", Statement: "private unauthorized mutation"}}},
 		domain.AuditRecordAssert:  {"records": []map[string]any{{"statement": "private unauthorized mutation"}}},

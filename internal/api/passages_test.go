@@ -27,12 +27,13 @@ import (
 )
 
 type passageFixture struct {
-	h      *harness
-	model  pg.EmbeddingModel
-	store  *pg.MessageEmbeddingStore
-	calls  atomic.Int32
-	status atomic.Int32
-	after  func()
+	h         *harness
+	model     pg.EmbeddingModel
+	store     *pg.MessageEmbeddingStore
+	retriever *passage.Retriever
+	calls     atomic.Int32
+	status    atomic.Int32
+	after     func()
 }
 
 func passageVector(text string) []float32 {
@@ -75,6 +76,7 @@ func attachPassages(t *testing.T, h *harness, after func()) *passageFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixture.retriever = retriever
 	h.server.Close()
 	h.server = httptest.NewServer(api.NewServer(credential.NewStore(h.pool, string(migrate.ControlSchema)), api.Stores{
 		Audit: pg.NewAuditStore(h.pool, h.schema), Exporter: pg.NewExporter(h.pool, h.schema), Projects: pg.NewProjectStore(h.pool, h.schema), Observations: pg.NewObservationStore(h.pool), Eraser: pg.NewEraser(h.pool), Recaller: recall.NewWithBudget(pg.NewRecallStore(h.pool, h.schema), recall.Budget{Characters: 100000, MaxRows: 50}), Citations: pg.NewCitationStore(h.pool, h.schema), Records: pg.NewRecordStore(h.pool, h.schema), Artifacts: pg.NewArtifactStore(h.pool, h.schema), Subjects: pg.NewSubjectStore(h.pool, h.schema), Passages: retriever,

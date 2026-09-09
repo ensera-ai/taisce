@@ -26,6 +26,7 @@ import (
 
 	"github.com/ensera-ai/taisce/internal/api"
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/entitycandidate"
 	"github.com/ensera-ai/taisce/internal/extract"
 	"github.com/ensera-ai/taisce/internal/formation"
 	"github.com/ensera-ai/taisce/internal/infra/inference"
@@ -176,25 +177,31 @@ func run(ctx context.Context, log *slog.Logger) error {
 		log.Info("HTTP admission totals", "accepted", stats.Accepted, "refused", stats.Refused, "anonymous_audit_suppressed", stats.AuditSuppressed)
 	}()
 	var passages *passage.Retriever
+	var entityCandidates *entitycandidate.Retriever
 	if role != roleWorker {
 		passages, err = configuredPassages(memory, schema)
+		if err != nil {
+			return err
+		}
+		entityCandidates, err = configuredEntityCandidates(memory, schema)
 		if err != nil {
 			return err
 		}
 	}
 	server := api.NewServer(
 		credential.NewStore(registry, string(migrate.ControlSchema)), api.Stores{
-			Audit:        pg.NewAuditStore(memory, schema),
-			Exporter:     pg.NewExporter(memory, schema),
-			Projects:     pg.NewProjectStore(memory, schema),
-			Observations: pg.NewObservationStore(memory),
-			Eraser:       pg.NewEraser(memory),
-			Recaller:     recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()),
-			Citations:    pg.NewCitationStore(memory, schema),
-			Records:      pg.NewRecordStore(memory, schema),
-			Artifacts:    pg.NewArtifactStore(memory, schema),
-			Subjects:     pg.NewSubjectStore(memory, schema),
-			Passages:     passages,
+			Audit:            pg.NewAuditStore(memory, schema),
+			Exporter:         pg.NewExporter(memory, schema),
+			Projects:         pg.NewProjectStore(memory, schema),
+			Observations:     pg.NewObservationStore(memory),
+			Eraser:           pg.NewEraser(memory),
+			Recaller:         recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()),
+			Citations:        pg.NewCitationStore(memory, schema),
+			Records:          pg.NewRecordStore(memory, schema),
+			Artifacts:        pg.NewArtifactStore(memory, schema),
+			Subjects:         pg.NewSubjectStore(memory, schema),
+			Passages:         passages,
+			EntityCandidates: entityCandidates,
 		}, schema,
 		log,
 		admission,

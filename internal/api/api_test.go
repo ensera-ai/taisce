@@ -820,21 +820,22 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 			"data_subject_id": "subject-1",
 			"messages":        []map[string]any{{"role": "user", "content": "I work at Ensera."}},
 		}, http.StatusCreated},
-		domain.AuditCitationResolve: {map[string]any{}, http.StatusOK},
-		domain.AuditRecordList:      {map[string]any{}, http.StatusOK},
-		domain.AuditRecordHistory:   {map[string]any{}, http.StatusOK},
-		domain.AuditRecordRetract:   {map[string]any{}, http.StatusOK},
-		domain.AuditRecordCorrect:   {map[string]any{}, http.StatusOK},
-		domain.AuditArtifactPut:     {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745", "data_subject_id": "artifact-owner", "kind": "state", "name": "scratch", "content": []byte("opaque scratchpad")}, http.StatusOK},
-		domain.AuditArtifactGet:     {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745"}, http.StatusOK},
-		domain.AuditArtifactList:    {map[string]any{}, http.StatusOK},
-		domain.AuditArtifactDelete:  {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745"}, http.StatusOK},
-		domain.AuditRecordAssert:    {map[string]any{"records": []pg.RecordAssertion{{IdempotencyKey: "29ec5631-bae3-4cf8-a165-a8759a8f9931", DataSubjectID: "subject-1", Subject: "Atlas", Predicate: "works_at", Object: "Ensera", Statement: "Atlas works at Ensera"}}}, http.StatusOK},
-		domain.AuditFreshness:       {nil, http.StatusOK},
-		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
-		domain.AuditEmbeddingSearch: {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
-		domain.AuditMessageGet:      {map[string]any{}, http.StatusOK},
-		domain.AuditExport:          {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
+		domain.AuditCitationResolve:       {map[string]any{}, http.StatusOK},
+		domain.AuditRecordList:            {map[string]any{}, http.StatusOK},
+		domain.AuditRecordHistory:         {map[string]any{}, http.StatusOK},
+		domain.AuditRecordRetract:         {map[string]any{}, http.StatusOK},
+		domain.AuditRecordCorrect:         {map[string]any{}, http.StatusOK},
+		domain.AuditArtifactPut:           {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745", "data_subject_id": "artifact-owner", "kind": "state", "name": "scratch", "content": []byte("opaque scratchpad")}, http.StatusOK},
+		domain.AuditArtifactGet:           {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745"}, http.StatusOK},
+		domain.AuditArtifactList:          {map[string]any{}, http.StatusOK},
+		domain.AuditArtifactDelete:        {map[string]any{"id": "de8f7a94-ddb7-46c5-a561-19b0f6a43745"}, http.StatusOK},
+		domain.AuditRecordAssert:          {map[string]any{"records": []pg.RecordAssertion{{IdempotencyKey: "29ec5631-bae3-4cf8-a165-a8759a8f9931", DataSubjectID: "subject-1", Subject: "Atlas", Predicate: "works_at", Object: "Ensera", Statement: "Atlas works at Ensera"}}}, http.StatusOK},
+		domain.AuditFreshness:             {nil, http.StatusOK},
+		domain.AuditRecall:                {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
+		domain.AuditEmbeddingSearch:       {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
+		domain.AuditEntityEmbeddingSearch: {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
+		domain.AuditMessageGet:            {map[string]any{}, http.StatusOK},
+		domain.AuditExport:                {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
 		domain.AuditErase: {map[string]any{
 			"data_subject_id": "subject-1", "reason": "the ledger test",
 		}, http.StatusOK},
@@ -886,6 +887,8 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	run(domain.AuditMessageGet)
 	attachPassages(t, h, nil).activate(t, "p1", "v1")
 	run(domain.AuditEmbeddingSearch)
+	attachEntityCandidates(t, h).activate(t, "p1")
+	run(domain.AuditEntityEmbeddingSearch)
 	exercise[domain.AuditEntityGet].body["id"] = entityIDForInspection(t, h)
 	run(domain.AuditEntityList)
 	run(domain.AuditEntityGet)

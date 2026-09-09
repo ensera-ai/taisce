@@ -34,6 +34,7 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 |---|---|---|---|
 | `message.get` | POST | `/v1/messages/get` | 200 |
 | `embedding.search` | POST | `/v1/passages/search` | 200 |
+| `entity_embedding.search` | POST | `/v1/entities/candidates` | 200 |
 | `entity.list` | POST | `/v1/entities/list` | 200 |
 | `entity.get` | POST | `/v1/entities/get` | 200 |
 | `subject.register` | POST | `/v1/subjects/register` | 200 |
@@ -113,6 +114,29 @@ POST `/v1/passages/search` → 200
 | `build_state` | string |
 | `approximate` | boolean |
 | `passages` | array of {chunk_id: string, source_id: string, ordinal: integer, role: string, preview: string, similarity: number, occurred_at: timestamp (RFC 3339), message_bytes: integer, preview_complete: boolean, preview_byte_end: integer, content_digest: string} |
+
+
+## `entity_embedding.search`
+
+POST `/v1/entities/candidates` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `question` | string |
+| `limit` | integer, optional |
+| `candidates` | integer |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `generation_id` | string |
+| `target_count` | integer |
+| `build_state` | string |
+| `approximate` | boolean |
+| `candidates` | array of {entity_id: string, identity_kind: string, name_preview: string, name_bytes: integer, name_truncated: boolean, similarity: number} |
 
 
 ## `entity.list`
@@ -612,6 +636,8 @@ Any operation may answer with any of these.
 | `source_changed` |
 | `invalid_passage_query` |
 | `passage_unavailable` |
+| `invalid_entity_candidate_query` |
+| `entity_candidates_unavailable` |
 | `invalid_entity_page` |
 | `unauthenticated` |
 | `invalid_body` |

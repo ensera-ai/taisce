@@ -86,12 +86,6 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 		if len(expired) == 0 {
 			return expireUnusedSubjects(ctx, tx, s.schema, scope, limit, out.Deleted)
 		}
-		names, err := removeEntityNamesTx(ctx, tx, s.schema, scope, "", expired)
-		if err != nil {
-			return err
-		}
-		out.Deleted["entity_name_receipt"] = names
-
 		kinds, err := declaredKinds(ctx, tx, s.schema)
 		if err != nil {
 			return err
@@ -117,6 +111,14 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 			}
 			out.Deleted[k.kind] = int(tag.RowsAffected())
 		}
+
+		// Count registered aggregate projections before changing a source-owned name input can
+		// invalidate them through its trigger.
+		names, err := removeEntityNamesTx(ctx, tx, s.schema, scope, "", expired)
+		if err != nil {
+			return err
+		}
+		out.Deleted["entity_name_receipt"] = names
 
 		// A jointly supported fact can remain, but its expired source quote cannot.
 		if _, err := tx.Exec(ctx, s.schema.SQL(`DELETE FROM {schema}.fact_evidence WHERE source_observation_id=ANY($1::uuid[])`), expired); err != nil {

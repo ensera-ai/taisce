@@ -27,6 +27,7 @@ import (
 
 	"github.com/ensera-ai/taisce/internal/credential"
 	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/entitycandidate"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/passage"
 	"github.com/ensera-ai/taisce/internal/recall"
@@ -42,37 +43,39 @@ const Version = "v1"
 
 // Server is the HTTP surface over one instance.
 type Server struct {
-	credentials  *credential.Store
-	audit        *pg.AuditStore
-	exporter     *pg.Exporter
-	projects     *pg.ProjectStore
-	observations *pg.ObservationStore
-	eraser       *pg.Eraser
-	recaller     *recall.Recaller
-	citations    *pg.CitationStore
-	records      *pg.RecordStore
-	artifacts    *pg.ArtifactStore
-	subjects     *pg.SubjectStore
-	passages     *passage.Retriever
-	schema       pg.Schema
-	log          *slog.Logger
-	authAudits   refusedAuthBudget
-	admission    *Admission
+	credentials      *credential.Store
+	audit            *pg.AuditStore
+	exporter         *pg.Exporter
+	projects         *pg.ProjectStore
+	observations     *pg.ObservationStore
+	eraser           *pg.Eraser
+	recaller         *recall.Recaller
+	citations        *pg.CitationStore
+	records          *pg.RecordStore
+	artifacts        *pg.ArtifactStore
+	subjects         *pg.SubjectStore
+	passages         *passage.Retriever
+	entityCandidates *entitycandidate.Retriever
+	schema           pg.Schema
+	log              *slog.Logger
+	authAudits       refusedAuthBudget
+	admission        *Admission
 }
 
 // Stores names the memory dependencies explicitly so adding a capability cannot shift positional wiring.
 type Stores struct {
-	Audit        *pg.AuditStore
-	Exporter     *pg.Exporter
-	Projects     *pg.ProjectStore
-	Observations *pg.ObservationStore
-	Eraser       *pg.Eraser
-	Recaller     *recall.Recaller
-	Citations    *pg.CitationStore
-	Records      *pg.RecordStore
-	Artifacts    *pg.ArtifactStore
-	Subjects     *pg.SubjectStore
-	Passages     *passage.Retriever
+	Audit            *pg.AuditStore
+	Exporter         *pg.Exporter
+	Projects         *pg.ProjectStore
+	Observations     *pg.ObservationStore
+	Eraser           *pg.Eraser
+	Recaller         *recall.Recaller
+	Citations        *pg.CitationStore
+	Records          *pg.RecordStore
+	Artifacts        *pg.ArtifactStore
+	Subjects         *pg.SubjectStore
+	Passages         *passage.Retriever
+	EntityCandidates *entitycandidate.Retriever
 }
 
 // NewServer keeps the credential store separate because it uses the protected registry connection.
@@ -94,8 +97,8 @@ func NewServer(credentials *credential.Store, stores Stores, schema pg.Schema, l
 		credentials: credentials, audit: stores.Audit, exporter: stores.Exporter, projects: stores.Projects,
 		observations: stores.Observations, eraser: stores.Eraser, recaller: stores.Recaller,
 		citations: stores.Citations, records: stores.Records, artifacts: stores.Artifacts, subjects: stores.Subjects,
-		passages: stores.Passages,
-		schema:   schema, log: log, admission: gate,
+		passages: stores.Passages, entityCandidates: stores.EntityCandidates,
+		schema: schema, log: log, admission: gate,
 	}
 }
 
@@ -168,6 +171,7 @@ type route struct {
 var operations = []route{
 	{Operation{domain.AuditMessageGet, http.MethodPost, "/messages/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getMessage }, messageRequest{}, pg.SourceMessageWindow{}},
 	{Operation{domain.AuditEmbeddingSearch, http.MethodPost, "/passages/search", http.StatusOK}, func(s *Server) grantedHandler { return s.searchPassages }, passageRequest{}, passage.Page{}},
+	{Operation{domain.AuditEntityEmbeddingSearch, http.MethodPost, "/entities/candidates", http.StatusOK}, func(s *Server) grantedHandler { return s.searchEntityCandidates }, entityCandidateRequest{}, entitycandidate.Page{}},
 	{Operation{domain.AuditEntityList, http.MethodPost, "/entities/list", http.StatusOK}, func(s *Server) grantedHandler { return s.listEntities }, entityListRequest{}, pg.EntityPage{}},
 	{Operation{domain.AuditEntityGet, http.MethodPost, "/entities/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getEntity }, entityGetRequest{}, pg.EntityIdentity{}},
 	{Operation{domain.AuditSubjectRegister, http.MethodPost, "/subjects/register", http.StatusOK}, func(s *Server) grantedHandler { return s.registerSubject }, pg.SubjectRegistration{}, pg.SubjectWrite{}},
@@ -889,27 +893,29 @@ const (
 	// A key identifies one logical write, including after its content has been erased.
 	codeIdempotencyConflict errorCode = "idempotency_conflict"
 	// codeInvalidQuestion is a recall with nothing to answer.
-	codeInvalidQuestion       errorCode = "invalid_question"
-	codeRateLimited           errorCode = "rate_limited"
-	codeInvalidCitation       errorCode = "invalid_citation"
-	codeCitationLimit         errorCode = "citation_limit"
-	codeNotFound              errorCode = "not_found"
-	codeForbidden             errorCode = "forbidden"
-	codeInvalidRecordPage     errorCode = "invalid_record_page"
-	codeInvalidEntityPage     errorCode = "invalid_entity_page"
-	codeInvalidPassageQuery   errorCode = "invalid_passage_query"
-	codeInvalidMessageWindow  errorCode = "invalid_message_window"
-	codeSourceChanged         errorCode = "source_changed"
-	codePassageUnavailable    errorCode = "passage_unavailable"
-	codeInvalidRecallControls errorCode = "invalid_recall_controls"
-	codeInvalidRecordMutation errorCode = "invalid_record_mutation"
-	codeRecordConflict        errorCode = "record_conflict"
-	codeRecordMutationLimit   errorCode = "record_mutation_limit"
-	codeInvalidArtifact       errorCode = "invalid_artifact"
-	codeInvalidSubject        errorCode = "invalid_subject"
-	codeSubjectConflict       errorCode = "subject_conflict"
-	codeArtifactConflict      errorCode = "artifact_conflict"
-	codeStorageCapacity       errorCode = "storage_capacity"
+	codeInvalidQuestion             errorCode = "invalid_question"
+	codeRateLimited                 errorCode = "rate_limited"
+	codeInvalidCitation             errorCode = "invalid_citation"
+	codeCitationLimit               errorCode = "citation_limit"
+	codeNotFound                    errorCode = "not_found"
+	codeForbidden                   errorCode = "forbidden"
+	codeInvalidRecordPage           errorCode = "invalid_record_page"
+	codeInvalidEntityPage           errorCode = "invalid_entity_page"
+	codeInvalidPassageQuery         errorCode = "invalid_passage_query"
+	codeInvalidEntityCandidateQuery errorCode = "invalid_entity_candidate_query"
+	codeInvalidMessageWindow        errorCode = "invalid_message_window"
+	codeSourceChanged               errorCode = "source_changed"
+	codePassageUnavailable          errorCode = "passage_unavailable"
+	codeEntityCandidatesUnavailable errorCode = "entity_candidates_unavailable"
+	codeInvalidRecallControls       errorCode = "invalid_recall_controls"
+	codeInvalidRecordMutation       errorCode = "invalid_record_mutation"
+	codeRecordConflict              errorCode = "record_conflict"
+	codeRecordMutationLimit         errorCode = "record_mutation_limit"
+	codeInvalidArtifact             errorCode = "invalid_artifact"
+	codeInvalidSubject              errorCode = "invalid_subject"
+	codeSubjectConflict             errorCode = "subject_conflict"
+	codeArtifactConflict            errorCode = "artifact_conflict"
+	codeStorageCapacity             errorCode = "storage_capacity"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -927,6 +933,7 @@ const (
 var errorCodes = []errorCode{
 	codeInvalidMessageWindow, codeSourceChanged,
 	codeInvalidPassageQuery, codePassageUnavailable,
+	codeInvalidEntityCandidateQuery, codeEntityCandidatesUnavailable,
 	codeInvalidEntityPage,
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,

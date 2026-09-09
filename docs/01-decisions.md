@@ -3985,3 +3985,45 @@ against the unchanged 91.6% floor. Initial qualification configuration failures 
 retained as evidence. See `docs/23-gpu-qualification.md` for model identities and lifecycle evidence.
 The remote logical wipe returned zero and provider termination was verified before closing the run.
 The ephemeral SSH key was removed; the account-level GPU credential remains only in the operator environment.
+
+## D110 — Entity similarity proposes identities and never resolves them
+
+**Decision.** Entity embeddings are a separate model space over bounded canonical names, retained
+aliases and verbatim fact evidence. They have their own input version and immutable
+model/revision/endpoint/dimension identity. Equal model settings do not make message and entity
+vectors interchangeable. Candidate search returns stable entity IDs, bounded name previews and
+similarity scores; it cannot merge, rename or create an entity. Resolution policy remains a measured
+caller decision because a false merge has a different governance cost from a missed candidate.
+
+Each generation materializes a finite set of named entity IDs under the project row lock. A named
+entity created after that point makes every retained generation stale, including an active one, and
+search refuses before sending the question to the provider. Repair can reconstruct lost vectors only
+when the target snapshot remains complete. A stale generation requires a new generation, which can be
+activated atomically before the old generation is cancelled and pruned. At most two nondiscarded
+generations and one million targets are retained per project.
+
+Every aggregate vector registers every contributing observation: entity creation/name receipts and
+the observations behind its verbatim fact evidence, up to 4096 distinct sources. Removing any source
+deletes the aggregate and makes a ready build incomplete. A bounded repair reconstructs the surface
+from retained data. Model calls run outside database transactions; publication rechecks input and
+source digests under source-row and per-entity locks, so a result calculated from changed or erased
+evidence cannot commit. Search is project-scoped, exact by default, optionally uses a bounded HNSW
+candidate set, and writes only content-free credential audit.
+
+**Alternatives and limits.** Reusing message vectors would conflate two input contracts. Embedding an
+LLM-written entity summary would introduce claims that are harder to attribute and erase. Incrementally
+adding targets to a completed generation would make its coverage and model input frontier ambiguous;
+explicit replacement keeps both observable. These candidates do not establish a safe automatic merge
+threshold, semantic quality, filtered ANN recall or production capacity. Community-report embeddings
+remain a distinct third surface. Tracking: #139, #10, #11 and #19.
+
+**Verification.** PostgreSQL tests cover exact and optional ANN ordering, distinct message/entity
+identity, shared-source ownership, erasure, retention, export, repair, replacement after a new entity,
+changed input during inference, invalid provider output, activation, cancellation, pruning and retained
+generation capacity. HTTP tests cover project authorization, read-only credentials, bounded input,
+provider failure and content-free audit. CLI tests cover the generation lifecycle and search contract.
+The full PostgreSQL-backed repository suite passes at 91.8% cross-package coverage against the
+unchanged 91.6% floor; focused PostgreSQL, HTTP and CLI race checks pass. These establish functional
+and concurrency correctness. The configured local provider persists and retrieves entity candidates
+at its actual 2560 dimensions. These results do not establish semantic quality, latency, throughput
+or production capacity.
