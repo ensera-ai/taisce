@@ -42,8 +42,9 @@ services:
     volumes:
       - ./deploy/gpu/generation-nginx.conf:/etc/nginx/nginx.conf:ro
       - ./qualification-tls:/tls:ro
+      - ./qualification-tls/ca.crt:/etc/ssl/certs/ca-certificates.crt:ro
     healthcheck:
-      test: ["CMD", "wget", "--ca-certificate=/tls/ca.crt", "-qO-", "https://127.0.0.1:8000/health"]
+      test: ["CMD", "wget", "-qO-", "https://127.0.0.1:8000/health"]
       interval: 15s
       timeout: 10s
       retries: 10
