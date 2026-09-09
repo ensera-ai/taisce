@@ -58,12 +58,20 @@ echo 'Running full regression and configured-provider tests'
     fi
     sleep 2
 done ) > results/container-stats.log 2>&1 &
-monitor_pid=$!
+container_monitor_pid=$!
+( printf 'timestamp, index, name, memory.used [MiB], utilization.gpu [%%], power.draw [W]\n'
+while true; do
+    nvidia-smi --query-gpu=timestamp,index,name,memory.used,utilization.gpu,power.draw \
+        --format=csv,noheader,nounits
+    sleep 2
+done ) > results/gpu-stats.csv 2>&1 &
+gpu_monitor_pid=$!
 set +e
 timeout 7200 "${dc[@]}" --profile qualification run --rm test > results/test-runner.log 2>&1
 result=$?
-kill "$monitor_pid" 2>/dev/null
-wait "$monitor_pid" 2>/dev/null
+kill "$container_monitor_pid" "$gpu_monitor_pid" 2>/dev/null
+wait "$container_monitor_pid" 2>/dev/null
+wait "$gpu_monitor_pid" 2>/dev/null
 set -e
 "${dc[@]}" ps --format json > results/services-after.json
 nvidia-smi --query-gpu=name,memory.used,utilization.gpu --format=csv > results/gpus-after.csv

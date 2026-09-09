@@ -10,10 +10,13 @@ termination verification even when a model or test fails.
 
 `compose.gpu.yaml` overrides `compose.yaml`. It runs PostgreSQL, bootstrap, API, workers and two
 vLLM services on the node. Integration fixtures use a second PostgreSQL cluster because they
-change cluster-wide roles; the deployed API and worker retain their own credentials. The generation service uses the pinned BF16 Qwen3.6-35B-A3B revision
-for extraction and reports, on four cards with tensor parallelism. The pinned BF16
-Qwen3-Embedding-4B revision uses one card. The remaining cards are available for subsequent
-workload experiments; merely renting eight GPUs is not evidence of eight-GPU utilization.
+change cluster-wide roles; the deployed API and worker retain their own credentials. The generation
+service uses the pinned BF16 Qwen3.6-35B-A3B revision for extraction and reports, split by pipeline
+parallelism across seven cards. The pinned BF16 Qwen3-Embedding-4B revision uses the eighth card.
+Qwen3.6 has 16 attention heads and 2 key/value heads, so a seven-way tensor split is invalid;
+vLLM's uneven pipeline split assigns the complete seven-card generation allocation without changing
+model precision. Allocation alone is not evidence of sustained utilization or a scaling result; the
+captured per-card measurements describe the exercised workload.
 The vLLM image version is fixed and its resolved digest is captured in the results.
 
 The qualification test PostgreSQL container is constrained to the documented eight-vCPU, 32-GiB
