@@ -72,7 +72,8 @@ func TestClosedRecordInspectionRequiresAvailableWithdrawalMetadata(t *testing.T)
 	schema := tenant(t, pool, "retract_read_failure")
 	id := statedAt(t, ctx, pg.NewObservationStore(pool), pg.NewFactStore(pool), schema, time.Now().UTC(), "Atlas works at Ensera", domain.Claim{Subject: "Atlas", Predicate: "works_at", Object: "Ensera", Statement: "Atlas works at Ensera", Cardinality: domain.CardinalityMany})
 	// A closed knowledge interval is not by itself evidence of a human withdrawal.
-	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.fact SET known=tstzrange(lower(known),clock_timestamp()) WHERE fact_id=$1`), id); err != nil {
+	// This fixture tests metadata availability, independently of host/database wall-clock ordering.
+	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.fact SET known=tstzrange(lower(known),lower(known)+interval '1 microsecond') WHERE fact_id=$1`), id); err != nil {
 		t.Fatal(err)
 	}
 	store, citations := pg.NewRecordStore(pool, schema), pg.NewCitationStore(pool, schema)
