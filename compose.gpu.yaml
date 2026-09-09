@@ -105,6 +105,7 @@ services:
       TAISCE_INFERENCE_EXTRACTOR_MODEL: Qwen/Qwen3.6-35B-A3B
       TAISCE_INFERENCE_EMBEDDING_ENDPOINT: https://embedding:8000/v1
       TAISCE_INFERENCE_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-4B
+      TAISCE_INFERENCE_EMBEDDING_REVISION: 5cf2132abc99cad020ac570b19d031efec650f2b
       TAISCE_INFERENCE_ALLOWLIST: generation:8000,embedding:8000
       GOMAXPROCS: "16"
     command: [bash, deploy/gpu/tests.sh]

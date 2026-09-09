@@ -24,6 +24,7 @@ gate coverage bash scripts/coverage-gate.sh results/coverage.out
 gate vet go vet ./...
 gate inference go test -tags inference -count=1 -v -timeout 90m ./internal/infra/inference/
 gate embedding-provider go test -tags inference -count=1 -v -timeout 5m ./internal/infra/pg/ -run '^TestConfiguredEmbeddingProvider'
+gate report-quality go test -tags=inference,qualification -count=1 -v -timeout 30m ./internal/infra/pg/ -run '^TestReportEmbeddingNamedCorpusQualityAndANNRecall$'
 gate passage-provider go test -tags inference -count=1 -v -timeout 5m ./internal/api/ -run '^TestConfiguredPassageProvider'
 gate race "${clean_inference[@]}" go test -race -count=1 -timeout 5m ./internal/api ./internal/infra/pg -run 'Test(MessageWindows|MessageReference|EveryOperation|ReadOnlyCredentials)'
 exit "$failed"
