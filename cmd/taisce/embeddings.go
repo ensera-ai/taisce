@@ -93,7 +93,7 @@ func embeddingsCommand(ctx context.Context, args []string, out io.Writer) error 
 	case "prune":
 		result, err = store.Prune(ctx, *scope, *generation, actor, *limit)
 	default:
-		config, e := inference.ConfigFromEnv()
+		config, e := inference.EmbeddingConfigFromEnv()
 		if e != nil {
 			return e
 		}

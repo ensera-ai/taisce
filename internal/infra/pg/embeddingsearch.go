@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -18,15 +19,21 @@ type MessageSearchOptions struct {
 	Candidates int // Zero is the exact baseline; a positive bounded count opts into ANN candidates.
 	Subject    string
 	Role       string
+	// Application reads use the transport's credential audit policy; operator reads audit here.
+	applicationRead bool
 }
 
 type MessageMatch struct {
-	ChunkID    string  `json:"chunk_id"`
-	SourceID   string  `json:"source_id"`
-	Ordinal    int     `json:"ordinal"`
-	Role       string  `json:"role"`
-	Preview    string  `json:"preview"`
-	Similarity float64 `json:"similarity"`
+	ChunkID         string    `json:"chunk_id"`
+	SourceID        string    `json:"source_id"`
+	Ordinal         int       `json:"ordinal"`
+	Role            string    `json:"role"`
+	Preview         string    `json:"preview"`
+	Similarity      float64   `json:"similarity"`
+	OccurredAt      time.Time `json:"occurred_at"`
+	MessageBytes    int       `json:"message_bytes"`
+	PreviewComplete bool      `json:"preview_complete"`
+	PreviewByteEnd  int       `json:"preview_byte_end"`
 }
 
 type MessageSearchResult struct {
@@ -40,7 +47,11 @@ type MessageSearchResult struct {
 // ANN candidates are opt-in and reranked against full-precision values and current source hashes.
 func (s *MessageEmbeddingStore) Search(ctx context.Context, scope, actor string, model EmbeddingModel, vector []float32, options MessageSearchOptions) (MessageSearchResult, error) {
 	out := MessageSearchResult{Matches: []MessageMatch{}, Approximate: options.Candidates > 0}
-	if err := validEmbeddingIDs(scope, actor); err != nil {
+	var ids []string
+	if !options.applicationRead {
+		ids = append(ids, actor)
+	}
+	if err := validEmbeddingIDs(scope, ids...); err != nil {
 		return out, err
 	}
 	if err := model.Validate(); err != nil {
@@ -72,12 +83,13 @@ func (s *MessageEmbeddingStore) Search(ctx context.Context, scope, actor string,
 			candidates += fmt.Sprintf(` ORDER BY (%s) <=> (%s) LIMIT $7`, expression, queryExpression)
 		}
 		query := `WITH candidates AS MATERIALIZED (` + candidates + `), eligible AS MATERIALIZED (
-   SELECT v.chunk_id,o.observation_id,m.ordinal,m.role,substring(m.content FOR 512) AS preview,v.embedding
+   SELECT v.chunk_id,o.observation_id,m.ordinal,m.role,substring(m.content FOR 512) AS preview,v.embedding,
+     m.occurred_at,octet_length(m.content) AS message_bytes,char_length(m.content)<=512 AS preview_complete
    FROM candidates v JOIN {schema}.observation o ON o.scope=v.scope AND o.observation_id=v.source_observation_id
    JOIN {schema}.turn_message m ON m.observation_id=o.observation_id AND m.chunk_id=v.chunk_id
    WHERE ($4::text='' OR o.data_subject_id=$4) AND ($5::text='' OR m.role=$5)
    AND v.input_digest=sha256(convert_to(m.content,'UTF8')))
-   SELECT chunk_id::text,observation_id::text,ordinal,role,preview,1-(embedding <=> $3::vector)
+   SELECT chunk_id::text,observation_id::text,ordinal,role,preview,1-(embedding <=> $3::vector),occurred_at,message_bytes,preview_complete
    FROM eligible ORDER BY embedding <=> $3::vector,chunk_id LIMIT $6`
 		args := []any{scope, generation.ID, string(encoded), options.Subject, options.Role, options.Limit}
 		if options.Candidates > 0 {
@@ -89,15 +101,19 @@ func (s *MessageEmbeddingStore) Search(ctx context.Context, scope, actor string,
 		}
 		for rows.Next() {
 			var match MessageMatch
-			if err := rows.Scan(&match.ChunkID, &match.SourceID, &match.Ordinal, &match.Role, &match.Preview, &match.Similarity); err != nil {
+			if err := rows.Scan(&match.ChunkID, &match.SourceID, &match.Ordinal, &match.Role, &match.Preview, &match.Similarity, &match.OccurredAt, &match.MessageBytes, &match.PreviewComplete); err != nil {
 				rows.Close()
 				return err
 			}
+			match.PreviewByteEnd = len(match.Preview)
 			out.Matches = append(out.Matches, match)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
+		}
+		if options.applicationRead {
+			return nil
 		}
 		return embeddingAudit(ctx, tx, s.schema, scope, actor, "embedding.search", int64(len(out.Matches)))
 	})
@@ -105,4 +121,11 @@ func (s *MessageEmbeddingStore) Search(ctx context.Context, scope, actor string,
 		return MessageSearchResult{}, err
 	}
 	return out, nil
+}
+
+// SearchEvidence is a source read for an already-authorized application. Like the record and
+// citation stores, it leaves credential audit policy to the transport; operator Search remains audited.
+func (s *MessageEmbeddingStore) SearchEvidence(ctx context.Context, scope string, model EmbeddingModel, vector []float32, options MessageSearchOptions) (MessageSearchResult, error) {
+	options.applicationRead = true
+	return s.Search(ctx, scope, "", model, vector, options)
 }

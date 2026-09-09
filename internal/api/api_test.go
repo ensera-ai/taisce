@@ -832,6 +832,7 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		domain.AuditRecordAssert:    {map[string]any{"records": []pg.RecordAssertion{{IdempotencyKey: "29ec5631-bae3-4cf8-a165-a8759a8f9931", DataSubjectID: "subject-1", Subject: "Atlas", Predicate: "works_at", Object: "Ensera", Statement: "Atlas works at Ensera"}}}, http.StatusOK},
 		domain.AuditFreshness:       {nil, http.StatusOK},
 		domain.AuditRecall:          {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
+		domain.AuditEmbeddingSearch: {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
 		domain.AuditExport:          {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
 		domain.AuditErase: {map[string]any{
 			"data_subject_id": "subject-1", "reason": "the ledger test",
@@ -880,6 +881,8 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	run(domain.AuditFreshness)
 	h.form(t)
 	run(domain.AuditRecall)
+	attachPassages(t, h, nil).activate(t, "p1", "v1")
+	run(domain.AuditEmbeddingSearch)
 	exercise[domain.AuditEntityGet].body["id"] = entityIDForInspection(t, h)
 	run(domain.AuditEntityList)
 	run(domain.AuditEntityGet)

@@ -135,7 +135,8 @@ test-inference:
 	@echo "inference profile: $(INFERENCE_PROFILE)"
 	set -a; . ./deploy/inference/$(INFERENCE_PROFILE).env; set +a; \
 	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v -timeout 3h ./internal/infra/inference/ && \
-	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v -timeout 5m ./internal/infra/pg/ -run '^TestConfiguredEmbeddingProvider'
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v -timeout 5m ./internal/infra/pg/ -run '^TestConfiguredEmbeddingProvider' && \
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v -timeout 5m ./internal/api/ -run '^TestConfiguredPassageProvider'
 
 # Rewrite the prompt golden from the prompt file.
 #

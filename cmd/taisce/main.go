@@ -31,6 +31,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
+	"github.com/ensera-ai/taisce/internal/passage"
 	"github.com/ensera-ai/taisce/internal/recall"
 )
 
@@ -174,6 +175,13 @@ func run(ctx context.Context, log *slog.Logger) error {
 		stats := admission.Stats()
 		log.Info("HTTP admission totals", "accepted", stats.Accepted, "refused", stats.Refused, "anonymous_audit_suppressed", stats.AuditSuppressed)
 	}()
+	var passages *passage.Retriever
+	if role != roleWorker {
+		passages, err = configuredPassages(memory, schema)
+		if err != nil {
+			return err
+		}
+	}
 	server := api.NewServer(
 		credential.NewStore(registry, string(migrate.ControlSchema)), api.Stores{
 			Audit:        pg.NewAuditStore(memory, schema),
@@ -186,6 +194,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 			Records:      pg.NewRecordStore(memory, schema),
 			Artifacts:    pg.NewArtifactStore(memory, schema),
 			Subjects:     pg.NewSubjectStore(memory, schema),
+			Passages:     passages,
 		}, schema,
 		log,
 		admission,

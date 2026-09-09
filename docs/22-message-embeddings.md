@@ -72,3 +72,40 @@ Index-plan fixtures explicitly control planner costs on small corpora to prove e
 eligibility and generation partition pruning. They do not measure latency, throughput, capacity or
 approximate recall. Controlled-host targets and GPU configuration remain external qualification work.
 See D104 and private issue #131 for scope and evidence.
+
+## Application passage search
+
+Set `TAISCE_INFERENCE_EMBEDDING_REVISION` on the API process to the exact revision used when starting
+the active generation. Configure the embedding model and its allowlisted endpoint/key as for the
+operator commands. API-only embedding does not require an extractor model. An empty revision leaves
+the route unavailable; an explicitly configured but invalid provider refuses API startup.
+
+A read-only or read-write project credential can call:
+
+```http
+POST /v1/passages/search
+Authorization: Bearer <project-credential>
+Content-Type: application/json
+
+{"question":"Which database did we choose?","limit":10,"data_subject_id":"subject-1","source_role":"user"}
+```
+
+The result contains `generation_id`, `through_offset`, `build_state`, `approximate`, and `passages`.
+Each passage contains `chunk_id`, `source_id`, `ordinal`, `role`, `occurred_at`, `similarity`, `preview`,
+`message_bytes`, `preview_byte_end` and `preview_complete`. The source id identifies the observation;
+the chunk id identifies its message. These are source references, not asserted-fact citation ids.
+There is no general message-download endpoint implied by these references. Previews start at byte
+zero and include at most 512 Unicode characters; the exclusive end offset is in UTF-8 bytes.
+
+`limit` defaults to 10 and is bounded to 1–32. `candidates` defaults to zero (exact retrieval); a
+positive value, at least the limit and at most 1000, opts into approximate candidates with exact
+reranking. Filtering happens after ANN candidate selection, so filtered ANN can return fewer matches.
+`source_role` accepts user, assistant, system or tool. A missing subject filter searches the entire
+credential project. The question is limited to 8192 UTF-8 bytes; subject filters to 1024 bytes.
+
+This is source evidence, not a factual answer or safe merge decision. The generation covers only its
+captured observation offset. New messages require operator generation work; continuous indexing is
+still tracked separately. A missing active generation, configuration mismatch or unavailable provider
+returns `503 passage_unavailable`; invalid controls return `400 invalid_passage_query`. Read requests
+share API admission and the 30-second request deadline. Read audit is content-free and best-effort,
+matching other application reads; operator search keeps its own transactional audit. See D106.

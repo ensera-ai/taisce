@@ -28,6 +28,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/credential"
 	"github.com/ensera-ai/taisce/internal/domain"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
+	"github.com/ensera-ai/taisce/internal/passage"
 	"github.com/ensera-ai/taisce/internal/recall"
 )
 
@@ -52,6 +53,7 @@ type Server struct {
 	records      *pg.RecordStore
 	artifacts    *pg.ArtifactStore
 	subjects     *pg.SubjectStore
+	passages     *passage.Retriever
 	schema       pg.Schema
 	log          *slog.Logger
 	authAudits   refusedAuthBudget
@@ -70,6 +72,7 @@ type Stores struct {
 	Records      *pg.RecordStore
 	Artifacts    *pg.ArtifactStore
 	Subjects     *pg.SubjectStore
+	Passages     *passage.Retriever
 }
 
 // NewServer keeps the credential store separate because it uses the protected registry connection.
@@ -91,7 +94,8 @@ func NewServer(credentials *credential.Store, stores Stores, schema pg.Schema, l
 		credentials: credentials, audit: stores.Audit, exporter: stores.Exporter, projects: stores.Projects,
 		observations: stores.Observations, eraser: stores.Eraser, recaller: stores.Recaller,
 		citations: stores.Citations, records: stores.Records, artifacts: stores.Artifacts, subjects: stores.Subjects,
-		schema: schema, log: log, admission: gate,
+		passages: stores.Passages,
+		schema:   schema, log: log, admission: gate,
 	}
 }
 
@@ -162,6 +166,7 @@ type route struct {
 }
 
 var operations = []route{
+	{Operation{domain.AuditEmbeddingSearch, http.MethodPost, "/passages/search", http.StatusOK}, func(s *Server) grantedHandler { return s.searchPassages }, passageRequest{}, passage.Page{}},
 	{Operation{domain.AuditEntityList, http.MethodPost, "/entities/list", http.StatusOK}, func(s *Server) grantedHandler { return s.listEntities }, entityListRequest{}, pg.EntityPage{}},
 	{Operation{domain.AuditEntityGet, http.MethodPost, "/entities/get", http.StatusOK}, func(s *Server) grantedHandler { return s.getEntity }, entityGetRequest{}, pg.EntityIdentity{}},
 	{Operation{domain.AuditSubjectRegister, http.MethodPost, "/subjects/register", http.StatusOK}, func(s *Server) grantedHandler { return s.registerSubject }, pg.SubjectRegistration{}, pg.SubjectWrite{}},
@@ -891,6 +896,8 @@ const (
 	codeForbidden             errorCode = "forbidden"
 	codeInvalidRecordPage     errorCode = "invalid_record_page"
 	codeInvalidEntityPage     errorCode = "invalid_entity_page"
+	codeInvalidPassageQuery   errorCode = "invalid_passage_query"
+	codePassageUnavailable    errorCode = "passage_unavailable"
 	codeInvalidRecallControls errorCode = "invalid_recall_controls"
 	codeInvalidRecordMutation errorCode = "invalid_record_mutation"
 	codeRecordConflict        errorCode = "record_conflict"
@@ -915,6 +922,7 @@ const (
 // change, so it would be wrong before it was useful. The honest statement is that any operation can
 // return any of these, and that is what the contract says.
 var errorCodes = []errorCode{
+	codeInvalidPassageQuery, codePassageUnavailable,
 	codeInvalidEntityPage,
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,

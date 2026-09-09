@@ -3793,3 +3793,53 @@ The affected description, neighborhood, resolution and thematic checks pass agai
 local provider. Resolution distributions still overlap; the small thematic fixture retains a positive
 gap but does not establish a shipping threshold. The semantic package has 100% statement coverage
 under the race detector; the complete cross-package suite passes at 91.9%, above the unchanged floor.
+
+## D106 — Authenticated passage evidence uses an explicitly bound active message generation
+
+**Decision.** `POST /v1/passages/search` accepts a bounded question and retrieves source messages
+under the credential's project. It is a read operation, available to read-only credentials. Similarity
+is evidence selection, not an assertion of a fact: results carry source/chunk identity, ordinal,
+role, occurrence time, similarity and a UTF-8 preview. The preview is at most 512 Unicode characters;
+`message_bytes`, `preview_byte_end` (exclusive, starting at zero) and `preview_complete` distinguish
+an excerpt from the entire message. This route does not expose a general source-content lookup.
+
+The API opts into read-path inference with `TAISCE_INFERENCE_EMBEDDING_REVISION`. Empty disables the
+capability; setting it requires valid embedding configuration at startup. Embedding-only configuration
+validates the effective provider's allowlisted endpoint and paired credential without requiring an
+extractor model. Worker-only processes do not configure this HTTP capability. The configured model
+name, explicit revision, endpoint digest and active dimensions must match the active generation
+before inference; storage checks identity again after the provider returns. Activation during inference
+therefore cannot combine different vector spaces. No active/matching generation or provider failure
+returns a content-free 503. Operator configuration and generation idempotency keys are not in results.
+
+**Boundary and cost.** The credential authorizes a project, not a data subject; callers can filter
+by subject and role, and must supply the intended subject for personal questions. Shared HTTP
+admission, the 30-second request context and inference payload/vector bounds also apply here. Questions
+are at most 8192 bytes, results at most 32, and optional ANN candidates at most 1000. Each request
+performs an active-generation lookup, one provider call and a PostgreSQL read. No latency claim is
+made for this additional read-path dependency. Exact retrieval is the default. ANN candidates are
+selected before subject/role filtering and full-precision reranking; selective queries can return
+fewer results, and ANN recall is unqualified. The response includes generation identity, finite
+`through_offset` and build state; it does not promise continuous indexing of new observations.
+
+Source hashes and source joins are checked at the final read. An erasure completed during inference
+removes the source from that result. As with other memory reads, a response already read or delivered
+cannot be recalled after a concurrent erasure. Credential audit uses the existing best-effort,
+content-free transport policy; a failed audit write is logged, not a claim of atomic read/audit
+coverage. Operator vector search retains its transactionally recorded operator audit.
+
+**Alternatives and reversal.** Rejected silently selecting any configured embedding model, since equal
+vector lengths do not establish a common space; rejected merging passages into asserted-fact recall,
+since similarity does not establish truth; rejected requiring an extractor for API-only inference,
+since it is not used. Mandatory ANN would sacrifice the exact comparison baseline without measured
+justification. This adds a transport/application capability over D104 storage and requires no migration.
+Disabling the opt-in or removing the route reverses it without rewriting stored generations.
+
+**Evidence.** Real PostgreSQL and HTTP tests cover read-only access, credential audit, project/subject/
+role isolation, bounded Unicode previews, source erasure, provider failure, activation during inference
+and storage refusal. The configured-provider test exercises the same authenticated route under the
+`inference` build tag. Controlled-host capacity and semantic ANN quality remain #101/#103.
+
+The local configured-provider HTTP journey passes at its actual 2560 dimensions. The full uncached
+PostgreSQL suite passes at 91.9% cross-package coverage after correcting the independent clock-sensitive
+inspection fixture (#135); the unchanged floor is 91.6%. Targeted race and contract checks pass.

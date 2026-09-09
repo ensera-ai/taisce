@@ -28,6 +28,8 @@ const (
 	// per message, embedding is a forward pass and runs once per entity and once per question.
 	// Operators pick different models for them, and a single variable would force one choice.
 	EnvEmbeddingModel = "TAISCE_INFERENCE_EMBEDDING_MODEL"
+	// An explicit revision opts the API into passage search against matching operator generations.
+	EnvEmbeddingRevision = "TAISCE_INFERENCE_EMBEDDING_REVISION"
 	// EnvEmbeddingEndpoint and EnvEmbeddingAPIKey send embedding somewhere other than generation.
 	//
 	// # Why the two roles can be different providers
@@ -88,15 +90,7 @@ type Config struct {
 // Listing a host is a deliberate act. That is the whole mechanism: it cannot be arrived at by
 // default, only by somebody writing the host down.
 func ConfigFromEnv() (Config, error) {
-	cfg := Config{
-		Endpoint: strings.TrimSuffix(strings.TrimSpace(os.Getenv(EnvEndpoint)), "/"),
-		APIKey:   strings.TrimSpace(os.Getenv(EnvAPIKey)),
-		Model:    strings.TrimSpace(os.Getenv(EnvModel)),
-
-		EmbeddingModel:    strings.TrimSpace(os.Getenv(EnvEmbeddingModel)),
-		EmbeddingEndpoint: strings.TrimSuffix(strings.TrimSpace(os.Getenv(EnvEmbeddingEndpoint)), "/"),
-		EmbeddingAPIKey:   strings.TrimSpace(os.Getenv(EnvEmbeddingAPIKey)),
-	}
+	cfg := inferenceEnvironment()
 	if cfg.Endpoint == "" {
 		return Config{}, fmt.Errorf("%s is not set", EnvEndpoint)
 	}
@@ -107,15 +101,42 @@ func ConfigFromEnv() (Config, error) {
 	if err := permitted(cfg.Endpoint, allowlist); err != nil {
 		return Config{}, err
 	}
-	// Checked separately and against the same list. An embedding endpoint that inherited the
-	// generation endpoint's permission would be a second host receiving somebody's words on the
-	// strength of a decision made about a different one.
+	// Both roles must be allowed when the configuration is used for generation and embedding.
 	if cfg.EmbeddingEndpoint != "" && cfg.EmbeddingEndpoint != cfg.Endpoint {
 		if err := permitted(cfg.EmbeddingEndpoint, allowlist); err != nil {
 			return Config{}, fmt.Errorf("%s: %w", EnvEmbeddingEndpoint, err)
 		}
 	}
 	return cfg, nil
+}
+
+// EmbeddingConfigFromEnv permits an embedding-only API or operator process. It validates the exact
+// endpoint/key pair Embedder will use, without requiring an unrelated generation model or host.
+func EmbeddingConfigFromEnv() (Config, error) {
+	cfg := inferenceEnvironment()
+	if cfg.EmbeddingModel == "" {
+		return Config{}, fmt.Errorf("%s is not set", EnvEmbeddingModel)
+	}
+	endpoint, _ := cfg.EmbeddingsAt()
+	if endpoint == "" {
+		return Config{}, fmt.Errorf("an embedding endpoint is not set")
+	}
+	if err := permitted(endpoint, os.Getenv(EnvAllowlist)); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func inferenceEnvironment() Config {
+	return Config{
+		Endpoint: strings.TrimSuffix(strings.TrimSpace(os.Getenv(EnvEndpoint)), "/"),
+		APIKey:   strings.TrimSpace(os.Getenv(EnvAPIKey)),
+		Model:    strings.TrimSpace(os.Getenv(EnvModel)),
+
+		EmbeddingModel:    strings.TrimSpace(os.Getenv(EnvEmbeddingModel)),
+		EmbeddingEndpoint: strings.TrimSuffix(strings.TrimSpace(os.Getenv(EnvEmbeddingEndpoint)), "/"),
+		EmbeddingAPIKey:   strings.TrimSpace(os.Getenv(EnvEmbeddingAPIKey)),
+	}
 }
 
 // EmbeddingsAt is where embedding goes, and with what key.

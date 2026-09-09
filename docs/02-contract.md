@@ -32,6 +32,7 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 
 | Operation | Method | Path | On success |
 |---|---|---|---|
+| `embedding.search` | POST | `/v1/passages/search` | 200 |
 | `entity.list` | POST | `/v1/entities/list` | 200 |
 | `entity.get` | POST | `/v1/entities/get` | 200 |
 | `subject.register` | POST | `/v1/subjects/register` | 200 |
@@ -55,6 +56,31 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 | `record.retract` | POST | `/v1/records/retract` | 200 |
 
 The operation name is the same identifier the audit ledger records, so an entry in an operator's ledger and a call in a client name the same thing.
+
+## `embedding.search`
+
+POST `/v1/passages/search` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `question` | string |
+| `limit` | integer, optional |
+| `candidates` | integer |
+| `data_subject_id` | string |
+| `source_role` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `generation_id` | string |
+| `through_offset` | integer |
+| `build_state` | string |
+| `approximate` | boolean |
+| `passages` | array of {chunk_id: string, source_id: string, ordinal: integer, role: string, preview: string, similarity: number, occurred_at: timestamp (RFC 3339), message_bytes: integer, preview_complete: boolean, preview_byte_end: integer} |
+
 
 ## `entity.list`
 
@@ -549,6 +575,8 @@ Any operation may answer with any of these.
 
 | Code |
 |---|
+| `invalid_passage_query` |
+| `passage_unavailable` |
 | `invalid_entity_page` |
 | `unauthenticated` |
 | `invalid_body` |
