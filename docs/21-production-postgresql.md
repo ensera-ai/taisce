@@ -159,10 +159,13 @@ that carry the most important reads. Keep autovacuum enabled and inspect `n_dead
 query latency before applying lower scale factors to individual high-churn tables. Global aggressive
 vacuum settings make every tenant pay for the busiest one.
 
-`chunk` is partitioned by project and each project has its own HNSW index. PostgreSQL autovacuum
-processes the partitions but does not automatically analyze a partitioned parent. Run
-`ANALYZE <namespace>.chunk` after a large initial load or a substantial change in partition data
-distribution. See [routine vacuuming](https://www.postgresql.org/docs/18/routine-vacuuming.html).
+`chunk` is partitioned by project for source locality and has no vector column or HNSW index.
+Message, entity and report vectors are partitioned by immutable embedding generation. Each generation
+child owns a directly-created, dimension-specific HNSW index; there is no HNSW index attached to the
+partitioned parent. PostgreSQL autovacuum processes leaf partitions but does not automatically
+analyze a partitioned parent. Analyze the relevant parent after a large initial load or a substantial
+change in partition distribution. See
+[routine vacuuming](https://www.postgresql.org/docs/18/routine-vacuuming.html).
 
 For a large HNSW build or rebuild:
 

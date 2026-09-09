@@ -16,6 +16,11 @@ Qwen3-Embedding-4B revision uses one card. The remaining cards are available for
 workload experiments; merely renting eight GPUs is not evidence of eight-GPU utilization.
 The vLLM image version is fixed and its resolved digest is captured in the results.
 
+The qualification test PostgreSQL container is constrained to the documented eight-vCPU, 32-GiB
+database-host starting specification. The runner samples container CPU, memory and block I/O while
+gates execute. Gate timestamp files make workload-specific peaks distinguishable from model startup
+and the ordinary regression suite.
+
 Only the API is published, on loopback. Model requests use Docker's service names and an explicit
 allowlist. Native vLLM TLS uses a one-day test CA; clients verify its certificate rather than
 bypassing the HTTPS requirement. The CA signing key is removed after issuing the server certificate,
@@ -45,6 +50,12 @@ runs the complete Go regression suite, coverage gate, vet, live inference corpus
 embedding/passage provider journeys and targeted race checks. Independent gates retain their
 individual exit statuses. Ordinary regression/race gates clear live inference variables so that
 fixtures retain their own endpoints and allowlists. A failed gate is reported, never silently converted to a pass.
+
+Database layout runs add a separately named qualification gate. `vector-layout-v1` compares a shared
+ordinary table, generation-list partitions and a bounded 32-way project hash across a fixed mix of
+small, medium and large projects at the production 2,560-dimensional representation. It measures
+exact and ANN recall, query plans, catalog/planning cost, build time, WAL, disk and erasure/vacuum
+behavior. It records observations without creating a target after seeing them.
 
 Collect `results/` and the runner status before cleanup. Redact credentials from any diagnostic
 logs; never copy `.env` or bootstrap logs. Run the root `wipe.sh` even after failure, then request

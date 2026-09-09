@@ -8,8 +8,10 @@ failed=0
 gate() {
     local name="$1"
     shift
+    date -u +%Y-%m-%dT%H:%M:%S.%NZ >"results/$name.started"
     "$@" >"results/$name.log" 2>&1
     local result=$?
+    date -u +%Y-%m-%dT%H:%M:%S.%NZ >"results/$name.finished"
     printf '%s %s\n' "$name" "$result" | tee -a results/gates.txt
     if (( result != 0 )); then failed=1; fi
 }
@@ -25,6 +27,7 @@ gate vet go vet ./...
 gate inference go test -tags inference -count=1 -v -timeout 90m ./internal/infra/inference/
 gate embedding-provider go test -tags inference -count=1 -v -timeout 5m ./internal/infra/pg/ -run '^TestConfiguredEmbeddingProvider'
 gate report-quality go test -tags=inference,qualification -count=1 -v -timeout 30m ./internal/infra/pg/ -run '^TestReportEmbeddingNamedCorpusQualityAndANNRecall$'
+gate vector-layout env TAISCE_VECTOR_LAYOUT_QUALIFICATION=1 go test -tags=qualification -count=1 -v -timeout 50m ./internal/infra/pg/ -run '^TestVectorLayoutOperatingEnvelope$'
 gate passage-provider go test -tags inference -count=1 -v -timeout 5m ./internal/api/ -run '^TestConfiguredPassageProvider'
 gate race "${clean_inference[@]}" go test -race -count=1 -timeout 5m ./internal/api ./internal/infra/pg -run 'Test(MessageWindows|MessageReference|EveryOperation|ReadOnlyCredentials)'
 exit "$failed"

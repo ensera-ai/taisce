@@ -50,9 +50,20 @@ docker image inspect vllm/vllm-openai:v0.28.0 --format '{{json .RepoDigests}}' >
 echo 'Running deployed API/worker smoke test'
 python3 deploy/gpu/smoke.py > results/deployed-smoke.log 2>&1
 echo 'Running full regression and configured-provider tests'
+( while true; do
+    timestamp="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
+    containers="$(docker ps -q --filter label=com.docker.compose.project=taisce-qualification)"
+    if [[ -n "$containers" ]]; then
+        docker stats --no-stream --format "$timestamp {{.Name}} cpu={{.CPUPerc}} memory={{.MemUsage}} block={{.BlockIO}}" $containers
+    fi
+    sleep 2
+done ) > results/container-stats.log 2>&1 &
+monitor_pid=$!
 set +e
 timeout 7200 "${dc[@]}" --profile qualification run --rm test > results/test-runner.log 2>&1
 result=$?
+kill "$monitor_pid" 2>/dev/null
+wait "$monitor_pid" 2>/dev/null
 set -e
 "${dc[@]}" ps --format json > results/services-after.json
 nvidia-smi --query-gpu=name,memory.used,utilization.gpu --format=csv > results/gpus-after.csv

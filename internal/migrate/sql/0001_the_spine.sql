@@ -234,23 +234,15 @@ CREATE TABLE {schema}.fact_evidence (
 -- Passages are EVIDENCE for what the traversal found, not the thing retrieval searches (G1). That is
 -- the inversion, and it is why this table is last in the file rather than first.
 --
--- ── DECIDED HERE: PARTITIONED BY SCOPE, WITH THE INDEX PER PARTITION ──────────────────────────
+-- ── DECIDED HERE: SOURCE CHUNKS PARTITIONED BY PROJECT ─────────────────────────────────────────
 --
--- A SINGLE HNSW over every project's vectors is unreachable in this product. Every recall carries a
--- scope predicate, so the planner takes the scope btree and sorts by exact distance; the ANN index
--- is reachable only by a query shape that is never issued, and it is maintained on every insert and
--- read never. Post-filtering an approximate index against a scope predicate is the same problem
--- from the other side: the index returns its nearest neighbours across all projects and the filter
--- discards most of them, so recall depends on how much of the corpus belongs to the caller.
---
--- LIST partitioning on scope with HNSW per partition removes both. Pruning happens first and the
--- index scan then runs inside one project's graph — no post-filtering, no `ef_search` to tune, and
--- an exact-correct result rather than an approximately-filtered one.
---
--- A partition is DDL per project, created when the project is created: one statement at a
--- controlled moment, not something issued from a request or a worker. And because a tenant is a
--- schema (G11), the partition count PER TABLE is bounded by projects-per-tenant — a handful —
--- rather than by every project on the platform.
+-- The project partition keeps source lookup, erasure and maintenance physically local when projects
+-- are large enough to justify it. This is an operating-layout choice rather than an authorization
+-- boundary; every query and constraint still carries scope. Migration 0046 removes the unstamped
+-- vector column below. Message, entity and report vectors live in model-identified tables partitioned
+-- by generation, with a directly-created HNSW index on each generation child. There is no virtual
+-- HNSW index on a partitioned parent. Project-count and small-project costs require the controlled
+-- layout measurements tracked in #101.
 CREATE TABLE {schema}.chunk (
     chunk_id              uuid        NOT NULL,
     scope                 text        NOT NULL,
@@ -266,7 +258,7 @@ CREATE TABLE {schema}.chunk (
 ) PARTITION BY LIST (scope);
 
 -- The default partition catches a scope whose partition was never created. It exists so that a
--- missing partition is a slow query rather than a failed write — losing a customer's memory because
+-- missing partition is a slow query rather than a failed write — losing source memory because
 -- provisioning missed a step is the worse failure, and a row here is visible to the same erasure.
 CREATE TABLE {schema}.chunk_unpartitioned PARTITION OF {schema}.chunk DEFAULT;
 

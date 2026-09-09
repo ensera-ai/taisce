@@ -70,7 +70,9 @@ services:
   # tests from changing credentials beneath the deployed API and worker.
   test-postgres:
     build: ./deploy/postgres
-    shm_size: 2g
+    cpus: 8.0
+    mem_limit: 32g
+    shm_size: 4g
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
       POSTGRES_DB: taisce
@@ -80,6 +82,36 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+    command:
+      - postgres
+      - -c
+      - shared_buffers=8GB
+      - -c
+      - effective_cache_size=22GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=2GB
+      - -c
+      - autovacuum_work_mem=512MB
+      - -c
+      - max_connections=80
+      - -c
+      - max_wal_size=16GB
+      - -c
+      - min_wal_size=4GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_compression=on
+      - -c
+      - track_io_timing=on
+      - -c
+      - track_wal_io_timing=on
+      - -c
+      - log_autovacuum_min_duration=1s
   api:
     volumes: ["./qualification-tls/ca.crt:/tls/ca.crt:ro"]
     environment:
