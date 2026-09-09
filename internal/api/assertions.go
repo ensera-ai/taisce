@@ -31,6 +31,8 @@ func (s *Server) assertRecords(w http.ResponseWriter, r *http.Request, grant cre
 	if err != nil {
 		s.record(r, domain.AuditRecordAssert, grant, domain.OutcomeRefused, 0)
 		switch {
+		case errors.Is(err, pg.ErrEntityNameLimit):
+			writeError(w, 400, codeInvalidRecordMutation, "entity name exceeds the byte or variant limit; use an existing spelling")
 		case errors.Is(err, pg.ErrInvalidRecordMutation), errors.Is(err, pg.ErrUnboundSpeaker):
 			writeError(w, 400, codeInvalidRecordMutation, "bounded assertions, an admitted predicate and unique UUID retry keys are required")
 		case errors.Is(err, pg.ErrIdempotencyConflict):

@@ -3587,3 +3587,43 @@ but would restore the demonstrated identity-confusion defect (#125).
 missing and retained facts. They now refuse without partial facts, evidence or registrations.
 Additional checks cover damaged endpoint snapshots, faithful reconstruction, compatible shared
 entities and preservation of existing alias arrays; generation/recovery race tests cover shared callers.
+
+## D100 — Name variants retain source ownership outside the entity cache
+
+**Decision.** Each admitted named endpoint retains its exact spelling and normalized identity in
+`entity_name_receipt`, keyed by project, observation, entity and a SHA-256 text key. A database trigger
+computes the key and refuses a source/project or named-identity mismatch. The original text remains
+stored and checked. Records have a source FK and survive derived entity loss, like fact receipts.
+Export includes the subject's own records; erasure and expiry delete them and rebuild affected caches
+in the same transaction. Recovery restores alias caches from surviving records and counts repaired
+retained facts in its existing progress output.
+
+**Identity boundary.** Canonical name, normalized identity and speaker attribution remain the stable
+shared identity validated by D99. Variants are source-contributed spellings of that same normalized
+name, not semantic equivalence declarations or changes to the canonical identity. The canonical
+identity may survive a contributing source when another source still supports the entity. Independent
+support for the same variant survives one contributor's erasure. Aliases from an old untracked array
+have no provable owner: migration 0043 clears those caches rather than assigning invented sources.
+New source-owned records are the recovery input; this unreleased migration does not claim to recover
+unrecorded historical spellings.
+
+**Bounds and cost.** Each name and normalized name is at most 4096 UTF-8 bytes. An entity has at most
+64 displayed variants beyond its canonical spelling; exceeding the bound refuses the fact transaction.
+Ordinary writes update this bounded cache without scanning earlier name records. Recovery and deletion
+query source support through the project/entity index; their work can grow with an entity's supporting
+sources. Controlled-host plan and workload comparisons remain #102/#103. Arrays contain distinct
+display spellings and distinct normalized search terms, not parallel position-paired lists.
+
+**Concurrency and alternatives.** Source rows are locked before named entity work; erasure locks its
+source rows before refreshing shared entities. Recovery uses update locks for its endpoints, extending
+D99's shared locks to avoid competing lock upgrades during cache repair. Reconstructing from shared
+canonical snapshots would invent provenance; retaining unowned arrays would leave erased contributions;
+re-querying all support on every assertion would amplify the write cost with corpus growth. All are
+rejected. Reversal requires a migration and loss or export of the source-owned variant records; changing
+the cache layout alone does not require re-extraction.
+
+**Proof.** PostgreSQL tests cover shared variants, source-specific export, erasure/expiry, entity loss,
+cache repair counts, concurrent insertion, size/cardinality limits, project mismatch and rollback.
+HTTP assertions/corrections expose bounded-input refusals with no partial sources. General entity
+resolution generations and independent projection rebuilding remain #58; this completes #127's
+source-owned spelling lifecycle.

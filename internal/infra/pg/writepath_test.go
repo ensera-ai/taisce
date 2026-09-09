@@ -1530,24 +1530,33 @@ func TestContextIsNotReadFromAnotherProjectsMessage(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	// Deliberately simulate owner-level corruption to keep the defensive context join exercised.
-	// Runtime writes cannot create this state: the project FKs are verified in the integrity suite.
-	if _, err := pool.Exec(ctx, schema.SQL(`ALTER TABLE {schema}.projection_dependency DROP CONSTRAINT dependency_source_project_fk;
-        ALTER TABLE {schema}.fact_evidence DROP CONSTRAINT evidence_source_project_fk;
-        ALTER TABLE {schema}.fact_receipt DROP CONSTRAINT fact_receipt_scope_source_observation_id_fkey;
-        ALTER TABLE {schema}.source_extraction DROP CONSTRAINT source_extraction_scope_source_observation_id_fkey`)); err != nil {
+	// Create valid data first: source admission refuses a foreign observation even when a database
+	// owner removes a constraint. Corrupt only the evidence link to exercise the defensive reader.
+	if err := migrate.ProvisionScope(ctx, pool, schema.String(), "p2"); err != nil {
+		t.Fatal(err)
+	}
+	otherTurn := turnOf(domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: secret})
+	otherTurn.Scope, otherTurn.DataSubjectID = "p2", "subject-2"
+	other, err := obs.Append(ctx, schema, otherTurn)
+	if err != nil {
 		t.Fatal(err)
 	}
 	// A fact in another project whose evidence points at this project's message: the shape a defect
 	// upstream would produce.
 	at := strings.Index(secret, "Ensera")
-	if _, err := pg.NewFactStore(pool).Assert(ctx, schema, "p2", stored.ID, domain.RoleUser, "subject-2",
+	if _, err := pg.NewFactStore(pool).Assert(ctx, schema, "p2", other.ID, domain.RoleUser, "subject-2",
 		domain.Claim{
 			Subject: "Named claimant", Predicate: "works_at", Cardinality: domain.CardinalityMany,
 			Object: "Ensera", Statement: "The user works at Ensera.", Quote: "Ensera",
 			ByteStart: at, ByteEnd: at + len("Ensera"),
 		}); err != nil {
 		t.Fatalf("assert: %v", err)
+	}
+	if _, err := pool.Exec(ctx, schema.SQL(`ALTER TABLE {schema}.fact_evidence DROP CONSTRAINT evidence_source_project_fk`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.fact_evidence SET source_observation_id=$1::uuid WHERE scope='p2'`), stored.ID); err != nil {
+		t.Fatal(err)
 	}
 	var ensera string
 	if err := pool.QueryRow(ctx, schema.SQL(

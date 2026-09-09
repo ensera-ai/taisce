@@ -40,8 +40,10 @@ reports through the normal database mechanism; repeating a complete page does no
 
 Entity endpoints must match the saved identity, including project, canonical/normalized name and
 named/speaker attribution (D99). A conflicting retained UUID refuses the page; it is never silently
-reused or overwritten. Compatible retained entities keep their current metadata and aliases. Alias
-arrays are not in the receipts and cannot be faithfully reconstructed by this operation.
+reused or overwritten. Compatible retained entities keep their identity metadata. D100 extends the
+recovery lock to permit alias-cache repair from surviving source-owned name records; a changed cache
+counts toward `repaired`. Those records must be backed up with observations and fact receipts. Old
+unrecorded spellings cannot be reconstructed. Semantic identity changes remain a separate operation.
 
 Recovery preserves original extraction and pipeline stamps. It does not run newer extraction rules,
 restore a lost receipt, regenerate summaries or embeddings, restore unrecorded additional evidence or

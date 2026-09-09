@@ -82,6 +82,9 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 		if _, err := tx.Exec(ctx, schema.SQL(`SELECT 1 FROM {schema}.data_subject WHERE scope=$1 AND subject_id=$2 FOR UPDATE`), scope, dataSubjectID); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, schema.SQL(`SELECT 1 FROM {schema}.observation WHERE scope=$1 AND data_subject_id=$2 ORDER BY observation_id FOR UPDATE`), scope, dataSubjectID); err != nil {
+			return err
+		}
 
 		kinds, err := declaredKinds(ctx, tx, schema)
 		if err != nil {
@@ -101,6 +104,17 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 		if err := eraseGenerationMetadataTx(ctx, tx, schema, scope, dataSubjectID, &out); err != nil {
 			return err
 		}
+		names, err := removeEntityNamesTx(ctx, tx, schema, scope, dataSubjectID, nil)
+		if err != nil {
+			return err
+		}
+		out.Deleted["entity_name_receipt"] = names
+		var nameResidual int
+		if err := tx.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.entity_name_receipt r JOIN {schema}.observation o
+            ON o.scope=r.scope AND o.observation_id=r.source_observation_id WHERE o.scope=$1 AND o.data_subject_id=$2`), scope, dataSubjectID).Scan(&nameResidual); err != nil {
+			return err
+		}
+		out.Residual["entity_name_receipt"] = nameResidual
 
 		for _, k := range kinds {
 			tag, err := tx.Exec(ctx, deleteProjectionSQL(schema, k), scope, dataSubjectID)

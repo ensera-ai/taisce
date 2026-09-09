@@ -50,6 +50,10 @@ func repairFactSupportTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, i
 	if err := validateReceiptEntitiesTx(ctx, tx, schema, scope, state, left, right); err != nil {
 		return false, err
 	}
+	namesRepaired, err := repairReceiptEntityNamesTx(ctx, tx, schema, scope, state)
+	if err != nil {
+		return false, err
+	}
 	var evidenceAdded int
 	err = tx.QueryRow(ctx, schema.SQL(`WITH expected AS (
         SELECT * FROM jsonb_populate_record(NULL::{schema}.fact_evidence,$1::jsonb)
@@ -100,7 +104,7 @@ func repairFactSupportTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, i
 	if conflict {
 		return false, ErrInvalidReceipt
 	}
-	return evidenceAdded+historyAdded+registrationsAdded > 0, nil
+	return evidenceAdded+historyAdded+registrationsAdded > 0 || namesRepaired, nil
 }
 
 // Expected registrations use the live retained endpoints and the source-owned history. A temporal

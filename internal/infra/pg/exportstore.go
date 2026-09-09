@@ -110,6 +110,13 @@ func (e *Exporter) Export(ctx context.Context, schema Schema, scope, dataSubject
 			return err
 		}
 		out.Sections["source_extraction"] = pins
+		names, err := exportRows(ctx, tx, schema, `SELECT to_jsonb(r)-'name_hash' FROM {schema}.entity_name_receipt r
+            JOIN {schema}.observation o ON o.scope=r.scope AND o.observation_id=r.source_observation_id
+            WHERE o.scope=$1 AND o.data_subject_id=$2 ORDER BY r.entity_id,r.name,r.source_observation_id`, scope, dataSubjectID)
+		if err != nil {
+			return err
+		}
+		out.Sections["entity_name_receipt"] = names
 
 		for _, table := range []string{"fact_generation", "fact_generation_record"} {
 			items, err := exportRows(ctx, tx, schema, "SELECT to_jsonb(r) FROM {schema}."+table+" r WHERE r.scope=$1 AND r.source_observation_id IN (SELECT observation_id FROM {schema}.observation WHERE scope=$1 AND data_subject_id=$2) ORDER BY r.generation_id", scope, dataSubjectID)

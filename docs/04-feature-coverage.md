@@ -29,6 +29,7 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 
 | Work | Delivery and evidence | Remaining scope |
 |---|---|---|
+| Source-owned name variants [#127](https://github.com/althunibat/taisce/issues/127) | D100 retains source-owned spellings, maintains bounded alias caches, reconstructs them during fact recovery, and removes expired/erased contributions while preserving shared support. HTTP bounds and database concurrency/rollback tests cover the lifecycle. | Canonical reassignment/semantic resolution generations remain #58; controlled-host alias lookup and support-scan measurements remain #102/#103. |
 | Entity recovery identity [#125](https://github.com/althunibat/taisce/issues/125) | D99 validates retained endpoint identity under row locks before missing-fact recovery or support repair. Conflicting snapshots refuse the transaction; compatible shared entities keep their IDs and aliases. | Source-owned alias reconstruction remains #102/#58. |
 | Strict request parsing [#87](https://github.com/althunibat/taisce/issues/87) | Closed; `62c931c`. Complete-object decoding, duplicate/case-alias rejection, UTF-8/surrogate validation and nesting/body bounds. HTTP/PostgreSQL refusal tests prove no writes. | None in this issue. |
 | Refused-auth audit [#88](https://github.com/althunibat/taisce/issues/88) | Closed; `16582d4`. No supplied credential text enters the ledger; bounded per-process sampling, suppression counts and race tests. | Fleet-wide admission remains [#93](https://github.com/althunibat/taisce/issues/93). |

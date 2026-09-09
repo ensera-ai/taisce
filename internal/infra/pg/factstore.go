@@ -257,6 +257,9 @@ func resolveEntity(ctx context.Context, tx pgx.Tx, schema Schema, scope, observa
 		return resolveSpeaker(ctx, tx, schema, scope, observationID, dataSubjectID)
 	}
 	normalized := domain.NormalizeName(name)
+	if len(name) > 4096 || len(normalized) > 4096 {
+		return "", ErrEntityNameLimit
+	}
 	if normalized == "" {
 		// A blank end is not an entity. Empty rather than an error: the fact is still worth
 		// storing, it simply has an unresolvable end, and traversal skips it.
@@ -264,6 +267,10 @@ func resolveEntity(ctx context.Context, tx pgx.Tx, schema Schema, scope, observa
 	}
 	if entityType == "" {
 		entityType = "thing"
+	}
+	var retainedSource string
+	if err := tx.QueryRow(ctx, schema.SQL(`SELECT observation_id::text FROM {schema}.observation WHERE scope=$1 AND observation_id=$2::uuid FOR KEY SHARE`), scope, observationID).Scan(&retainedSource); err != nil {
+		return "", err
 	}
 
 	// UPSERT rather than select-then-insert. Two observations naming the same entity form
@@ -282,7 +289,7 @@ func resolveEntity(ctx context.Context, tx pgx.Tx, schema Schema, scope, observa
 	// The surface form becomes an alias when it differs from the canonical one, so the entity
 	// accumulates the ways it has actually been referred to. Cheap, and it is what an operator
 	// judging whether a merge was right needs to see.
-	if _, err := tx.Exec(ctx, schema.SQL(addAliasSQL), id, name, normalized); err != nil {
+	if err := retainEntityNameTx(ctx, tx, schema, scope, observationID, id, name, normalized); err != nil {
 		return "", fmt.Errorf("record alias for %q: %w", name, err)
 	}
 
@@ -299,18 +306,6 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (scope, normalized_name) WHERE identity_kind = 'named' DO UPDATE
    SET resolution_version = {schema}.entity.resolution_version
 RETURNING entity_id::text`
-
-// Appended only when absent and only when it differs from the canonical name, so an entity mentioned
-// a thousand times does not accumulate a thousand copies. Both arrays move together — one is what a
-// person reads and the other is what a lookup matches — because one without the other is how they
-// drift.
-const addAliasSQL = `
-UPDATE {schema}.entity
-   SET aliases            = array_append(aliases, $2),
-       normalized_aliases = array_append(normalized_aliases, $3)
- WHERE entity_id = $1::uuid
-   AND canonical_name <> $2
-   AND NOT ($3 = ANY(normalized_aliases))`
 
 // `known` defaults to [now, ∞): we believe it from the moment it is recorded. `valid` opens at the
 // claim's own time, because when something became true and when we heard about it are different

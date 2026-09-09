@@ -30,6 +30,8 @@ func (s *Server) correctRecords(w http.ResponseWriter, r *http.Request, grant cr
 	if err != nil {
 		s.record(r, domain.AuditRecordCorrect, grant, domain.OutcomeRefused, 0)
 		switch {
+		case errors.Is(err, pg.ErrEntityNameLimit):
+			writeError(w, 400, codeInvalidRecordMutation, "entity name exceeds the byte or variant limit; use an existing spelling")
 		case errors.Is(err, pg.ErrInvalidRecordMutation), errors.Is(err, pg.ErrUnboundSpeaker):
 			writeError(w, 400, codeInvalidRecordMutation, "current record identifiers, versions and bounded corrections are required")
 		case errors.Is(err, pg.ErrRecordNotFound):

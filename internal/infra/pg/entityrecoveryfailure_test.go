@@ -49,12 +49,13 @@ func TestRecoveryPreservesCompatibleSharedEntityAndExistingAliases(t *testing.T)
 		text := name + " works at Ensera"
 		statedAt(t, ctx, pg.NewObservationStore(pool), facts, schema, time.Now().UTC(), text, domain.Claim{Subject: name, Predicate: "works_at", Object: "Ensera", Statement: text, Cardinality: domain.CardinalityMany})
 	}
-	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.entity SET aliases=ARRAY['ENSERA'],normalized_aliases=ARRAY['ensera'] WHERE normalized_name='ensera'; DELETE FROM {schema}.fact`)); err != nil {
+	statedAt(t, ctx, pg.NewObservationStore(pool), facts, schema, time.Now().UTC(), "Atlas works at ENSERA", domain.Claim{Subject: "Atlas", Predicate: "works_at", Object: "ENSERA", Statement: "Atlas works at ENSERA", Cardinality: domain.CardinalityMany})
+	if _, err := pool.Exec(ctx, schema.SQL(`DELETE FROM {schema}.fact`)); err != nil {
 		t.Fatal(err)
 	}
 	before := recoverySnapshot(t, pool, schema, "entity")
 	page, err := facts.RecoverFacts(ctx, schema, "p1", "", "", uuid.NewString(), 100)
-	if err != nil || page.Restored != 2 {
+	if err != nil || page.Restored != 3 {
 		t.Fatalf("compatible identities refused: %+v %v", page, err)
 	}
 	if recoverySnapshot(t, pool, schema, "entity") != before {

@@ -165,6 +165,9 @@ func restoreFactReceiptTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, 
 	if err := validateReceiptEntitiesTx(ctx, tx, schema, scope, state, left, right); err != nil {
 		return false, err
 	}
+	if _, err := repairReceiptEntityNamesTx(ctx, tx, schema, scope, state); err != nil {
+		return false, err
+	}
 	// A successor may be in another page. Keep the source-owned link in the receipt and attach
 	// the live FK as soon as that successor is available; intervals are exact on every page.
 	if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.fact(fact_id,scope,subject_entity_id,object_entity_id,predicate,statement,valid,known,confidence,data_subject_id,cardinality,source_role,recorded_at,superseded_by,supersession_source,version,lang,retention_until)
