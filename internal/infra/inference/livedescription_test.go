@@ -39,7 +39,6 @@ import (
 
 	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/report"
-	"github.com/ensera-ai/taisce/internal/semantic"
 )
 
 func TestWhetherADescribedEntitySeparatesWhereAnAssembledOneDidNot(t *testing.T) {
@@ -86,7 +85,7 @@ func TestWhetherADescribedEntitySeparatesWhereAnAssembledOneDidNot(t *testing.T)
 	for _, c := range cases {
 		inputs = append(inputs,
 			c.question,
-			semantic.Surface(c.canonical, c.aliases, c.quotes),
+			measuredSurface(t, c.canonical, c.aliases, c.quotes),
 			described[c.canonical])
 	}
 	vectors, err := inference.NewEmbedder(config).Embed(ctx, inputs)

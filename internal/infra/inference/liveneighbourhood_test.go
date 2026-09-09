@@ -36,7 +36,6 @@ import (
 	"time"
 
 	"github.com/ensera-ai/taisce/internal/infra/inference"
-	"github.com/ensera-ai/taisce/internal/semantic"
 )
 
 // neighbourhood is an entity with the relations it stands in, which is what the fact table holds.
@@ -121,8 +120,8 @@ func TestWhetherAnEntitysNeighbourhoodIsWhatDistinguishesIt(t *testing.T) {
 	for _, c := range cases {
 		inputs = append(inputs,
 			c.question,
-			semantic.Surface(c.canonical, c.aliases, c.mentions),
-			semantic.Surface(c.canonical, c.aliases, append(append([]string(nil), c.mentions...), c.relations...)))
+			measuredSurface(t, c.canonical, c.aliases, c.mentions),
+			measuredSurface(t, c.canonical, c.aliases, append(append([]string(nil), c.mentions...), c.relations...)))
 	}
 
 	vectors, err := inference.NewEmbedder(config).Embed(ctx, inputs)

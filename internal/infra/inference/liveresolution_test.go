@@ -134,8 +134,8 @@ func TestWhatASemanticSurfaceResolvesAndWhatItWouldMerge(t *testing.T) {
 	for _, c := range cases {
 		inputs = append(inputs,
 			c.question,
-			semantic.Surface(c.canonical, c.aliases, nil),
-			semantic.Surface(c.canonical, c.aliases, c.quotes))
+			measuredSurface(t, c.canonical, c.aliases, nil),
+			measuredSurface(t, c.canonical, c.aliases, c.quotes))
 	}
 
 	vectors, err := inference.NewEmbedder(config).Embed(ctx, inputs)
@@ -218,4 +218,14 @@ func distribution(t *testing.T, what string, paraphrase, nearMiss []float64) flo
 	t.Logf("  near misses:  %.4f … %.4f", nearMiss[0], nearMiss[len(nearMiss)-1])
 	t.Logf("  gap:          %+.4f  (worst paraphrase minus best near miss)", worst-best)
 	return worst - best
+}
+
+// A refused representation is a failed measurement input, never an empty vector surrogate.
+func measuredSurface(t *testing.T, canonical string, aliases, quotes []string) string {
+	t.Helper()
+	surface, err := semantic.Surface(canonical, aliases, quotes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return surface
 }

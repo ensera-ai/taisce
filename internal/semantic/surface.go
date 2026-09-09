@@ -23,8 +23,10 @@
 package semantic
 
 import (
+	"errors"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // MEASURED NOT TO SEPARATE, AND KEPT ANYWAY — see D59 and #105.
@@ -37,7 +39,7 @@ import (
 // works — the surface is what #105 varies, and deleting it would mean rebuilding it to ask the
 // question again.
 
-// SurfaceBudget is how many characters of an entity's surface are embedded.
+// SurfaceBudget is the maximum UTF-8 bytes of the complete representation, including separators.
 //
 // # Why there is a bound
 //
@@ -47,11 +49,19 @@ import (
 //
 // # Why this number
 //
-// About two thousand characters is a dozen or so sentences: enough that an entity mentioned in several
+// About two thousand bytes is a small set of sentences: enough that an entity mentioned in several
 // contexts is represented by more than one of them, and short enough that the surface still points at
 // a thing rather than at a topic. It is a constant rather than a setting because nothing has asked to
 // vary it, and the measurement that would justify changing it is the one #10 exists to take.
 const SurfaceBudget = 2000
+
+// Collection bounds cap validation, deduplication and sorting before any output is built.
+const MaxSurfaceAliases = 64
+const MaxSurfaceQuotes = 1024
+const MaxSurfaceInputBytes = 1 << 20
+
+var ErrInvalidSurface = errors.New("semantic surface requires a canonical identity and valid UTF-8 without NUL")
+var ErrSurfaceLimit = errors.New("semantic surface input exceeds its identity or collection budget")
 
 // Surface is the text an entity is found by: what it has been called, and what was said about it.
 //
@@ -71,11 +81,24 @@ const SurfaceBudget = 2000
 // A question usually contains the name. Putting the surface forms at the front means the thing being
 // described is stated before the evidence for it, which is the order a sentence about anything takes
 // — and when the budget cuts, it cuts evidence rather than identity.
-func Surface(canonical string, aliases []string, quotes []string) string {
+func Surface(canonical string, aliases []string, quotes []string) (string, error) {
+	if err := validateSurfaceInput(canonical, aliases, quotes); err != nil {
+		return "", err
+	}
+	canonical = strings.TrimSpace(canonical)
+	if canonical == "" {
+		return "", ErrInvalidSurface
+	}
+	if len(canonical) > SurfaceBudget {
+		return "", ErrSurfaceLimit
+	}
 	var b strings.Builder
 	b.WriteString(canonical)
 
 	for _, alias := range distinct(aliases, canonical) {
+		if b.Len()+3+len(alias) > SurfaceBudget {
+			continue
+		}
 		b.WriteString(" | ")
 		b.WriteString(alias)
 	}
@@ -86,14 +109,33 @@ func Surface(canonical string, aliases []string, quotes []string) string {
 	for _, quote := range distinct(quotes, "") {
 		addition := len(quote) + 1
 		if b.Len()+addition > SurfaceBudget {
-			// Stop at a whole quote rather than cutting one. Half a sentence embeds as half a
-			// sentence, which is a worse representation than the sentence not being there.
-			break
+			// Whole quotes preserve what was said. A non-fitting quote does not exclude a later
+			// shorter quote; deterministic ordering still makes the same input reproducible.
+			continue
 		}
 		b.WriteString("\n")
 		b.WriteString(quote)
 	}
-	return b.String()
+	return b.String(), nil
+}
+
+func validateSurfaceInput(canonical string, aliases, quotes []string) error {
+	if len(aliases) > MaxSurfaceAliases || len(quotes) > MaxSurfaceQuotes {
+		return ErrSurfaceLimit
+	}
+	total := 0
+	for _, group := range [][]string{{canonical}, aliases, quotes} {
+		for _, value := range group {
+			if len(value) > MaxSurfaceInputBytes-total {
+				return ErrSurfaceLimit
+			}
+			total += len(value)
+			if !utf8.ValidString(value) || strings.ContainsRune(value, 0) {
+				return ErrInvalidSurface
+			}
+		}
+	}
+	return nil
 }
 
 // distinct returns the unique members, sorted, without a value the caller has already used.

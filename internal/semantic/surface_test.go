@@ -21,13 +21,13 @@ func TestTheSameEntityAlwaysProducesTheSameSurface(t *testing.T) {
 		"our site in Dublin has the lab",
 		"Dublin HQ moved last year",
 	}
-	forwards := semantic.Surface("Dublin office", []string{"Dublin HQ", "the Dublin site"}, quotes)
+	forwards := surfaceFor(t, "Dublin office", []string{"Dublin HQ", "the Dublin site"}, quotes)
 
 	reversed := make([]string, len(quotes))
 	for i := range quotes {
 		reversed[i] = quotes[len(quotes)-1-i]
 	}
-	backwards := semantic.Surface("Dublin office", []string{"the Dublin site", "Dublin HQ"}, reversed)
+	backwards := surfaceFor(t, "Dublin office", []string{"the Dublin site", "Dublin HQ"}, reversed)
 
 	if forwards != backwards {
 		t.Fatalf("two orderings of one entity produced two surfaces:\n%q\n%q", forwards, backwards)
@@ -41,7 +41,7 @@ func TestIdentityComesBeforeEvidenceAndSurvivesTheCut(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		quotes = append(quotes, fmt.Sprintf("%d %s", i, strings.Repeat("something was said here ", 5)))
 	}
-	surface := semantic.Surface("Dublin office", []string{"Dublin HQ"}, quotes)
+	surface := surfaceFor(t, "Dublin office", []string{"Dublin HQ"}, quotes)
 
 	if !strings.HasPrefix(surface, "Dublin office") {
 		t.Fatalf("the canonical name is not first: %q", surface[:40])
@@ -49,7 +49,7 @@ func TestIdentityComesBeforeEvidenceAndSurvivesTheCut(t *testing.T) {
 	if !strings.Contains(surface, "Dublin HQ") {
 		t.Fatal("an alias was cut, so identity was traded for evidence")
 	}
-	if len(surface) > semantic.SurfaceBudget+len(quotes[0]) {
+	if len(surface) > semantic.SurfaceBudget {
 		t.Fatalf("the surface is %d characters against a budget of %d",
 			len(surface), semantic.SurfaceBudget)
 	}
@@ -59,7 +59,7 @@ func TestIdentityComesBeforeEvidenceAndSurvivesTheCut(t *testing.T) {
 // representation of an entity than the sentence not being there.
 func TestAQuoteIsNeverCutInHalf(t *testing.T) {
 	long := strings.Repeat("a complete sentence that will not fit. ", 60)
-	surface := semantic.Surface("Marta", nil, []string{"Marta works at Ensera", long})
+	surface := surfaceFor(t, "Marta", nil, []string{"Marta works at Ensera", long})
 
 	if strings.Contains(surface, long[:200]) && !strings.Contains(surface, long) {
 		t.Fatal("a quote was included in part")
@@ -72,7 +72,7 @@ func TestAQuoteIsNeverCutInHalf(t *testing.T) {
 // A relation asserted five times stores five identical quotes, and a surface repeating one sentence
 // five times is a surface mostly about that sentence.
 func TestARepeatedQuoteIsSaidOnce(t *testing.T) {
-	surface := semantic.Surface("Marta", []string{"Marta", "MARTA "}, []string{
+	surface := surfaceFor(t, "Marta", []string{"Marta", "MARTA "}, []string{
 		"Marta works at Ensera", "Marta works at Ensera", "Marta works at Ensera",
 	})
 	if n := strings.Count(surface, "Marta works at Ensera"); n != 1 {
@@ -88,8 +88,17 @@ func TestARepeatedQuoteIsSaidOnce(t *testing.T) {
 // names is thin and it is honest — the alternative is describing an entity from material that does
 // not exist.
 func TestAnEntityWithNoQuotesIsStillItsNames(t *testing.T) {
-	surface := semantic.Surface("Dublin office", []string{"Dublin HQ"}, nil)
+	surface := surfaceFor(t, "Dublin office", []string{"Dublin HQ"}, nil)
 	if surface != "Dublin office | Dublin HQ" {
 		t.Fatalf("got %q", surface)
 	}
+}
+
+func surfaceFor(t *testing.T, canonical string, aliases, quotes []string) string {
+	t.Helper()
+	surface, err := semantic.Surface(canonical, aliases, quotes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return surface
 }

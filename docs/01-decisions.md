@@ -1566,7 +1566,7 @@ sequence).
 An extension runs inside the backend process, so a fault in one takes the cluster, and the cluster is
 the product. The test is not *"might we want this"* but *"what reads it today"*.
 
-Currently: `vector` (`chunk.embedding` and the per-partition HNSW), `btree_gist` (the traversal
+Currently: `vector` (model-identified message generations and their dimension-specific HNSW, D104), `btree_gist` (the traversal
 indexes and D4's constraint), `pg_stat_statements` (the only way to answer "which query got slower"
 after a deploy without adding an instrumentation path to the server).
 
@@ -3763,3 +3763,33 @@ have incomplete coverage. No entity/report embedding, semantic quality, latency,
 claim follows from this message-vector journey. Tests prove source ownership, cancellation and rollback,
 plus exact/approximate compatibility with the local provider's actual 2560 dimensions. Index fixtures
 prove eligibility with controlled planner costs, not that ANN is always the cheapest small-corpus plan.
+
+## D105 — Entity semantic representations bound identity as well as evidence
+
+**Decision.** `semantic.Surface` returns a validated representation or an explicit refusal. Its
+2,000-byte UTF-8 budget covers the trimmed canonical name, optional aliases, evidence and separators.
+The canonical identity must fit in full. Optional aliases and quotes are deduplicated, sorted and
+included whole when they fit; an oversized item is skipped so it cannot exclude a later fitting one.
+At most 64 aliases, 1024 quotes and 1 MiB of combined input bound validation, deduplication and sorting.
+Invalid UTF-8, NUL and an empty canonical identity refuse with no partial output. Measurements must
+handle refusal before asking a provider to embed anything.
+
+**Alternatives.** Budgeting only evidence lets names bypass the declared work bound: a regression
+produced 12,004 output bytes against a 2,000-byte budget. Clipping a canonical name or a quote silently
+changes the identity or source represented, so both are rejected. Stopping at the first non-fitting
+optional item gives its sorted position unintended power over all subsequent evidence. Deterministic
+whole-item selection preserves the same ordinary inputs while making omissions explicit in the contract.
+Byte accounting matches provider request bounds; calling bytes characters would imply an unequal and
+incorrect Unicode allowance. These defensive ceilings are not measured semantic-quality optima.
+
+**Scope and reversal.** This package supplies experimental candidate representations. It does not
+persist entity vectors, choose a merge threshold or enable automatic semantic merging. Existing
+measurements still distinguish paraphrase gains from near-miss risks; #10/#11/#19 retain those gates.
+A caller already loading unbounded evidence must separately bound its database query; this pure helper
+cannot undo that allocation. Reversal is a code/API change and requires no data migration. Tests cover
+exact Unicode/collection limits, invalid input, whole-item selection, duplicates and deterministic order.
+
+The affected description, neighborhood, resolution and thematic checks pass against the configured
+local provider. Resolution distributions still overlap; the small thematic fixture retains a positive
+gap but does not establish a shipping threshold. The semantic package has 100% statement coverage
+under the race detector; the complete cross-package suite passes at 91.9%, above the unchanged floor.

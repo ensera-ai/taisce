@@ -29,6 +29,7 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 
 | Work | Delivery and evidence | Remaining scope |
 |---|---|---|
+| Entity semantic input bounds [#132](https://github.com/althunibat/taisce/issues/132) | D105 enforces the complete representation budget, rejects unsupported canonical identities and bounds collection work. The reproduced budget bypass is covered; the semantic package passes at 100% coverage under the race detector. | Configured-provider regression and the full 91.9% coverage gate pass; persistent entity embeddings and safe semantic resolution remain #10/#11/#19. |
 | Message embedding generations [#131](https://github.com/althunibat/taisce/issues/131) | D104 adds model-identified persisted messages, bounded build/repair, explicit activation, source-owned erasure/export/expiry and exact/optional ANN retrieval. Local provider compatibility passes at 2560 dimensions. | Continuous embedding, entity/report surfaces and controlled-host semantic/capacity qualification remain #19/#101/#103. |
 | Embedding boundary [#130](https://github.com/althunibat/taisce/issues/130) | D103 bounds requests/replies and refuses zero, oversized or non-finite vectors before ranking. Regressions reproduce the previous zero/NaN behavior; race checks cover valid boundaries and reply overflow. | Persistent model/dimension identity, three embedding surfaces and generation cutover remain #101/#19. |
 | Entity inspection [#129](https://github.com/althunibat/taisce/issues/129) | D102 exposes bounded entity inventory and exact identity lookup under project read authorization, with source-owned aliases, speaker binding, audit and erasure behavior. PostgreSQL verifies direct project/UUID index access. | Entity-purge preview/execution and feedback remain #89; workload qualification remains #103. |
@@ -86,7 +87,7 @@ Older issue reconciliation at `ff0a851` separates completed work from superseded
 Issue #18 is a standing obligation for the life of the repository, not a finite feature awaiting
 implementation. Parent issues #83/#98 stay open while their actual child acceptance remains unfinished.
 
-The complete uncached real-PostgreSQL suite through message embedding generations passes at **91.7%**,
+The complete uncached real-PostgreSQL suite through message embedding generations and semantic input bounds passes at **91.9%**,
 meeting the enforced **91.6%** floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
