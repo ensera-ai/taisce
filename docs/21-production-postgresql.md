@@ -167,6 +167,15 @@ analyze a partitioned parent. Analyze the relevant parent after a large initial 
 change in partition distribution. See
 [routine vacuuming](https://www.postgresql.org/docs/18/routine-vacuuming.html).
 
+The controlled `vector-layout-v1` qualification retained this design. With 128 projects and 13,824
+vectors, the ordinary shared layout did not select HNSW for the production-shaped filtered query,
+while the generation child did. Removing a generation reclaimed its child immediately with 8 KB of
+WAL and no vacuum; filtered alternatives required delete/vacuum work. At 1,000 generations, catalog
+storage was 32.8 MB and p95 planning was 4.089 ms. Exact search remains the default because ANN was
+slower on the small report corpus and lower candidate bounds lost recall in the mixed corpus. See
+[`docs/27-vector-layout-qualification.md`](27-vector-layout-qualification.md) for the complete method,
+measurements and limits. Deployment-wide capacity remains #103.
+
 For a large HNSW build or rebuild:
 
 - set `maintenance_work_mem` for that maintenance session rather than raising ordinary query memory;

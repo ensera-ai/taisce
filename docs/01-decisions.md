@@ -4143,3 +4143,65 @@ sequential latency was 45.492/47.234/52.153 ms p50/p95/p99; ANN latency ranged f
 unchanged 91.6% coverage floor. The remote logical wipe returned zero, provider termination was
 verified, and a fresh paginated inventory contained zero active instances. Full evidence and method
 are in `docs/26-report-quality-qualification.md`.
+
+## D115 — Immutable embedding generations are the physical vector boundary
+
+**Decision.** Keep message, entity and report vectors list-partitioned by immutable embedding
+generation. Project remains the logical authorization and query boundary. Every generation child owns
+one directly-created, dimension-specific HNSW index; the partitioned parent owns no HNSW index.
+Exact cosine remains the default search. Approximate search is an explicit request and its candidate
+bound must be qualified against exact truth for the intended corpus.
+
+The generation boundary binds model name, immutable revision, endpoint identity, input contract and
+dimension to a finite corpus. A model or dimension change creates, builds and validates a replacement
+generation, activates it atomically, then cancels and prunes the old generation. A mismatched retry
+or provider reply fails before partial publication. Detaching and dropping the old child provides a
+bounded retirement path without filtered deletion and vacuum.
+
+**Measurement.** `vector-layout-v1` compared ordinary shared storage, the current generation-list
+layout and 32-way project hash storage across 128 projects and 13,824 2,560-dimensional vectors. The
+ordinary filtered query selected no HNSW index and its representative execution took 402.074 ms; the
+generation layout pruned to and selected its child HNSW in 6.063 ms. At candidate bounds 32/64,
+generation recall@10 versus exact was 0.8458; 128 restored 1.0 with a 343.477 ms p95 tail. The hash
+alternative reached only 0.7958 at the lower bounds and did not improve the model/dimension lifecycle.
+
+Generation retirement took 0.126 seconds, wrote 8 KB of WAL and required no vacuum. Ordinary and
+hash deletion required 113.977 and 31.536 seconds of vacuum respectively. Generation-list storage
+was 296.3 MB versus 287.0 MB ordinary. At 1,000 generations, catalog storage was 32.8 MB, cumulative
+provisioning took 43.362 seconds and p95 planning was 4.089 ms with one planned leaf. The complete
+method and limits are in `docs/27-vector-layout-qualification.md`. Tracking: #101 and #98.
+
+**Alternatives and limits.** A parent index is virtual and does not create one global physical graph;
+D71 corrected that earlier explanation. The measured ordinary/shared index still failed to serve the
+filtered query shape. Project hash partitions added a second physical boundary without improving
+recall or lifecycle. Tiny projects showed no reason to request ANN, and no project-specific vector
+partition is created. Their generation child retains the common HNSW lifecycle: adding a size-triggered
+index state would add publication races and a second search contract without a measured operational
+benefit at the qualified catalog size. Revisit only if #103 identifies that cost as material.
+
+This supersedes D7's historical vector-layout conclusion. It does not change D69's single-tenant
+namespace or the project-partitioned, non-vector `chunk` table. The measurement is one controlled
+distribution on one host; it does not establish a production corpus ceiling, throughput objective or
+universal ANN candidate bound.
+
+## D116 — GPU qualification scales through independent generation replicas
+
+**Decision.** The eight-A100 qualification profile assigns GPUs 0–6 to seven independent
+`Qwen/Qwen3.8-27B` BF16 vLLM replicas and GPU 7 to `Qwen/Qwen3-Embedding-4B`. A pinned nginx service
+verifies backend TLS and distributes requests by least active connections. Seven Taisce workers match
+the seven generation replicas. Model traffic stays inside Compose and the existing credential,
+revision, image-digest, watchdog, wipe and verified-termination controls remain mandatory.
+
+This replaces D109's original four-generation-GPU allocation. Seven-way model parallelism is not a
+valid fit for the selected models: the earlier Qwen3.6 pipeline layout failed schema-constrained
+requests, and Qwen3.8-Flash-Next's n-gram embedding layer does not support the needed pipeline layout.
+Independent 27B replicas use each generation card through supported tensor-parallel size one and
+increase concurrent request capacity without coupling all requests to one seven-stage pipeline.
+
+**Verification and limits.** A fresh-node run at `5c9edec` returned 140/140 valid structured
+responses at concurrency 28 in 5.342 seconds: 26.205 requests/s, 655.137 completion tokens/s and
+1.025/1.212/1.222 seconds p50/p95/p99. Every generation GPU reached 100% observed utilization and
+held about 75.7 GiB; per-replica logs proved traffic reached all seven. The deployed memory journey,
+all nine runner gates, logical wipe and provider termination passed. This is a controlled benchmark,
+not a production service objective. Full evidence is in `docs/27-vector-layout-qualification.md`.
+Tracking: #140.
