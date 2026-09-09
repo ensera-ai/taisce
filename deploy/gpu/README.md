@@ -10,17 +10,17 @@ termination verification even when a model or test fails.
 
 `compose.gpu.yaml` overrides `compose.yaml`. It runs PostgreSQL, bootstrap, API, workers and two
 vLLM services on the node. Integration fixtures use a second PostgreSQL cluster because they
-change cluster-wide roles; the deployed API and worker retain their own credentials. The generation
-service uses the pinned BF16 Qwen3.6-35B-A3B revision for extraction and reports, split by pipeline
-parallelism across seven cards. The pinned BF16 Qwen3-Embedding-4B revision uses the eighth card.
-Qwen3.6 has 16 attention heads and 2 key/value heads, so a seven-way tensor split is invalid;
-vLLM's uneven pipeline split assigns the complete seven-card generation allocation without changing
-model precision. Allocation alone is not evidence of sustained utilization or a scaling result; the
+change cluster-wide roles; the deployed API and worker retain their own credentials. Seven
+independent servers run the pinned BF16 Qwen3.8-27B revision, one on each of GPUs 0 through 6. A
+TLS-verifying nginx service distributes generation requests by least active connections and gives
+Taisce one stable internal endpoint. The pinned BF16 Qwen3-Embedding-4B revision uses GPU 7.
+Qwen3.8-27B needs 51.1 GiB for weights and fits one complete 32K-context replica on an A100 80 GB;
+replication therefore uses every generation card without imposing a tensor or pipeline topology on
+the model. Allocation alone is not evidence of sustained utilization or a scaling result; the
 captured per-card measurements describe the exercised workload.
-The generation server selects the Guidance structured-output backend because vLLM's xgrammar backend
-can desynchronize its finite-state matcher under pipeline parallelism and return HTTP 500 for a valid
-schema-constrained request. The live structured-output gates qualify this compatibility choice.
-The vLLM image version is fixed and its resolved digest is captured in the results.
+Each generation server selects the Guidance structured-output backend. The live structured-output
+gates and bounded concurrent benchmark qualify this compatibility choice. Generation and embedding
+image digests are fixed or captured in the results.
 
 The qualification test PostgreSQL container is constrained to the documented eight-vCPU, 32-GiB
 database-host starting specification. The runner samples container CPU, memory and block I/O while
@@ -56,6 +56,9 @@ runs the complete Go regression suite, coverage gate, vet, live inference corpus
 embedding/passage provider journeys and targeted race checks. Independent gates retain their
 individual exit statuses. Ordinary regression/race gates clear live inference variables so that
 fixtures retain their own endpoints and allowlists. A failed gate is reported, never silently converted to a pass.
+The generation benchmark sends 140 schema-constrained requests at concurrency 28 through the shared
+endpoint and records request rate, token throughput and latency percentiles. Per-GPU telemetry and
+per-replica logs show whether the bounded workload reached every generation card.
 
 Database layout runs add a separately named qualification gate. `vector-layout-v1` compares a shared
 ordinary table, generation-list partitions and a bounded 32-way project hash across a fixed mix of

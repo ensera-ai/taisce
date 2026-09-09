@@ -2,41 +2,73 @@
 # SPDX-License-Identifier: Apache-2.0
 # Disposable qualification override. Run only on an owned eight-A100 test node.
 # Models and application traffic stay on the Compose network; host access is loopback-only.
+x-generation-replica: &generation-replica
+  image: vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8
+  command:
+    - Qwen/Qwen3.8-27B
+    - --revision=1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
+    - --dtype=bfloat16
+    - --tensor-parallel-size=1
+    - --structured-outputs-config.backend=guidance
+    - --max-model-len=32768
+    - --max-num-seqs=8
+    - --gpu-memory-utilization=0.95
+    - --reasoning-parser=qwen3
+    - --default-chat-template-kwargs={"enable_thinking":false}
+    - --ssl-keyfile=/tls/server.key
+    - --ssl-certfile=/tls/server.crt
+  shm_size: 8g
+  environment:
+    HF_HOME: /models
+  volumes: ["gpu-models:/models", "./qualification-tls:/tls:ro"]
+  healthcheck:
+    test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8000/health',context=ssl.create_default_context(cafile='/tls/ca.crt'),timeout=5)"]
+    interval: 15s
+    timeout: 10s
+    retries: 120
+    start_period: 20m
+
 services:
   generation:
-    image: vllm/vllm-openai:v0.28.0
-    command:
-      - Qwen/Qwen3.6-35B-A3B
-      - --revision=995ad96eacd98c81ed38be0c5b274b04031597b0
-      - --dtype=bfloat16
-      - --tensor-parallel-size=1
-      - --pipeline-parallel-size=7
-      - --distributed-executor-backend=mp
-      - --structured-outputs-config.backend=guidance
-      - --max-model-len=32768
-      - --max-num-seqs=8
-      - --gpu-memory-utilization=0.85
-      - --reasoning-parser=qwen3
-      - --default-chat-template-kwargs={"enable_thinking":false}
-      - --ssl-keyfile=/tls/server.key
-      - --ssl-certfile=/tls/server.crt
-    shm_size: 16g
-    environment:
-      HF_HOME: /models
-    volumes: ["gpu-models:/models", "./qualification-tls:/tls:ro"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["0", "1", "2", "3", "4", "5", "6"]
-              capabilities: [gpu]
+    image: nginx@sha256:42a516af16b852e33b7682d5ef8acbd5d13fe08fecadc7ed98605ba5e3b26ab8
+    depends_on:
+      generation-0: {condition: service_healthy}
+      generation-1: {condition: service_healthy}
+      generation-2: {condition: service_healthy}
+      generation-3: {condition: service_healthy}
+      generation-4: {condition: service_healthy}
+      generation-5: {condition: service_healthy}
+      generation-6: {condition: service_healthy}
+    volumes:
+      - ./deploy/gpu/generation-nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./qualification-tls:/tls:ro
     healthcheck:
-      test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8000/health',context=ssl.create_default_context(cafile='/tls/ca.crt'),timeout=5)"]
+      test: ["CMD", "wget", "--ca-certificate=/tls/ca.crt", "-qO-", "https://127.0.0.1:8000/health"]
       interval: 15s
       timeout: 10s
-      retries: 120
-      start_period: 20m
+      retries: 10
+
+  generation-0:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["0"], capabilities: [gpu]}]}}}
+  generation-1:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["1"], capabilities: [gpu]}]}}}
+  generation-2:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["2"], capabilities: [gpu]}]}}}
+  generation-3:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["3"], capabilities: [gpu]}]}}}
+  generation-4:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["4"], capabilities: [gpu]}]}}}
+  generation-5:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["5"], capabilities: [gpu]}]}}}
+  generation-6:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["6"], capabilities: [gpu]}]}}}
   embedding:
     image: vllm/vllm-openai:v0.28.0
     command:
@@ -137,7 +169,7 @@ services:
       SSL_CERT_FILE: /tls/ca.crt
       TAISCE_TEST_DSN: postgres://postgres:${POSTGRES_PASSWORD:?required}@test-postgres:5432/taisce?sslmode=disable
       TAISCE_INFERENCE_ENDPOINT: https://generation:8000/v1
-      TAISCE_INFERENCE_EXTRACTOR_MODEL: Qwen/Qwen3.6-35B-A3B
+      TAISCE_INFERENCE_EXTRACTOR_MODEL: Qwen/Qwen3.8-27B
       TAISCE_INFERENCE_EMBEDDING_ENDPOINT: https://embedding:8000/v1
       TAISCE_INFERENCE_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-4B
       TAISCE_INFERENCE_EMBEDDING_REVISION: 5cf2132abc99cad020ac570b19d031efec650f2b

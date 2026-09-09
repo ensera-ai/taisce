@@ -8,7 +8,20 @@ cd /root/taisce-qualification
 umask 077
 install -m 700 deploy/gpu/wipe.sh wipe.sh
 mkdir -p results
-trap 'status=$?; printf "%s\n" "$status" > results/run-exit; exit "$status"' EXIT
+container_monitor_pid=
+gpu_monitor_pid=
+finish() {
+    status=$?
+    trap - EXIT
+    for pid in "$container_monitor_pid" "$gpu_monitor_pid"; do
+        [[ -n "$pid" ]] || continue
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    done
+    printf "%s\n" "$status" > results/run-exit
+    exit "$status"
+}
+trap finish EXIT
 echo 'Checking node hardware'
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv > results/gpus.csv
 test "$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)" -eq 8
@@ -30,7 +43,7 @@ values = {
     'TAISCE_PROJECT': 'gpu_qualification',
     'TAISCE_PORT': '127.0.0.1:8080',
     'TAISCE_INFERENCE_ENDPOINT': 'https://generation:8000/v1',
-    'TAISCE_INFERENCE_EXTRACTOR_MODEL': 'Qwen/Qwen3.6-35B-A3B',
+    'TAISCE_INFERENCE_EXTRACTOR_MODEL': 'Qwen/Qwen3.8-27B',
     'TAISCE_INFERENCE_EMBEDDING_ENDPOINT': 'https://embedding:8000/v1',
     'TAISCE_INFERENCE_EMBEDDING_MODEL': 'Qwen/Qwen3-Embedding-4B',
     'TAISCE_INFERENCE_ALLOWLIST': 'generation:8000,embedding:8000',
@@ -41,16 +54,18 @@ PY
 dc=(docker compose -p taisce-qualification -f compose.yaml -f compose.gpu.yaml)
 "${dc[@]}" config --quiet
 echo 'Pulling pinned vLLM and Go images'
-timeout 1800 "${dc[@]}" --profile qualification pull generation embedding test > results/pull.log 2>&1
+timeout 1800 "${dc[@]}" --profile qualification pull \
+    generation generation-{0..6} embedding test > results/pull.log 2>&1
 echo 'Starting vLLM model services and PostgreSQL'
-timeout 3600 "${dc[@]}" up -d --build --wait --wait-timeout 3000 generation embedding postgres test-postgres > results/model-start.log 2>&1
+timeout 3600 "${dc[@]}" up -d --build --wait --wait-timeout 3000 \
+    generation generation-{0..6} embedding postgres test-postgres > results/model-start.log 2>&1
 echo 'Starting application components'
 timeout 1800 "${dc[@]}" up -d --build --wait --wait-timeout 300 api worker > results/application-start.log 2>&1
 "${dc[@]}" ps --format json > results/services.json
-docker image inspect vllm/vllm-openai:v0.28.0 --format '{{json .RepoDigests}}' > results/model-image-digest.json
-echo 'Running deployed API/worker smoke test'
-python3 deploy/gpu/smoke.py > results/deployed-smoke.log 2>&1
-echo 'Running full regression and configured-provider tests'
+docker image inspect vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8 \
+    --format '{{json .RepoDigests}}' > results/generation-image-digest.json
+docker image inspect vllm/vllm-openai:v0.28.0 \
+    --format '{{json .RepoDigests}}' > results/embedding-image-digest.json
 ( while true; do
     timestamp="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
     containers="$(docker ps -q --filter label=com.docker.compose.project=taisce-qualification)"
@@ -67,14 +82,19 @@ while true; do
     sleep 2
 done ) > results/gpu-stats.csv 2>&1 &
 gpu_monitor_pid=$!
+echo 'Running deployed API/worker smoke test'
+python3 deploy/gpu/smoke.py > results/deployed-smoke.log 2>&1
+echo 'Benchmarking the seven-replica structured-output endpoint'
+"${dc[@]}" exec -T generation-0 python3 - < deploy/gpu/generation-benchmark.py \
+    > results/generation-benchmark.json
+echo 'Running full regression and configured-provider tests'
 set +e
 timeout 7200 "${dc[@]}" --profile qualification run --rm -T test > results/test-runner.log 2>&1
 result=$?
-kill "$container_monitor_pid" "$gpu_monitor_pid" 2>/dev/null
-wait "$container_monitor_pid" 2>/dev/null
-wait "$gpu_monitor_pid" 2>/dev/null
 set -e
-"${dc[@]}" logs --no-color generation > results/generation.log 2>&1 || true
+for service in generation generation-{0..6}; do
+    "${dc[@]}" logs --no-color "$service" > "results/$service.log" 2>&1 || true
+done
 "${dc[@]}" logs --no-color embedding > results/embedding.log 2>&1 || true
 "${dc[@]}" ps --format json > results/services-after.json
 nvidia-smi --query-gpu=name,memory.used,utilization.gpu --format=csv > results/gpus-after.csv
