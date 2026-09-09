@@ -4090,3 +4090,25 @@ multi-source ownership, export, erasure, retention, repair, finite-snapshot inva
 cutover and stale-model refusal. HTTP tests cover authentication, read-only access, input bounds and
 the generated contract. CLI tests cover generation management without printing provider input. The
 configured-provider inference profile checks its actual vector width separately from quality claims.
+
+## D113 — Each semantic input wins the question it was designed to answer
+
+**Decision.** Passage, entity and community-report generations remain separate because their
+production input shapes retrieve different intents under the configured embedder. The named
+`surface-contract/v1` fixture compares every question against all three inputs from one domain. A
+source-note question must select the verbatim passage, an alias question must select the bounded
+entity surface, and an aggregate question must select the written report. Each assertion explicitly
+requires the intended input to outrank both substitutes.
+
+**Alternatives and limits.** Distinct generation hashes prove that inputs cannot be mixed in storage,
+but do not prove that the representations behave differently. A synthetic embedder would prove only
+test plumbing. The live fixture uses the same message text, `semantic.Surface` and
+`report.EmbeddingSurface` builders sent to the configured provider. Three questions are a contract
+fixture rather than a quality distribution, and they do not establish an absolute relevance cutoff,
+filtered ANN recall, latency or capacity. Those require the named corpus and controlled host tracked
+in #19/#101/#103.
+
+**Verification.** With `qwen3-embedding:4b-q8_0` at 2560 dimensions, the source-note question scores
+passage 0.8180, entity 0.6017 and report 0.6662; the alias question scores 0.7119, 0.7941 and 0.6680;
+the aggregate question scores 0.5210, 0.5228 and 0.6154. All three intended surfaces win, and either
+substitution fails its fixture.
