@@ -100,57 +100,6 @@ func TestApplyingTwiceChangesNothing(t *testing.T) {
 	}
 }
 
-// ISSUE #1's CLAIM, and G1's. A single HNSW behind a scope predicate is unreachable — the planner
-// prefers an exact sort. This asserts the fix: the planner prunes to one project's partition FIRST,
-// and the index scan then runs inside a graph holding only that project's vectors.
-func TestTheVectorSearchPrunesToOnePartitionAndUsesItsIndex(t *testing.T) {
-	ctx := context.Background()
-	pool := testPool(t)
-	tenant := freshTenant(t, pool)
-	schema, _ := NewSchema(tenant)
-
-	for _, scope := range []string{"projecta", "projectb"} {
-		if err := ProvisionScope(ctx, pool, tenant, scope); err != nil {
-			t.Fatalf("provision %s: %v", scope, err)
-		}
-	}
-	// Enough rows that a sequential scan is not simply the cheapest option regardless.
-	if _, err := pool.Exec(ctx, schema.SQL(`
-		INSERT INTO {schema}.chunk (chunk_id, scope, source_observation_id, text, occurred_at, source_role, embedding)
-		SELECT gen_random_uuid(),
-		       CASE WHEN i % 2 = 0 THEN 'projecta' ELSE 'projectb' END,
-		       CASE WHEN i % 2=0 THEN $1::uuid ELSE $2::uuid END, 'chunk ' || i, now(), 'user',
-		       (SELECT array_agg(random())::vector FROM generate_series(1, 1024))
-		  FROM generate_series(1, 2000) i`), seedObservation(t, pool, schema, "projecta"), seedObservation(t, pool, schema, "projectb")); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if _, err := pool.Exec(ctx, schema.SQL(`ANALYZE {schema}.chunk`)); err != nil {
-		t.Fatalf("analyze: %v", err)
-	}
-
-	plan := explain(t, pool, schema.SQL(`
-		SELECT chunk_id FROM {schema}.chunk
-		 WHERE scope = 'projecta'
-		 ORDER BY embedding <=> (SELECT array_agg(0.5)::vector FROM generate_series(1, 1024))
-		 LIMIT 10`))
-	t.Logf("plan:\n%s", plan)
-
-	// Pruning: the other project's partition must not appear at all.
-	if strings.Contains(plan, "chunk_projectb") {
-		t.Fatalf("the query touched another project's partition — pruning did not happen:\n%s", plan)
-	}
-	// And the surviving partition's ANN index must be what answers it.
-	var indexName string
-	if err := pool.QueryRow(ctx, schema.SQL(`SELECT idx.relname FROM pg_index i
-       JOIN pg_class idx ON idx.oid=i.indexrelid JOIN pg_am am ON am.oid=idx.relam
-       WHERE i.indrelid='{schema}.chunk_projecta'::regclass AND am.amname='hnsw'`)).Scan(&indexName); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(plan, indexName) {
-		t.Fatalf("the partition's HNSW index was not used, which is the whole point of #1:\n%s", plan)
-	}
-}
-
 // Provisioning is retried by operators who are unsure whether it ran.
 // explain returns the WHOLE plan. EXPLAIN yields one row per line, so reading it with QueryRow
 // silently returns only the first — which made this test pass its pruning assertion and fail its

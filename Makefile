@@ -134,7 +134,8 @@ test-inference:
 		{ echo "no such profile: deploy/inference/$(INFERENCE_PROFILE).env"; exit 1; }
 	@echo "inference profile: $(INFERENCE_PROFILE)"
 	set -a; . ./deploy/inference/$(INFERENCE_PROFILE).env; set +a; \
-	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v -timeout 3h ./internal/infra/inference/
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v -timeout 3h ./internal/infra/inference/ && \
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -tags inference -count=1 -v -timeout 5m ./internal/infra/pg/ -run '^TestConfiguredEmbeddingProvider'
 
 # Rewrite the prompt golden from the prompt file.
 #

@@ -54,6 +54,8 @@ func TestRuntimePoolRefusesPrivilegeDriftAndAcceptsRemediation(t *testing.T) {
 		{"artifact quota policy write", `GRANT UPDATE ON SCHEMA.agent_storage_policy TO {role}`, `REVOKE UPDATE ON SCHEMA.agent_storage_policy FROM {role}`, MemoryPlane},
 		{"artifact quota column write", `GRANT UPDATE(used_bytes) ON SCHEMA.agent_storage_policy TO {role}`, `REVOKE UPDATE(used_bytes) ON SCHEMA.agent_storage_policy FROM {role}`, MemoryPlane},
 		{"policy catalog write", `GRANT UPDATE ON SCHEMA.projection_kind TO {role}`, `REVOKE UPDATE ON SCHEMA.projection_kind FROM {role}`, MemoryPlane},
+		{"embedding identity write", `GRANT UPDATE(model_revision) ON SCHEMA.embedding_generation TO {role}`, `REVOKE UPDATE(model_revision) ON SCHEMA.embedding_generation FROM {role}`, MemoryPlane},
+		{"embedding activation write", `GRANT INSERT ON SCHEMA.embedding_active TO {role}`, `REVOKE INSERT ON SCHEMA.embedding_active FROM {role}`, MemoryPlane},
 		{"registry credential write", `GRANT UPDATE ON control.credential TO {role}`, `REVOKE UPDATE ON control.credential FROM {role}`, RegistryPlane},
 		{"registry memory read", `GRANT SELECT ON SCHEMA.observation TO {role}`, `REVOKE SELECT ON SCHEMA.observation FROM {role}`, RegistryPlane},
 	} {

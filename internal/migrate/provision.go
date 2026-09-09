@@ -43,7 +43,8 @@ func ProvisionMemorySchema(ctx context.Context, pool *pgxpool.Pool, name string)
 // ErrProjectStorageConflict refuses an existing relation that cannot serve this project's storage.
 var ErrProjectStorageConflict = errors.New("project storage conflicts with an existing relation")
 
-// ProvisionScope atomically creates a project's row, chunk partition and cosine HNSW index.
+// ProvisionScope atomically creates a project's row and source-chunk partition. Vector indexes
+// belong to explicit model generations, where their dimension is known.
 // Repeated/concurrent calls validate existing storage instead of trusting its name. A failed
 // statement rolls back all newly created storage. Unprovisioned writes remain in the default
 // partition; moving existing default-partition data is a separate maintenance operation.
@@ -55,7 +56,7 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, namespace, scope st
 	if !scopePattern.MatchString(scope) {
 		return fmt.Errorf("project %q is not a valid identifier: %s", scope, scopePattern)
 	}
-	tableName, indexName := projectStorageNames(scope)
+	tableName := projectStorageNames(scope)
 	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, namespace+":project:"+scope); err != nil {
 			return err
@@ -79,24 +80,6 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, namespace, scope st
 				return fmt.Errorf("validate project partition: %w", err)
 			}
 		}
-		partition := pgx.Identifier{namespace, attachedName}.Sanitize()
-		var indexed bool
-		if err := tx.QueryRow(ctx, validProjectIndexSQL, partition).Scan(&indexed); err != nil {
-			return fmt.Errorf("inspect project index: %w", err)
-		}
-		if !indexed {
-			// A partitioned-parent index is virtual: each child owns its actual index. We currently
-			// provision HNSW on demand on the child; alternative strategies remain measured under #101.
-			if _, err := tx.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (embedding vector_cosine_ops)`, pgx.Identifier{indexName}.Sanitize(), partition)); err != nil {
-				return fmt.Errorf("create project index: %w", err)
-			}
-			if err := tx.QueryRow(ctx, validProjectIndexSQL, partition).Scan(&indexed); err != nil {
-				return err
-			}
-			if !indexed {
-				return ErrProjectStorageConflict
-			}
-		}
 		if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.project(scope,label) VALUES($1,$1) ON CONFLICT(scope) DO NOTHING`), scope); err != nil {
 			return fmt.Errorf("record project %q: %w", scope, err)
 		}
@@ -104,18 +87,15 @@ func ProvisionScope(ctx context.Context, pool *pgxpool.Pool, namespace, scope st
 	})
 }
 
-// Keep short legacy table names and reuse any valid existing index. New index names always
-// use a digest, so a project such as foo_ann_idx cannot collide with foo's index. The complete
-// SHA-256 digest encodes into 52 bytes; generated table/index lengths are distinct and fit the
-// 63-byte limit. Catalog validation refuses any pre-existing or hypothetical digest collision.
-func projectStorageNames(scope string) (string, string) {
+// Short project names remain legible; long names use the full SHA-256 digest so a PostgreSQL
+// identifier truncation cannot merge two projects. Actual partition attachment is still validated.
+func projectStorageNames(scope string) string {
+	if len(scope) <= 49 {
+		return "chunk_" + scope
+	}
 	digest := sha256.Sum256([]byte(scope))
 	encoded := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(digest[:]))
-	table := "chunk_" + scope
-	if len(scope) > 49 {
-		table = "chunk_" + encoded
-	}
-	return table, "chunk_ann_" + encoded
+	return "chunk_" + encoded
 }
 
 const findProjectPartitionSQL = `
@@ -127,13 +107,3 @@ JOIN pg_namespace cn ON cn.oid=child.relnamespace
 WHERE pn.nspname=$1 AND parent.relname='chunk' AND cn.nspname=$1
  AND child.relispartition AND child.relkind='r'
  AND pg_get_expr(child.relpartbound,child.oid)=format('FOR VALUES IN (%L)',$2::text)`
-
-const validProjectIndexSQL = `
-SELECT EXISTS(
- SELECT 1 FROM pg_index i JOIN pg_class idx ON idx.oid=i.indexrelid
- JOIN pg_am am ON am.oid=idx.relam
- JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=i.indkey[0]
- JOIN pg_opclass op ON op.oid=i.indclass[0]
- WHERE i.indrelid=$1::regclass AND i.indisvalid AND i.indisready
-   AND i.indnkeyatts=1 AND i.indnatts=1 AND i.indpred IS NULL AND i.indexprs IS NULL
-   AND am.amname='hnsw' AND a.attname='embedding' AND op.opcname='vector_cosine_ops')`

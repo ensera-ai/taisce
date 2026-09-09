@@ -3721,3 +3721,45 @@ unbounded-input and invalid-direction failure modes without changing stored data
 the fix. Adapter tests now cover refusal before network work, exact count/byte/dimension boundaries,
 valid order, a response whose oversized prefix is valid JSON and finite extreme cosine inputs.
 The full adapter suite passes under the race detector. This closes #130's boundary-hardening scope.
+
+## D104 — Message vectors belong to explicit model generations and their exact sources
+
+**Decision.** Persist full-precision message vectors under immutable project/model/revision/endpoint-
+digest/dimension/metric/input-version identity. An operator starts a generation with an idempotent
+UUID key and a captured maximum observation offset. At most two non-discarded generations are retained
+per project. Build progress is separate from identity and activation; runtime grants cannot modify
+those policy tables. Explicit activation independently checks surviving source coverage and hashes.
+The active pointer changes atomically, never as a side effect of starting or finishing a build.
+
+**Sources and failure.** Stable retained message chunk IDs and SHA-256 of exact UTF-8 content bind each
+vector to its source. Bidirectional deferred constraints require the matching source registration;
+export, erasure and retention cover every generation. Pages contain at most 64 messages, 64 KiB each
+and 1 MiB total. The model supplies coordinates only. A session lock spans the provider call without
+holding a transaction; a persisted lease fences disconnected runners. Commit locks sources/chunks,
+checks compatibility and publishes vectors, registrations, cursor and audit together. Source deletion
+wins; source edits refuse. Repair replays the captured range with the same model and preserves
+compatible vectors. Cancellation clears the lease; bounded pruning excludes active/building generations,
+detaches and drops only an empty catalog-validated partition, and retains an operation-key tombstone.
+
+**Retrieval and indexing.** Storage admits 1–4000 finite components with nonzero direction. A generation
+partition has a dimension-specific cosine HNSW index. Through 2000 dimensions it indexes vector values;
+above that it indexes normalized half-precision expressions while retaining original coordinates for
+reranking. Exact retrieval materializes eligible rows before distance ordering so it cannot silently
+use ANN. Optional bounded ANN candidates are filtered against current authoritative source hashes and
+reranked in full precision. Both paths are project scoped and return message evidence with bounded
+previews. Approximate filtered recall and production capacity remain unqualified (#101/#103).
+
+**Alternatives and reversibility.** An unstamped fixed-dimension column cannot distinguish model spaces
+and cannot store the configured 2560-dimensional provider output. In-place re-embedding mixes spaces
+while work is incomplete. Both are rejected; the unused fixed 1024-dimensional chunk column and its
+provisioning-time index are removed in the unreleased schema. A second database would add an erasure
+and operational boundary without demonstrated need. Partition-per-generation bounds the dimension
+contract and isolates an index graph; its catalog/DDL cost needs controlled-host qualification before
+large project counts. Reversal needs a storage migration and regeneration from retained messages.
+
+**Limits.** Model revision is operator-declared, not a provider attestation. Builds cover finite source
+snapshots; continuous embedding of new messages is not delivered here. Active repair can temporarily
+have incomplete coverage. No entity/report embedding, semantic quality, latency, throughput or capacity
+claim follows from this message-vector journey. Tests prove source ownership, cancellation and rollback,
+plus exact/approximate compatibility with the local provider's actual 2560 dimensions. Index fixtures
+prove eligibility with controlled planner costs, not that ANN is always the cheapest small-corpus plan.

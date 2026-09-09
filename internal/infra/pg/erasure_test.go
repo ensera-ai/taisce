@@ -134,6 +134,22 @@ func TestEverythingDerivedFromASubjectIsErasedWithAResidualOfZero(t *testing.T) 
 	}
 
 	described(t, pool, schema)
+	embeddings := pg.NewMessageEmbeddingStore(pool, schema)
+	embeddingActor := uuid.NewString()
+	embeddingModel := pg.EmbeddingModel{Name: "erasure-fixture", Revision: "v1", EndpointHash: strings.Repeat("a", 64), Dimensions: 3}
+	embeddingGeneration, err := embeddings.Start(ctx, "p1", uuid.NewString(), embeddingActor, embeddingModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := embeddings.BuildPage(ctx, "p1", embeddingGeneration.ID, embeddingActor, embeddingModel, 64, func(_ context.Context, texts []string) ([][]float32, error) {
+		vectors := make([][]float32, len(texts))
+		for i := range vectors {
+			vectors[i] = []float32{1, 0, 0}
+		}
+		return vectors, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Before: every projection kind has rows, so the erasure has something to prove.
 	kinds := declaredKinds(t, pool, schema)

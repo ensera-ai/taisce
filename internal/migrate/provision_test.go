@@ -69,9 +69,9 @@ func TestLongProjectNamesWithTheSamePrefixHaveDistinctStorageAndPrune(t *testing
 		if err := pool.QueryRow(ctx, findProjectPartitionSQL, name, scope).Scan(&partitions[i]); err != nil {
 			t.Fatal(err)
 		}
-		table, index := projectStorageNames(scope)
-		if len(table) > 63 || len(index) > 63 || partitions[i] != table {
-			t.Fatalf("unsafe physical name: %q %q %q", table, index, partitions[i])
+		table := projectStorageNames(scope)
+		if len(table) > 63 || partitions[i] != table {
+			t.Fatalf("unsafe physical name: %q %q", table, partitions[i])
 		}
 		source := seedObservation(t, pool, schema, scope)
 		if _, err := pool.Exec(ctx, schema.SQL(`INSERT INTO {schema}.chunk(chunk_id,scope,source_observation_id,text,occurred_at,source_role) VALUES(gen_random_uuid(),$1,$2,'fixture',now(),'user')`), scope, source); err != nil {
@@ -116,7 +116,7 @@ func TestProjectRowFailureRollsBackItsPartitionAndIndex(t *testing.T) {
 }
 
 func TestConflictingProjectRelationsAreNotTreatedAsSuccessfulProvisioning(t *testing.T) {
-	for _, kind := range []string{"ordinary table", "wrong bound", "wrong parent", "wrong index"} {
+	for _, kind := range []string{"ordinary table", "wrong bound", "wrong parent"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := context.Background()
 			pool := testPool(t)
@@ -131,12 +131,7 @@ func TestConflictingProjectRelationsAreNotTreatedAsSuccessfulProvisioning(t *tes
 			case "wrong parent":
 				sql = `CREATE TABLE {schema}.other_chunk (LIKE {schema}.chunk INCLUDING DEFAULTS INCLUDING CONSTRAINTS) PARTITION BY LIST(scope);
       CREATE TABLE {schema}.chunk_collision PARTITION OF {schema}.other_chunk FOR VALUES IN ('collision')`
-			case "wrong index":
-				sql = `CREATE TABLE {schema}.chunk_collision PARTITION OF {schema}.chunk FOR VALUES IN ('collision');
-      CREATE INDEX chunk_collision_ann_idx ON {schema}.chunk_collision(occurred_at)`
 			}
-			_, candidateIndex := projectStorageNames("collision")
-			sql = strings.ReplaceAll(sql, "chunk_collision_ann_idx", candidateIndex)
 			if _, err := pool.Exec(ctx, schema.SQL(sql)); err != nil {
 				t.Fatal(err)
 			}
@@ -162,7 +157,7 @@ func TestValidLegacyPartitionAndIndexNamesAreReused(t *testing.T) {
 	schema, _ := NewSchema(name)
 	scope := strings.Repeat("p", 63)
 	if _, err := pool.Exec(ctx, schema.SQL(fmt.Sprintf(`CREATE TABLE {schema}.legacy_partition PARTITION OF {schema}.chunk FOR VALUES IN ('%s');
- CREATE INDEX legacy_cosine ON {schema}.legacy_partition USING hnsw(embedding vector_cosine_ops)`, scope))); err != nil {
+ CREATE INDEX legacy_lookup ON {schema}.legacy_partition(occurred_at)`, scope))); err != nil {
 		t.Fatal(err)
 	}
 	before := storageObjects(t, pool, schema)
@@ -240,30 +235,6 @@ func TestProjectTableNamesCannotCollideWithAnotherProjectsIndex(t *testing.T) {
 	}
 }
 
-func TestIndexBuildFailureRollsBackNewProjectStorage(t *testing.T) {
-	ctx := context.Background()
-	pool := testPool(t)
-	name := freshTenant(t, pool)
-	schema, _ := NewSchema(name)
-	// Reproduce a drifted embedding column that the required cosine operator class cannot index.
-	if _, err := pool.Exec(ctx, schema.SQL(`ALTER TABLE {schema}.chunk ALTER COLUMN embedding TYPE text USING embedding::text`)); err != nil {
-		t.Fatal(err)
-	}
-	before := storageObjects(t, pool, schema)
-	if err := ProvisionScope(ctx, pool, name, "bad_index"); err == nil || !strings.Contains(err.Error(), "create project index") {
-		t.Fatalf("index failure not reported: %v", err)
-	}
-	if after := storageObjects(t, pool, schema); after != before {
-		t.Fatalf("index failure left storage: %d -> %d", before, after)
-	}
-	if _, err := pool.Exec(ctx, schema.SQL(`ALTER TABLE {schema}.chunk ALTER COLUMN embedding TYPE vector(1024) USING embedding::vector(1024)`)); err != nil {
-		t.Fatal(err)
-	}
-	if err := ProvisionScope(ctx, pool, name, "bad_index"); err != nil {
-		t.Fatalf("retry after column remediation: %v", err)
-	}
-}
-
 func TestExistingDefaultPartitionDataIsPreservedWhenAttachmentIsRefused(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
@@ -322,7 +293,11 @@ func TestALegacyPartitionWithNoANNIndexIsCompletedWithoutRenamingIt(t *testing.T
 		t.Fatal(err)
 	}
 	var indexed bool
-	if err := pool.QueryRow(ctx, validProjectIndexSQL, pgx.Identifier{name, "legacy_unindexed"}.Sanitize()).Scan(&indexed); err != nil || !indexed {
-		t.Fatalf("legacy partition not indexed: %v %v", indexed, err)
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_am a ON a.oid=c.relam WHERE i.indrelid=$1::regclass AND a.amname='hnsw')`, pgx.Identifier{name, "legacy_unindexed"}.Sanitize()).Scan(&indexed); err != nil || indexed {
+		t.Fatalf("source partition unexpectedly requires an unstamped vector index: %v %v", indexed, err)
+	}
+	var partition string
+	if err := pool.QueryRow(ctx, findProjectPartitionSQL, name, "legacy").Scan(&partition); err != nil || partition != "legacy_unindexed" {
+		t.Fatalf("attachment changed: %s %v", partition, err)
 	}
 }

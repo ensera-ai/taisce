@@ -888,6 +888,13 @@ func (e Erasure) Clean() bool {
 // Operations the ledger records. Closed, because an operation nobody has heard of cannot be counted,
 // and the point of the ledger is that the set of things which happen is knowable.
 const (
+	AuditEmbeddingStart    = "embedding.start"
+	AuditEmbeddingBuild    = "embedding.build"
+	AuditEmbeddingActivate = "embedding.activate"
+	AuditEmbeddingCancel   = "embedding.cancel"
+	AuditEmbeddingPrune    = "embedding.prune"
+	AuditEmbeddingRepair   = "embedding.repair"
+	AuditEmbeddingSearch   = "embedding.search"
 	AuditObserve           = "observe"
 	AuditRecall            = "recall"
 	AuditErase             = "erase"
@@ -936,6 +943,8 @@ const (
 // becomes servable and a name removed stops being servable, without a second list agreeing to it.
 func RecordableOperation(name string) bool {
 	switch name {
+	case AuditEmbeddingStart, AuditEmbeddingBuild, AuditEmbeddingActivate, AuditEmbeddingCancel, AuditEmbeddingPrune, AuditEmbeddingRepair, AuditEmbeddingSearch:
+		return true
 	case AuditEntityList, AuditEntityGet:
 		return true
 	case AuditRebuildStart, AuditRebuildCancel:

@@ -29,6 +29,7 @@ does not complete an issue whose adapter, recovery or operational acceptance rem
 
 | Work | Delivery and evidence | Remaining scope |
 |---|---|---|
+| Message embedding generations [#131](https://github.com/althunibat/taisce/issues/131) | D104 adds model-identified persisted messages, bounded build/repair, explicit activation, source-owned erasure/export/expiry and exact/optional ANN retrieval. Local provider compatibility passes at 2560 dimensions. | Continuous embedding, entity/report surfaces and controlled-host semantic/capacity qualification remain #19/#101/#103. |
 | Embedding boundary [#130](https://github.com/althunibat/taisce/issues/130) | D103 bounds requests/replies and refuses zero, oversized or non-finite vectors before ranking. Regressions reproduce the previous zero/NaN behavior; race checks cover valid boundaries and reply overflow. | Persistent model/dimension identity, three embedding surfaces and generation cutover remain #101/#19. |
 | Entity inspection [#129](https://github.com/althunibat/taisce/issues/129) | D102 exposes bounded entity inventory and exact identity lookup under project read authorization, with source-owned aliases, speaker binding, audit and erasure behavior. PostgreSQL verifies direct project/UUID index access. | Entity-purge preview/execution and feedback remain #89; workload qualification remains #103. |
 | Message chunk recovery [#128](https://github.com/althunibat/taisce/issues/128) | D101 retains source-owned chunk UUIDs and restores missing chunks/registrations through bounded, audited operator pages. Conflicts refuse atomically; embeddings survive and erased sources cannot revive. | Changed segmentation and embedding regeneration remain #58/#19; controlled workloads remain #103. |
@@ -85,12 +86,13 @@ Older issue reconciliation at `ff0a851` separates completed work from superseded
 Issue #18 is a standing obligation for the life of the repository, not a finite feature awaiting
 implementation. Parent issues #83/#98 stay open while their actual child acceptance remains unfinished.
 
-The complete uncached real-PostgreSQL suite through authored assertions and opaque artifact storage passes at **91.7%**,
+The complete uncached real-PostgreSQL suite through message embedding generations passes at **91.7%**,
 meeting the enforced **91.6%** floor. Targeted race checks and `go vet ./...` pass. These
 are correctness checks, not production latency or scaling measurements.
 
-Inference profiles are tracked separately. The full local inference suite passed in 2140.657 seconds
-on the earlier speaker-binding working tree. The targeted description/thematic/speaker rerun
+Inference profiles are tracked separately. The full local inference suite at `d9448d1` passed in
+2696.859 seconds. The new persisted message-vector journey also passed against the configured local
+provider with its actual 2560-dimensional output, including exact and approximate retrieval. The targeted description/thematic/speaker rerun
 against `17ac077` passed in 462.482 seconds. Known semantic separation limitations remain explicit
 in the tests. OpenRouter stopped on upstream HTTP 429; a later bounded retry was also rate-limited.
 Its verification is incomplete. The GPU profile awaits endpoint/model/allowlist configuration.

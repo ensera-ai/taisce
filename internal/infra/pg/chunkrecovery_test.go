@@ -161,7 +161,20 @@ func TestConcurrentChunkRecoveryPreservesEmbeddingsAndSerializesErasure(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.chunk SET embedding=array_fill(0.5::real,ARRAY[1024])::vector`)); err != nil {
+	embeddings := pg.NewMessageEmbeddingStore(pool, schema)
+	actor := uuid.NewString()
+	model := pg.EmbeddingModel{Name: "test", Revision: "v1", EndpointHash: strings.Repeat("a", 64), Dimensions: 1024}
+	generation, err := embeddings.Start(ctx, "p1", uuid.NewString(), actor, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := embeddings.BuildPage(ctx, "p1", generation.ID, actor, model, 64, func(context.Context, []string) ([][]float32, error) {
+		v := make([]float32, 1024)
+		for i := range v {
+			v[i] = 0.5
+		}
+		return [][]float32{v}, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	start := pg.ChunkRecoveryCursor{Offset: -1, Ordinal: -1}
@@ -169,10 +182,10 @@ func TestConcurrentChunkRecoveryPreservesEmbeddingsAndSerializesErasure(t *testi
 		t.Fatal(err)
 	}
 	var preserved bool
-	if err := pool.QueryRow(ctx, schema.SQL(`SELECT embedding=array_fill(0.5::real,ARRAY[1024])::vector FROM {schema}.chunk`)).Scan(&preserved); err != nil || !preserved {
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT embedding=array_fill(0.5::real,ARRAY[1024])::vector FROM {schema}.message_embedding`)).Scan(&preserved); err != nil || !preserved {
 		t.Fatalf("embedding changed %v %v", preserved, err)
 	}
-	if _, err := pool.Exec(ctx, schema.SQL(`DELETE FROM {schema}.chunk`)); err != nil {
+	if _, err := pool.Exec(ctx, schema.SQL(`DELETE FROM {schema}.message_embedding; DELETE FROM {schema}.chunk`)); err != nil {
 		t.Fatal(err)
 	}
 	ready := make(chan struct{})
