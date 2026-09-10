@@ -4615,3 +4615,40 @@ door and one in the loop per tool call.
 
 **How hard to undo.** Removing the route and the plugin leaves the server as it was; the credential
 split in `authenticated` stays as an ordinary refactor.
+
+## D129 — Every adapter is the same shape on its framework's own seam, and the memory bytes agree
+
+**Date:** 2026-09-10. **Tracking:** [#27](https://github.com/althunibat/taisce/issues/27),
+[#28](https://github.com/althunibat/taisce/issues/28), [#29](https://github.com/althunibat/taisce/issues/29).
+
+**Decision.** Each adapter maps the six rules D127 holds onto the one seam its framework offers for
+"before the model call, after the answer", and adds nothing of its own. Microsoft Agent Framework in
+.NET and Python: the context provider, built through the framework's constructor hooks and its default
+filters, with the adapter's response filter keeping only the assistant's final text. LangGraph: agent
+middleware around the model call and after the run. Spring AI: an advisor. LangChain4j: a decorator
+over the application's `ChatModel`, because LangChain4j reads its chat memory before the new message
+is added to it, so a memory cannot inject for the turn in hand and the model is the one seam that
+sees the whole request and the whole answer. Every adapter renders the memory message D127 defines and
+derives the turn's idempotency key as a version-5 UUID over the subject, the run and the messages, so
+a turn stored by two adapters is one observation and a memory message from any parses the same. The
+untrusted mark lives where the framework has a slot for it: message metadata or additional properties
+where they exist, the user message's attributes and name in LangChain4j. Each adapter ships a
+conformance driver, and the run of the suite against a live deployment is the evidence it carries.
+Each language is one repository (D44): `taisce-dotnet`, `taisce-python` (three distributions),
+`taisce-java` (three modules).
+
+**Why.** An adapter that reimplements its framework's wrapper or filters is the fork G8 forbids;
+building on the framework's own hooks keeps the defaults in one place every adapter inherits. One
+key derivation across languages is what makes "resumable and duplicate-safe" a property of the
+system rather than of each client. The seam choices are the frameworks' facts, found by driving each
+with a scripted model: the LangChain4j one was found when a chat-memory adapter passed five cases and
+never handed the model a memory message.
+
+**Rejected.** Emulating a missing seam locally (#28): logic in an adapter. A shared client across
+languages: each language's HTTP and JSON idioms are its own, and the contract is small. Injecting as a
+system message anywhere: both Java frameworks pin a system message first and never evict it.
+
+**Impact.** Security: the memory message is marked untrusted on every framework and never re-enters
+memory as a person's words. Operations: an adapter's release runs the suite against a real deployment.
+
+**How hard to undo.** Each adapter is its own repository; replacing one changes nothing here.
