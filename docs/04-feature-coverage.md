@@ -157,6 +157,32 @@ register; route counts alone are not a functional equivalence test.
 
 ## Execution order
 
+Replanned 2026-09-10 at `90edd7b` as three passes over one journey, tracked in [#158](https://github.com/althunibat/taisce/issues/158): an agent
+developer installs an adapter, turns become memory, recall composes it, an operator sees what
+happened, and erasure proves itself. Sequencing is by dependency, not by area. The earlier ordering
+below it is retained as the record of the 2026-09-08 review.
+
+**Pass 1 — core correct enough to freeze the contract.** CI on this repository ([#157](https://github.com/althunibat/taisce/issues/157));
+[#155](https://github.com/althunibat/taisce/issues/155) exclusion violation becomes a refusal; [#153](https://github.com/althunibat/taisce/issues/153) role gate narrowed to the principal, role
+refusals stored; [#154](https://github.com/althunibat/taisce/issues/154) event relations versus state relations, corpus rerun; [#149](https://github.com/althunibat/taisce/issues/149) composed
+recall over exact anchors, semantic candidates, the report hierarchy and passages under one budget;
+[#91](https://github.com/althunibat/taisce/issues/91) document ingestion and an ingest command; [#36](https://github.com/althunibat/taisce/issues/36) contract v1 frozen. Nothing in pass 2 starts
+before the freeze.
+
+**Pass 2 — SDK and adapters.** [#26](https://github.com/althunibat/taisce/issues/26) conformance suite against a live deployment; [#27](https://github.com/althunibat/taisce/issues/27) .NET
+client and MAF adapter as the reference; [#31](https://github.com/althunibat/taisce/issues/31) MCP plugin early as the dogfood path; [#28](https://github.com/althunibat/taisce/issues/28) Python
+and [#29](https://github.com/althunibat/taisce/issues/29) LangGraph, LangChain4j, Spring AI; [#22](https://github.com/althunibat/taisce/issues/22) and [#25](https://github.com/althunibat/taisce/issues/25) compaction after the first adapter
+exists; [#24](https://github.com/althunibat/taisce/issues/24) head-to-head; [#97](https://github.com/althunibat/taisce/issues/97) Go client, recommended rejected.
+
+**Pass 3 — operate it.** A management API for credentials, projects, grants, refusal inspection and
+erasure receipts with the CLI moved onto it; [#77](https://github.com/althunibat/taisce/issues/77) the portal; [#76](https://github.com/althunibat/taisce/issues/76) the Helm chart with the
+first failover measurement; [#37](https://github.com/althunibat/taisce/issues/37) release and supply chain.
+
+**Measurement thread, on GPU days in parallel.** [#16](https://github.com/althunibat/taisce/issues/16), [#103](https://github.com/althunibat/taisce/issues/103), [#11](https://github.com/althunibat/taisce/issues/11), and [#15](https://github.com/althunibat/taisce/issues/15) once
+[#149](https://github.com/althunibat/taisce/issues/149) has made recall the thing being measured.
+
+### Order from the 2026-09-08 review
+
 1. **Identity and security:** [#84](https://github.com/althunibat/taisce/issues/84) first-person binding, [#88](https://github.com/althunibat/taisce/issues/88) audit content, [#87](https://github.com/althunibat/taisce/issues/87) JSON ambiguity,
    with [ensera-ai/taisce#85](https://github.com/ensera-ai/taisce/issues/85)/[ensera-ai/taisce#94](https://github.com/ensera-ai/taisce/issues/94) privilege design. These protect attribution and the boundaries all later APIs use.
 2. **Reliable writes:** [#85](https://github.com/althunibat/taisce/issues/85) idempotency, [#86](https://github.com/althunibat/taisce/issues/86) message groups, [ensera-ai/taisce#58](https://github.com/ensera-ai/taisce/issues/58) rebuild/generation lifecycle,
