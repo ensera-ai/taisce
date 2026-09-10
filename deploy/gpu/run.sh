@@ -85,6 +85,23 @@ done ) > results/gpu-stats.csv 2>&1 &
 gpu_monitor_pid=$!
 echo 'Running deployed API/worker smoke test'
 python3 deploy/gpu/smoke.py > results/deployed-smoke.log 2>&1
+# TAISCE_GPU_MODE selects what the deployed stack is used for. `qualification` (the default) is the
+# full gate set. `coverage` measures the relation vocabulary against a document corpus the operator
+# placed at /root/corpus (#43): it needs the models and the write path, not the regression suite, so
+# it returns after the measurement rather than spending node hours on gates that ran elsewhere.
+if [[ "${TAISCE_GPU_MODE:-qualification}" == coverage ]]; then
+    echo 'Measuring vocabulary coverage over /root/corpus'
+    set +e
+    TAISCE_COMPOSE="docker compose -p taisce-qualification -f compose.yaml -f compose.gpu.yaml" \
+        CORPUS=/root/corpus CORPUS_SHARDS=7 RESULTS=results \
+        python3 deploy/gpu/vocabulary-coverage.py > results/vocabulary-coverage.log 2>&1
+    result=$?
+    set -e
+    "${dc[@]}" logs --no-color worker > results/worker.log 2>&1 || true
+    "${dc[@]}" logs --no-color generation > results/generation.log 2>&1 || true
+    nvidia-smi --query-gpu=name,memory.used,utilization.gpu --format=csv > results/gpus-after.csv
+    exit "$result"
+fi
 echo 'Benchmarking the seven-replica structured-output endpoint'
 "${dc[@]}" exec -T generation-0 python3 - < deploy/gpu/generation-benchmark.py \
     > results/generation-benchmark.json

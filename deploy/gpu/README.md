@@ -84,3 +84,21 @@ overwrite of provider-managed storage.
 The default run is functional qualification. Throughput, latency, corpus size and failover targets
 require separately specified workloads and acceptance limits; a passing GPU run does not establish
 those claims.
+
+## Vocabulary coverage over a document corpus
+
+`TAISCE_GPU_MODE=coverage bash deploy/gpu/run.sh` deploys the same stack, runs the smoke journey,
+then measures the relation vocabulary against a corpus the operator placed at `/root/corpus`
+(issue #43) and returns without the regression gates. `deploy/gpu/vocabulary-coverage.py` deals the
+documents across seven projects, one per generation replica, because formation holds one advisory
+lock per project; observes each document once under the `tool` role with a deterministic retry key;
+waits for every project's watermark; and reads admitted facts against every refusal reason from the
+database, with unmapped refusals broken down by the relation the model tried to use. It writes
+`results/vocabulary-coverage.json` and `.md`. AP-format JSON (`headline`, `body_nitf`,
+`firstcreated`) and plain text files are both read.
+
+The corpus is the operator's to license and never enters the repository, the image or the results.
+It is uploaded beside the source and removed by `wipe.sh` with everything else. Claims refused by
+role are reported by formation and not persisted, so they are absent from the denominator; a number
+from this mode is a coverage measurement of one extractor on one corpus, not a retrieval quality
+result.

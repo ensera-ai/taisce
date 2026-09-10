@@ -20,6 +20,10 @@ fi
 cd /root
 rm -rf /root/taisce-qualification || status=1
 rm -f /root/taisce-qualification-run.log || status=1
+# A benchmark corpus is placed beside the source for a coverage run and is licensed to the operator,
+# not to the node: it leaves with everything else.
+rm -rf /root/corpus || status=1
 test ! -e /root/taisce-qualification || status=1
+test ! -e /root/corpus || status=1
 printf 'qualification logical wipe exit=%s\n' "$status"
 exit "$status"
