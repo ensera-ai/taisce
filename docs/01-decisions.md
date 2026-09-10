@@ -4276,3 +4276,32 @@ Deriving the denominator from a sample rebuild, which is one article's ratio pre
 
 **How hard to undo.** The harness flag is one environment variable. The measurement itself is
 re-runnable from the committed harness against any corpus the operator licenses. Tracking: #43.
+
+## D120 — The vocabulary does not grow to admit a news corpus's unmapped tail
+
+**Decision.** No relation is added to the vocabulary from the AP news measurement (#43). Measured
+over 537 formed articles at `5b3775b` with the qualified extractor: 7,482 proposals, 430 unmapped, a
+5.75% unmapped rate; 228 distinct unmapped predicates of which 166 appear once. That is the shape #43
+itself named as a vocabulary that is right with a tail that is noise. The head of the tail is
+attribution — `reported`, `denied`, `said`, `announced`, `told`, `says`, together about a fifth of the
+unmapped claims — and attribution is not a relation between two entities: the quote already carries
+who said it, and a fact whose object is a sentence has no cardinality, no supersession and no edge to
+follow. Event verbs in the tail (`died`, `killed`, `filed`, `sued`, `lost`) are #154's decision about
+event relations, not a vocabulary gap to fill by name.
+
+**Why the measurement is trusted for this.** The vocabulary check is the first admission check in
+the extractor, so the unmapped count is complete over every proposal regardless of what later gates
+refuse; and the second pass observed without a data subject, so the denominator is facts plus every
+stored refusal (D119). Thirty-seven of the thirty-nine relations were used; `has_timezone` and
+`learning` were not, which says what news does not talk about rather than anything about the set.
+
+**Rejected.** Adding `said`/`reported` as relations, which turns every quoted sentence into a fact
+about its speaker with the sentence as object and makes the graph a passage store with extra steps.
+Adding per-corpus predicates, which reopens D15's closed set for the one property the closure buys:
+that a relation is queryable, cardinality-decidable and supersession-capable because a foreign key
+admits it. Treating 5.75% as a target to drive to zero, which would be measured against reporting
+verbs the graph should not hold.
+
+**How hard to undo.** A migration adds a predicate; nothing on the read path changes. The number
+that would reopen this is a corpus where the unmapped head is a genuine entity relation asserted
+often, and the harness re-runs on any corpus the operator licenses.

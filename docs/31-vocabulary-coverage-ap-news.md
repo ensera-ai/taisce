@@ -72,19 +72,45 @@ The same corpus, twelve fresh projects, no data subject on the observations, eve
 Without a subject the role gate does not apply, tool-role facts are admitted under their own role,
 and the denominator is complete: facts plus every stored refusal.
 
-_In progress at the time of writing; the table below is filled in from `results/vocabulary-coverage.json`
-when formation completes._
+The run was stopped by the operator at 537 formed articles: the model server was the provider's
+container capacity at about eight articles a minute, and the eight-card VM pool that would have run
+the reference topology delivered nothing bootable all day. The figures below are therefore a partial
+run over 537 of 1,397 articles, dealt in corpus order across twelve projects, and are stated as such.
+The harness's own report is retained as `pass2-interim.json` beside the run's evidence.
 
 | Outcome | Count |
 |---|---|
-| articles formed | — |
-| facts | — |
-| refused, by reason | — |
-| unmapped rate (unmapped / all proposals) | — |
-| unmapped share of refusals | — |
-| documents with no fact | — |
+| articles formed | 537 of 1,397 (partial; run stopped) |
+| proposals (facts + stored refusals) | 7,482 |
+| facts | 4,022 |
+| refused, `not_current` | 2,092 |
+| refused, `not_asserted` | 781 |
+| refused, `unmapped_relation` | 430 |
+| refused, `unlocatable_quote` | 147 |
+| refused, `unresolvable_subject` | 9 |
+| refused, `duplicate_claim` | 1 |
+| **unmapped rate (unmapped / all proposals)** | **5.75%** |
+| unmapped share of refusals | 12.4% |
+| formed articles with no fact | 53 of 537 (9.9%) |
+| facts per formed article | median 6, maximum 36 |
+| distinct unmapped predicates | 228, of which 166 appear once |
+| parked by the exclusion defect (#155) at the stop | 40 |
 
-Top unmapped predicates, the breakdown #43 asks for, follow the table when the run completes.
+**Unmapped predicates, the breakdown #43 asks for.** `reported` 25, `denied` 24, `said` 23, `is` 14,
+`died` 12, `announced` 8, `told` 8, `killed` 7, `asserts` 6, `was` 6, `has` 5, `says` 5, then a tail of
+four or fewer: `agreed to`, `filed`, `found`, `lost`, `sent`, `works_for`, `approved`, `called_on`,
+`caused_by`, `directed`, `refused`, `repealed`, `violate` and 200 more. The head is attribution, the
+middle is events, and the rest is one-offs.
+
+**What the corpus did use.** Thirty-seven of the thirty-nine relations; only `has_timezone` and
+`learning` never appeared. The most used: `has_role` 1,094, `intends_to` 393, `works_at` 371,
+`located_in` 267, `has_status` 234, `lives_in` 164, `related_to` 122, `member_of` 111, `created` 109,
+`participated_in` 108, `owns` 99, `prefers` 96.
+
+**The decision.** No relation is added; D120 records why. A 5.75% unmapped rate with a tail that is
+three-quarters singletons is the shape #43 named as a vocabulary that is right with a tail that is
+noise, and the head of the tail is attribution, which is provenance rather than a relation. Whether
+event verbs become event relations is #154; whether documents fall back to passages is #149.
 
 This pass surfaced a third defect. Nine articles parked after six attempts each with the fact insert
 violating the single-cardinality exclusion constraint. That constraint is G4 working: one current

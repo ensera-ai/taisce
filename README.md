@@ -34,6 +34,7 @@ Database erasure does not establish what an external provider retained. See the
 | [docs/05-releases.md](docs/05-releases.md) | Preparing public snapshots and preserving private development history |
 | [`docs/21-production-postgresql.md`](docs/21-production-postgresql.md) | PostgreSQL production sizing, qualification and rollback |
 | [`docs/26-report-quality-qualification.md`](docs/26-report-quality-qualification.md) | Report semantic quality and filtered ANN measurements on disposable GPU infrastructure |
+| [`docs/31-vocabulary-coverage-ap-news.md`](docs/31-vocabulary-coverage-ap-news.md) | What the closed vocabulary admits and refuses on a news corpus, measured |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How work is tracked |
 | [`AGENTS.md`](AGENTS.md) | The working rules, in full; `CLAUDE.md` is a symlink to it |
 | [development issues](https://github.com/althunibat/taisce/issues) | The private roadmap — the source of truth for scope |
