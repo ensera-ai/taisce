@@ -290,6 +290,10 @@ func (s *Server) Handler(readiness ...http.Handler) http.Handler {
 		mux.Handle(o.Method+" /"+Version+o.Path, s.authenticated(s.authorized(o.Name, o.handler(s))))
 	}
 
+	// The MCP door loops back into the operations above, so it is mounted after them and is not
+	// one of them: a tool call is one of those operations, reached by another protocol (D128).
+	mux.Handle(http.MethodPost+" "+MCPPath, s.mcpHandler(mux))
+
 	return mux
 }
 
@@ -304,67 +308,78 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 		requestCtx, cancelRequest := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancelRequest()
 		r = r.WithContext(requestCtx)
-		releaseAuth, ok := s.admission.authenticate(time.Now())
+		grant, ok := s.resolveGrant(w, r)
 		if !ok {
-			writeAdmissionRefusal(w)
 			return
 		}
-		defer releaseAuth()
-		token, ok := bearer(r.Header.Get("Authorization"))
-		if !ok {
-			s.recordRefusedAuth(r)
-			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
-			return
-		}
-		authCtx, cancelAuth := context.WithTimeout(r.Context(), 2*time.Second)
-		grant, err := s.credentials.Resolve(authCtx, token)
-		cancelAuth()
-		if errors.Is(err, credential.ErrUnknown) {
-			s.recordRefusedAuth(r)
-			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
-			return
-		}
-		if err != nil {
-			s.log.Error("resolve credential", "error", err)
-			writeError(w, http.StatusInternalServerError, codeInternal, "the request could not be served")
-			return
-		}
-		releaseAuth()
 		releaseWork, ok := s.admission.acquire(grant.Project, grant.CredentialID)
 		if !ok {
 			writeAdmissionRefusal(w)
 			return
 		}
 		defer releaseWork()
-
-		// The credential resolved. Whether the project it names still exists is a different
-		// question, and it is asked here because no constraint can ask it: the credential is in the
-		// registry and the project is in the tenant schema, on opposite sides of the boundary that
-		// stops a memory query reading a key.
-		//
-		// The command that mints a credential checks the project exists, which catches a typo. It
-		// cannot catch what happens next — a project suspended, or removed, with credentials for it
-		// still in circulation. Without this, such a credential authenticates and writes into a
-		// namespace nobody is watching.
-		//
-		// Refused as UNAUTHENTICATED rather than as a missing project. From the holder's side the
-		// fact they can act on is that their credential does not work; which project exists, and
-		// whether an operator suspended it, is not theirs to learn from an error message.
-		if _, err := s.projects.Active(r.Context(), grant.Project); err != nil {
-			if errors.Is(err, pg.ErrNoSuchProject) {
-				s.log.Warn("a credential names a project that is gone or suspended",
-					"credential", grant.CredentialID, "project", grant.Project)
-				s.record(r, domain.AuditAuthenticate, grant, domain.OutcomeRefused, 0)
-				writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
-				return
-			}
-			s.log.Error("read project", "error", err, "project", grant.Project)
-			writeError(w, http.StatusInternalServerError, codeInternal, "the request could not be served")
-			return
-		}
-
 		next(w, r, grant)
 	})
+}
+
+// resolveGrant is the credential half of authentication: the authentication slot, the bearer, the
+// registry lookup and the check that the credential's project still exists. It writes the refusal
+// itself and reports whether the caller may go on. It is separate from the work slot so that a
+// door which loops back into the operations (the MCP route) can refuse a stranger at the door
+// without holding a work slot the looped-back request then needs, which with a per-credential
+// limit of one would refuse every tool call as busy.
+func (s *Server) resolveGrant(w http.ResponseWriter, r *http.Request) (credential.Grant, bool) {
+	releaseAuth, ok := s.admission.authenticate(time.Now())
+	if !ok {
+		writeAdmissionRefusal(w)
+		return credential.Grant{}, false
+	}
+	defer releaseAuth()
+	token, ok := bearer(r.Header.Get("Authorization"))
+	if !ok {
+		s.recordRefusedAuth(r)
+		writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
+		return credential.Grant{}, false
+	}
+	authCtx, cancelAuth := context.WithTimeout(r.Context(), 2*time.Second)
+	grant, err := s.credentials.Resolve(authCtx, token)
+	cancelAuth()
+	if errors.Is(err, credential.ErrUnknown) {
+		s.recordRefusedAuth(r)
+		writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
+		return credential.Grant{}, false
+	}
+	if err != nil {
+		s.log.Error("resolve credential", "error", err)
+		writeError(w, http.StatusInternalServerError, codeInternal, "the request could not be served")
+		return credential.Grant{}, false
+	}
+	// The credential resolved. Whether the project it names still exists is a different
+	// question, and it is asked here because no constraint can ask it: the credential is in the
+	// registry and the project is in the tenant schema, on opposite sides of the boundary that
+	// stops a memory query reading a key.
+	//
+	// The command that mints a credential checks the project exists, which catches a typo. It
+	// cannot catch what happens next — a project suspended, or removed, with credentials for it
+	// still in circulation. Without this, such a credential authenticates and writes into a
+	// namespace nobody is watching.
+	//
+	// Refused as UNAUTHENTICATED rather than as a missing project. From the holder's side the
+	// fact they can act on is that their credential does not work; which project exists, and
+	// whether an operator suspended it, is not theirs to learn from an error message.
+	if _, err := s.projects.Active(r.Context(), grant.Project); err != nil {
+		if errors.Is(err, pg.ErrNoSuchProject) {
+			s.log.Warn("a credential names a project that is gone or suspended",
+				"credential", grant.CredentialID, "project", grant.Project)
+			s.record(r, domain.AuditAuthenticate, grant, domain.OutcomeRefused, 0)
+			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
+			return credential.Grant{}, false
+		}
+		s.log.Error("read project", "error", err, "project", grant.Project)
+		writeError(w, http.StatusInternalServerError, codeInternal, "the request could not be served")
+		return credential.Grant{}, false
+	}
+	return grant, true
 }
 
 func bearer(header string) (string, bool) {

@@ -95,7 +95,7 @@ func publicCopyFindings(root string) ([]string, int, error) {
 		"real-time", "instantly",
 	}
 	var public []string
-	for _, pattern := range []string{"README.md", "docs/*.md", "deploy/*/README.md"} {
+	for _, pattern := range []string{"README.md", "docs/*.md", "deploy/*/README.md", "plugins/*/README.md", "conformance/README.md"} {
 		matches, err := filepath.Glob(filepath.Join(root, pattern))
 		if err != nil {
 			return nil, 0, err

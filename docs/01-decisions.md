@@ -4521,3 +4521,49 @@ carries. Operations: a breaking change costs a version, which is the point.
 
 **How hard to undo.** Deleting the snapshot and its test removes the freeze and nothing else; the
 document and its test remain. Reversing a freeze is a decision here.
+
+## D128 — The MCP surface is one route on the same server, with four tools and no erasure
+
+**Date:** 2026-09-10. **Tracking:** [#31](https://github.com/althunibat/taisce/issues/31).
+
+**Decision.** `POST /mcp` on the API server speaks the Model Context Protocol over streamable HTTP
+without sessions, answering as `application/json`, through the official Go SDK. It takes the
+deployment's own bearer credential, checked at the door with the same refusal every route gives a
+stranger. Four tools: `recall`, `observe`, `freshness` and `resolve_citation`. A tool call becomes an
+ordinary request to the v1 route of the same name, carrying the caller's credential, looped back
+through the server's own handler chain, so credential resolution, admission, the ledger row, the
+request shape and the refusal codes are the ones every client gets; the tool's result is the v1
+response, structured and as text, and a refusal is a tool error carrying the operation's code. The
+door checks the credential but takes no admission work slot, because the looped-back request takes
+it and a door holding one too would refuse its own tool calls as busy under the per-credential
+limit; credential resolution is therefore split from the work slot for every route. Erasure and
+export are not tools. The Claude Code plugin under `plugins/claude-code` is the coding-agent surface
+over this route: the MCP configuration, three commands, a skill, a session-start hook that reports
+the watermark, and a capture hook that is off by default and records only the user's message under
+a key derived from the session and the message.
+
+**Why.** A model reads a tool list as a menu, so what is on it is a policy: an agent must not be
+able to erase or export a person because a sentence in its context told it to, and forgetting stays
+an administrative act with a receipt. Looping back through the routes keeps two doors one
+implementation; a second dispatch table would be the fork G8 forbids in adapters, inside the server.
+The credential rather than OAuth: a credential here is already bound to one project, revocable and
+attributed on every act, and a second identity system would end in a bearer token reaching exactly
+what the credential reaches. The plugin lives in this repository because it has no build, no
+ecosystem registry and no version of its own: it is configuration over this server's route and
+versions with the tool names.
+
+**Rejected.** A separate MCP process: a second deployable with its own credential handling and
+audit, for a mapping that is a table. Sessions and event streams: state carried for nothing and a
+buffering setting every proxy has to know. Tools that reach the store directly: no admission, no
+ledger, no contract. A session-start digest of "recent decisions": recall is anchored on names, and a
+digest without a question would be a paraphrase presented as memory; the hook reports the watermark
+and points at the tool instead. Capture on by default: a setting that sends every turn to the
+deployment is one the person turns on.
+
+**Impact.** Security: the door refuses strangers before the protocol is spoken; every tool call is
+audited as its operation under the caller's credential; nothing on the menu deletes. Operations: no
+new process, no new port; the route is on the API listener. Cost: one credential resolution at the
+door and one in the loop per tool call.
+
+**How hard to undo.** Removing the route and the plugin leaves the server as it was; the credential
+split in `authenticated` stays as an ordinary refactor.

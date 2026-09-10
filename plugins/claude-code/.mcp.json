@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "taisce": {
+      "url": "${user_config.endpoint}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.token}"
+      }
+    }
+  }
+}

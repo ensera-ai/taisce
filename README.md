@@ -240,6 +240,13 @@ to displayed names or statements. Migration 0022 refuses databases containing ol
 entities: those projections require rebuilding from retained observations before upgrading. It does
 not guess whose supersession history should be restored. See D66 and the rebuild backlog.
 
+### The same journey, over MCP
+
+The same four operations are tools on `POST /mcp`, under the same credential and the same ledger:
+`recall`, `observe`, `freshness` and `resolve_citation`. Erasure and export are deliberately not tools.
+A coding agent reaches memory that way; the Claude Code plugin in
+[`plugins/claude-code`](plugins/claude-code/README.md) is the ready-made one.
+
 ### Developing on it
 
 ```
