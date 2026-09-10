@@ -70,15 +70,11 @@ perf-stats:
 # gate. -coverpkg=./... because the default counts only what a package's own tests reach, which
 # understates a codebase exercised end to end and would let the number fall while looking steady.
 COVER_PROFILE ?= coverage.out
-# Extra flags for go test. CI passes -p 1: on the shared-substrate runner, tests in two packages
-# running at once have hung each other until the timeout (#161); one package at a time is slower
-# and deterministic. Locally the default parallelism stands.
-TEST_FLAGS ?=
 
 # -timeout 30m: the store package alone takes nine minutes here and longer on a CI runner, and Go's
 # default of ten minutes per package would fail a slow-but-passing suite as if it had hung.
 test: licence
-	TAISCE_TEST_DSN="$(TEST_DSN)" go test $(TEST_FLAGS) -timeout 30m -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -timeout 30m -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
 	./scripts/coverage-gate.sh $(COVER_PROFILE)
 
 # Every published file carries a copyright header. Checked rather than documented, because a licence

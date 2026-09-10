@@ -41,10 +41,8 @@ jobs:
         run: make db-up
 
       # `make test` is licence gate, then the suite with -coverpkg=./..., then the coverage gate.
-      # One package at a time on the runner: two packages sharing the substrate have hung each other
-      # until the timeout there (#161). Slower, and every minute of it is a test running.
       - name: Test, coverage gate, licence gate
-        run: make test COVER_PROFILE=coverage.out TEST_FLAGS="-p 1"
+        run: make test COVER_PROFILE=coverage.out
 
       - name: Vet
         run: go vet ./...
