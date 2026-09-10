@@ -73,8 +73,12 @@ COVER_PROFILE ?= coverage.out
 
 # -timeout 30m: the store package alone takes nine minutes here and longer on a CI runner, and Go's
 # default of ten minutes per package would fail a slow-but-passing suite as if it had hung.
+# -count=1: a cached test result is keyed on the binary, its flags and the files and variables the
+# test read, and the database's state is none of those. Without it a runner restoring the build
+# cache from an earlier job on the same tree reports packages as passed that never opened a
+# connection (#166), and locally a schema change nothing in the Go inputs records is invisible.
 test: licence
-	TAISCE_TEST_DSN="$(TEST_DSN)" go test -timeout 30m -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
+	TAISCE_TEST_DSN="$(TEST_DSN)" go test -count=1 -timeout 30m -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
 	./scripts/coverage-gate.sh $(COVER_PROFILE)
 
 # Every published file carries a copyright header. Checked rather than documented, because a licence
