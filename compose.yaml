@@ -177,6 +177,10 @@ services:
       <<: *service-env
       TAISCE_ROLE: worker
       TAISCE_HEALTH_ADDR: "127.0.0.1:8081"
+      # How long one formation attempt may take. A conversation turn never needs more than the
+      # default; a document-sized turn under a busy model server can, and until documents are
+      # segmented on the way in this is the operator's knob for it.
+      TAISCE_FORMATION_TURN_BUDGET: ${TAISCE_FORMATION_TURN_BUDGET:-5m}
     healthcheck:
       test: ["CMD", "/taisce", "probe", "--worker"]
       interval: 10s

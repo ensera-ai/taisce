@@ -31,12 +31,16 @@ type Model struct {
 
 // NewModel builds a proposer against an OpenAI-compatible endpoint.
 func NewModel(config Config) *Model {
+	timeout := config.Timeout
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
 	return &Model{
 		config: config,
 		// A timeout on the client as well as the context. A request with no deadline at either
 		// level is one hung connection away from a formation worker that stops making progress and
 		// reports nothing wrong.
-		client: &http.Client{Timeout: 2 * time.Minute},
+		client: &http.Client{Timeout: timeout},
 	}
 }
 

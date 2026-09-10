@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // Environment variables. Prefixed, because a process that reads a bare `API_KEY` picks up whatever
@@ -72,6 +73,11 @@ type Config struct {
 	// fall back to the generation endpoint's, so one provider needs one set of variables.
 	EmbeddingEndpoint string
 	EmbeddingAPIKey   string
+	// Timeout bounds one generation request at the HTTP client, beneath whatever deadline the
+	// caller's context carries. Zero selects the two-minute default. The formation worker sets it
+	// to its turn budget so that the deadline that fires is the one the operator configured and
+	// the one the failure reports, rather than a second, lower number hidden in the client.
+	Timeout time.Duration
 }
 
 // ConfigFromEnv reads the configuration and refuses anything that would send message content

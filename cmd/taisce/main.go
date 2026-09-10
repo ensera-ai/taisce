@@ -53,6 +53,7 @@ const (
 	envAdminDSN = "TAISCE_ADMIN_DSN"
 	// Which halves of the service this process runs: "all" (default), "api" or "worker".
 	envRole             = "TAISCE_ROLE"
+	envTurnBudget       = "TAISCE_FORMATION_TURN_BUDGET"
 	envRequireFormation = "TAISCE_REQUIRE_FORMATION"
 	envHealthAddr       = "TAISCE_HEALTH_ADDR"
 )
@@ -363,10 +364,14 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 	if err != nil {
 		return fmt.Errorf("load the vocabulary: %w", err)
 	}
+	policy := formation.DefaultPolicy()
+	if policy.TurnBudget, err = configuredTurnBudget(policy.TurnBudget); err != nil {
+		return err
+	}
+	inferenceConfig.Timeout = policy.TurnBudget
 	observations := pg.NewObservationStore(memory)
 	former := formation.NewFormer(observations, pg.NewFactStore(memory),
 		extract.NewWith(inference.NewModel(inferenceConfig), vocabulary))
-	policy := formation.DefaultPolicy()
 	driver := formation.NewDriver(
 		formation.NewWorkerWithPolicy(memory, observations, former, policy),
 		observations, pg.NewRetentionStore(memory, schema),
@@ -381,6 +386,26 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 		}
 	}()
 	return nil
+}
+
+// configuredTurnBudget reads how long one formation attempt may take, or keeps the default.
+//
+// A conversational turn never approaches the default, but a document-sized turn under a shared
+// model server can: measured on a news corpus, articles over ten kilobytes were cut off by the
+// client while the model was still writing their claims. Until documents are segmented on the way
+// in, this is the operator's only knob, so it is a setting rather than a constant. A value that is
+// not a positive duration is refused at startup: a budget of zero would fail every turn, and a
+// silently ignored typo would leave the operator believing they had raised it.
+func configuredTurnBudget(fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(envTurnBudget))
+	if raw == "" {
+		return fallback, nil
+	}
+	budget, err := time.ParseDuration(raw)
+	if err != nil || budget <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration such as 5m or 900s, got %q", envTurnBudget, raw)
+	}
+	return budget, nil
 }
 
 // One namespace is selected for the entire instance at startup, never by a request or project.
