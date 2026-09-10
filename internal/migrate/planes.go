@@ -41,6 +41,14 @@ func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, d
 	// database DDL below cannot all run inside one transaction, so the lock has to outlive the
 	// statements it protects. Taken on its own connection so returning it to the pool cannot leave
 	// the lock held by whoever borrows that connection next.
+	//
+	// Everything under the lock runs on that same connection. Borrowing a second one from the pool
+	// while holding the first is a deadlock sized by the pool: with as many callers as the pool has
+	// connections, each waiter holds one while it waits for the lock, and the holder waits for a
+	// connection none of them will release. That is the shape of a test with six starters on a
+	// four-core machine, whose default pool is four, and of nothing a deployment does, where each
+	// replica has a pool of its own; the connection is used because it is the correct shape, not
+	// because the pool is small.
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire a connection to establish the planes: %w", err)
@@ -62,12 +70,12 @@ func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, d
 		{ControlRole, controlPassword},
 		{DataRole, dataPassword},
 	} {
-		if err := ensureRole(ctx, pool, role.name, role.password); err != nil {
+		if err := ensureRole(ctx, conn, role.name, role.password); err != nil {
 			return err
 		}
 	}
 
-	if _, err := ApplyControl(ctx, pool); err != nil {
+	if _, err := applyControl(ctx, conn); err != nil {
 		return fmt.Errorf("migrate the registry: %w", err)
 	}
 
@@ -76,7 +84,7 @@ func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, d
 	// sanitised, rather than being configured somewhere it could disagree with where we are
 	// actually connected.
 	var database string
-	if err := pool.QueryRow(ctx, `SELECT current_database()`).Scan(&database); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT current_database()`).Scan(&database); err != nil {
 		return fmt.Errorf("read the database name: %w", err)
 	}
 	database = pgx.Identifier{database}.Sanitize()
@@ -100,16 +108,16 @@ func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, d
 		fmt.Sprintf(`REVOKE CREATE ON DATABASE %s FROM PUBLIC`, database),
 		fmt.Sprintf(`REVOKE CREATE ON DATABASE %s FROM %s`, database, DataRole),
 	} {
-		if _, err := pool.Exec(ctx, statement); err != nil {
+		if _, err := conn.Exec(ctx, statement); err != nil {
 			return fmt.Errorf("establish planes: %w", err)
 		}
 	}
 	return nil
 }
 
-func ensureRole(ctx context.Context, pool *pgxpool.Pool, name, password string) error {
+func ensureRole(ctx context.Context, on statements, name, password string) error {
 	var exists bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, name).
+	if err := on.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, name).
 		Scan(&exists); err != nil {
 		return fmt.Errorf("look for role %q: %w", name, err)
 	}
@@ -121,7 +129,7 @@ func ensureRole(ctx context.Context, pool *pgxpool.Pool, name, password string) 
 	// not take parameters. It comes from a deployment's configuration and never from a request.
 	statement := fmt.Sprintf(`%s ROLE %s LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %s`,
 		verb, pgx.Identifier{name}.Sanitize(), quoteLiteral(password))
-	if _, err := pool.Exec(ctx, statement); err != nil {
+	if _, err := on.Exec(ctx, statement); err != nil {
 		return fmt.Errorf("%s role %q: %w", verb, name, err)
 	}
 	return nil

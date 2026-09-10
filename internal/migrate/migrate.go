@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ensera-ai/taisce/internal/infra/pg"
@@ -116,14 +117,29 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, schema Schema) (applied []in
 
 // ApplyControl upgrades the fixed instance credential namespace using its separate migration set.
 func ApplyControl(ctx context.Context, pool *pgxpool.Pool) ([]int, error) {
+	return applyControl(ctx, pool)
+}
+
+func applyControl(ctx context.Context, on statements) ([]int, error) {
 	all, err := LoadControl()
 	if err != nil {
 		return nil, err
 	}
-	return apply(ctx, pool, ControlSchema, all)
+	return apply(ctx, on, ControlSchema, all)
 }
 
-func apply(ctx context.Context, pool *pgxpool.Pool, schema Schema, all []Script) (applied []int, err error) {
+// statements is what applying needs from a pool, and a single pooled connection offers the same.
+// A caller that already holds one connection for a session lock runs its migrations on that
+// connection rather than borrowing more from the pool: with N such callers on a pool of N, every
+// connection is held by a waiter and the lock holder waits for one that never comes back.
+type statements interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+func apply(ctx context.Context, pool statements, schema Schema, all []Script) (applied []int, err error) {
 
 	// The bootstrap problem: the table recording which migrations ran is itself created by the
 	// first migration. Asking for its contents before it exists is expected, not an error.

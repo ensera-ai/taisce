@@ -179,11 +179,25 @@ func TestAPlaneIdentityWithoutAPasswordIsRefused(t *testing.T) {
 //
 // Found by the test suite failing intermittently once three packages called this, which is the
 // cheapest possible place to find it.
+//
+// The pool is smaller than the number of starters on purpose. Each starter holds one connection
+// for the session lock; if the holder borrowed a second one for its work, every connection would
+// be held by a waiter and the holder would wait forever. A pool sized by the machine's cores hid
+// that on a laptop and showed it on a four-core runner; a fixed size shows it everywhere.
 func TestEstablishingThePlanesConcurrentlyIsSafe(t *testing.T) {
 	ctx := context.Background()
-	pool := testPool(t)
-
 	const starters = 6
+	config, err := pgxpool.ParseConfig(os.Getenv("TAISCE_TEST_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.MaxConns = starters - 2
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	errs := make([]error, starters)
