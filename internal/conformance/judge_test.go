@@ -1,0 +1,126 @@
+// Copyright 2026 The Taisce Authors
+// SPDX-License-Identifier: Apache-2.0
+package conformance
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"os"
+	"strings"
+	"testing"
+)
+
+func ptr[T any](v T) *T { return &v }
+
+// Every refusal the judge can make is watched being made, from a report that breaks each rule
+// in turn: a memory message that does not parse, one with the wrong role, one unmarked, one
+// missing its watermark, plan or facts, a turn that was fatal, a store error where none was
+// expected, an observe body that does not parse, the wrong roles, the wrong contents, and a
+// stored count that is not the expected one. A judge that can only pass is a checklist.
+func TestTheJudgeNamesEveryBrokenRule(t *testing.T) {
+	stored := int64(3)
+	good, _ := RenderMemoryMessage(MemoryMessage{Watermark: Watermark{Stored: &stored}, Plan: []byte(`{"hops":1}`), Facts: []byte(`[{"statement":"x"}]`)})
+	noWatermark, _ := RenderMemoryMessage(MemoryMessage{Plan: []byte(`{"hops":1}`), Facts: []byte(`[{"statement":"x"}]`)})
+	noPlan, _ := RenderMemoryMessage(MemoryMessage{Watermark: Watermark{Stored: &stored}, Plan: []byte(`null`), Facts: []byte(`[{"statement":"x"}]`)})
+	noFacts, _ := RenderMemoryMessage(MemoryMessage{Watermark: Watermark{Stored: &stored}, Plan: []byte(`{"hops":1}`), Facts: []byte(`[]`)})
+	observe := func(body string) []Recorded {
+		return []Recorded{{Method: http.MethodPost, Path: "/v1/observations", Body: []byte(body)}}
+	}
+	cases := []struct {
+		name     string
+		expect   Expect
+		report   Report
+		recorded []Recorded
+		stored   int64
+		want     string
+	}{
+		{"unparseable memory message", Expect{}, Report{ModelMessages: []Message{{Role: "user", Content: MemoryMessagePrefix + "\nnot json"}}}, nil, 0, "did not parse"},
+		{"count", Expect{MemoryMessages: ptr(1)}, Report{}, nil, 0, "expected 1 memory message(s)"},
+		{"role", Expect{MemoryRole: "user"}, Report{ModelMessages: []Message{{Role: "system", Content: good, Untrusted: true}}}, nil, 0, "never system"},
+		{"unmarked", Expect{MemoryUntrusted: ptr(true)}, Report{ModelMessages: []Message{{Role: "user", Content: good}}}, nil, 0, "not marked untrusted"},
+		{"no watermark", Expect{MemoryCarries: []string{"watermark"}}, Report{ModelMessages: []Message{{Role: "user", Content: noWatermark, Untrusted: true}}}, nil, 0, "no watermark"},
+		{"no plan", Expect{MemoryCarries: []string{"plan"}}, Report{ModelMessages: []Message{{Role: "user", Content: noPlan, Untrusted: true}}}, nil, 0, "no plan"},
+		{"no facts", Expect{MemoryCarries: []string{"facts"}}, Report{ModelMessages: []Message{{Role: "user", Content: noFacts, Untrusted: true}}}, nil, 0, "no facts"},
+		{"fatal", Expect{Fatal: ptr(false)}, Report{Fatal: true}, nil, 0, "fatal=true"},
+		{"silent store failure", Expect{StoreError: ptr(true)}, Report{}, nil, 0, "surfaced nothing"},
+		{"unexpected store error", Expect{StoreError: ptr(false)}, Report{StoreError: "boom"}, nil, 0, "where none was expected"},
+		{"not observed", Expect{Observed: ptr(true)}, Report{}, nil, 0, "nothing was sent to observe"},
+		{"observed after failure", Expect{Observed: ptr(false)}, Report{}, observe(`{}`), 0, "failed turn is not a memory"},
+		{"roles with nothing observed", Expect{ObservedRoles: []string{"user"}}, Report{}, nil, 0, "nothing was sent to observe"},
+		{"unparseable observe body", Expect{ObservedRoles: []string{"user"}}, Report{}, observe(`nope`), 0, "did not parse"},
+		{"wrong roles", Expect{ObservedRoles: []string{"user", "assistant"}}, Report{}, observe(`{"messages":[{"role":"user","content":"a"},{"role":"tool","content":"b"}]}`), 0, "internal tool traffic"},
+		{"wrong contents", Expect{ObservedContents: []string{"a"}}, Report{}, observe(`{"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"summary"}]}`), 0, "never observed"},
+		{"stored count", Expect{Stored: ptr(1)}, Report{}, nil, 2, "holds 2 more"},
+	}
+	for _, c := range cases {
+		failures := judge(c.expect, c.report, c.recorded, c.stored)
+		if len(failures) == 0 || !strings.Contains(strings.Join(failures, " "), c.want) {
+			t.Errorf("%s: expected a failure containing %q, got %v", c.name, c.want, failures)
+		}
+	}
+	// And the whole of a good turn passes with every expectation set.
+	all := Expect{MemoryMessages: ptr(1), MemoryRole: "user", MemoryUntrusted: ptr(true), MemoryCarries: []string{"watermark", "plan", "facts"},
+		Fatal: ptr(false), StoreError: ptr(false), Observed: ptr(true), ObservedRoles: []string{"user", "assistant"}, ObservedContents: []string{"a", "b"}, Stored: ptr(1)}
+	report := Report{ModelMessages: []Message{{Role: "user", Content: good, Untrusted: true}, {Role: "user", Content: "a"}}, Observed: true}
+	if f := judge(all, report, observe(`{"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"b"}]}`), 1); len(f) != 0 {
+		t.Fatalf("a conformant turn must pass, got %v", f)
+	}
+}
+
+// The runner's own refusals: a deployment address that is not a URL, a driver that cannot start,
+// a driver that answers something that is not a report, an instruction the served side cannot
+// parse, a served driver that fails, and a memory message whose parts are not JSON.
+func TestTheRunnerAndTheProtocolRefuseWhatTheyCannotUse(t *testing.T) {
+	if _, err := newProxy("://not a url"); err == nil {
+		t.Fatal("a bad deployment address must be refused")
+	}
+	if _, err := Run(context.Background(), Deployment{API: "://not a url"}, &Reference{}, Suite{Cases: []Case{{Name: "x"}}}); err == nil {
+		t.Fatal("a run against a bad address must be refused")
+	}
+	if _, err := (&Subprocess{}).Run(context.Background(), Instruction{}); err == nil {
+		t.Fatal("a driver with no command must be refused")
+	}
+	missing := &Subprocess{Command: []string{"/no/such/driver"}}
+	if _, err := missing.Run(context.Background(), Instruction{}); err == nil {
+		t.Fatal("a driver that cannot start must be refused")
+	}
+	garbage := &Subprocess{Command: []string{"sh", "-c", "read line; echo not-a-report"}}
+	if _, err := garbage.Run(context.Background(), Instruction{Case: "x"}); err == nil || !strings.Contains(err.Error(), "did not parse") {
+		t.Fatalf("a driver answering garbage must be refused by name, got %v", err)
+	}
+	_ = garbage.Close()
+	silent := &Subprocess{Command: []string{"sh", "-c", "exit 0"}}
+	if _, err := silent.Run(context.Background(), Instruction{Case: "x"}); err == nil {
+		t.Fatal("a driver that exits without answering must be refused")
+	}
+	_ = silent.Close()
+	if err := Serve(context.Background(), strings.NewReader("not json\n"), os.Stderr, &Reference{}); err == nil || !strings.Contains(err.Error(), "did not parse") {
+		t.Fatalf("an unparseable instruction must be refused by name, got %v", err)
+	}
+	failing := driverFunc(func(context.Context, Instruction) (Report, error) { return Report{}, errors.New("adapter exploded") })
+	if err := Serve(context.Background(), strings.NewReader(`{"case":"x"}`+"\n\n"), os.Stderr, failing); err == nil || !strings.Contains(err.Error(), "exploded") {
+		t.Fatalf("a failing driver must fail the serve loop, got %v", err)
+	}
+	if _, err := RenderMemoryMessage(MemoryMessage{Plan: json.RawMessage(`{not json`)}); err == nil {
+		t.Fatal("a memory message with a part that is not JSON must not render")
+	}
+}
+
+type driverFunc func(context.Context, Instruction) (Report, error)
+
+func (f driverFunc) Run(ctx context.Context, in Instruction) (Report, error) { return f(ctx, in) }
+
+// A deployment nobody answers at stops the run before any turn, and closing a driver that never
+// started is nothing.
+func TestARunAgainstNothingStopsBeforeAnyTurn(t *testing.T) {
+	if err := (&Subprocess{}).Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Run(context.Background(), Deployment{API: "http://127.0.0.1:1", Token: "x"}, &Reference{},
+		Suite{MemoryMessagePrefix: MemoryMessagePrefix, Cases: []Case{{Name: "seedless", Turn: Turn{User: "hi"}}}})
+	if err == nil || !strings.Contains(err.Error(), "could not run") {
+		t.Fatalf("expected the run to stop by reason, got %v", err)
+	}
+}

@@ -1,0 +1,55 @@
+{
+  "suite": "taisce-conformance/v1",
+  "memory_message_prefix": "taisce-memory/v1 untrusted",
+  "cases": [
+    {
+      "name": "memory_is_one_untrusted_user_message",
+      "rule": "Injected memory is exactly one user message, marked untrusted, carrying the watermark and the plan; never system, never assistant.",
+      "seed": [{"subject": "Marta", "predicate": "works_at", "object": "Ensera", "statement": "Marta works at Ensera."}],
+      "turn": {"user": "Where does Marta work?", "assistant": "At Ensera."},
+      "expect": {"memory_messages": 1, "memory_role": "user", "memory_untrusted": true, "memory_carries": ["watermark", "plan", "facts"], "fatal": false, "stored": 1}
+    },
+    {
+      "name": "recall_failure_is_not_fatal",
+      "rule": "When recall is unavailable the agent runs without memory: no memory message, no error raised to the turn, and the turn is still stored.",
+      "seed": [{"subject": "Marta", "predicate": "works_at", "object": "Ensera", "statement": "Marta works at Ensera."}],
+      "faults": {"recall": "unavailable"},
+      "turn": {"user": "Where does Marta work?", "assistant": "I do not know."},
+      "expect": {"memory_messages": 0, "fatal": false, "stored": 1}
+    },
+    {
+      "name": "write_failure_is_never_silent",
+      "rule": "When the store is unavailable the failure is surfaced to the application; a lost turn is invisible until a subject access request asks for it.",
+      "faults": {"observe": "unavailable"},
+      "turn": {"user": "Remember that I prefer written notes.", "assistant": "Noted."},
+      "expect": {"store_error": true, "stored": 0}
+    },
+    {
+      "name": "store_only_on_success",
+      "rule": "A failed turn is not a memory: when the model call fails nothing is observed.",
+      "turn": {"user": "Remember that I prefer written notes.", "model_failure": true},
+      "expect": {"observed": false, "stored": 0}
+    },
+    {
+      "name": "filters_default_to_external_messages",
+      "rule": "Internal tool traffic does not become memory by default: only the person's message and the final reply are observed.",
+      "turn": {
+        "user": "Book the room for Tuesday.",
+        "tool_calls": [{"call": "calendar.book(room=A, day=Tuesday)", "result": "booked: A/Tuesday"}],
+        "assistant": "Room A is booked for Tuesday."
+      },
+      "expect": {"observed_roles": ["user", "assistant"], "stored": 1}
+    },
+    {
+      "name": "no_synthetic_message_reaches_observe",
+      "rule": "A message the framework wrote, a summary or the injected memory itself, is never observed as though a person said it.",
+      "seed": [{"subject": "Marta", "predicate": "works_at", "object": "Ensera", "statement": "Marta works at Ensera."}],
+      "turn": {
+        "user": "Where does Marta work?",
+        "synthetic": [{"role": "assistant", "content": "Summary of earlier conversation: the user asked about colleagues."}],
+        "assistant": "At Ensera."
+      },
+      "expect": {"observed_contents": ["Where does Marta work?", "At Ensera."], "stored": 1}
+    }
+  ]
+}

@@ -4522,6 +4522,54 @@ carries. Operations: a breaking change costs a version, which is the point.
 **How hard to undo.** Deleting the snapshot and its test removes the freeze and nothing else; the
 document and its test remain. Reversing a freeze is a decision here.
 
+## D127 — One conformance suite holds every adapter, and the memory message has one shape
+
+**Date:** 2026-09-10. **Tracking:** [#26](https://github.com/althunibat/taisce/issues/26).
+
+**Decision.** The adapter rules G8 states are held by one suite, `conformance/cases.json`, run by every
+adapter against a live deployment through `taisce conformance`. An adapter is reached as a driver: a
+loop around the adapter that takes one JSON instruction per turn on stdin and answers one JSON report
+on stdout, so a driver in any language is a few dozen lines and holds no rule of its own. The runner
+seeds facts through the authored-assertion operation under a data subject per case, reads the stored
+offset from freshness before and after, and stands a recording proxy between the driver and the
+deployment that forwards, records, and for the cases that need it answers `503` to one operation.
+The model is stubbed inside the driver and nothing else is. Six cases hold the six rules: one
+untrusted `user` memory message carrying the watermark and the plan; recall failure not fatal; write
+failure never silent; store only on success; external-only filters by default; no synthetic or
+injected message observed. The memory message every adapter injects has one shape: the line
+`taisce-memory/v1 untrusted`, then a JSON document with `watermark` (freshness), `plan` (the recall's
+effective controls, degraded surfaces and reach) and the recall's `facts`, `reports` and `passages`
+unchanged; nothing is injected when the recall returns nothing, and the message is never stored. A
+reference adapter ships with the suite and is served as a driver by `--serve-reference`; nine broken
+variants of it are shown failing exactly the case that holds their rule.
+
+**Why.** Six adapters in five languages, each with its own green tests, is six chances for the
+behaviour to fork quietly; a suite written before any adapter moves holds each to the same rules from
+its first commit rather than auditing it afterwards. A fixed memory message is what makes the first
+rule checkable: a suite that can count messages but not read them cannot say whether the watermark,
+the one number that tells an agent how far behind its memory is, is present in every language. The
+proxy is the honest way to make a real store unavailable; a mock of the deployment proves that the
+mock matches the assertion. A stubbed model is unavoidable and stated: the suite is about what the
+adapter hands the model and stores afterwards.
+
+**Rejected.** A suite per adapter, restated in each language: the fork it exists to prevent. Mocks
+of the deployment. A free-form memory message: uncheckable and different per language. Injecting an
+empty memory message when the recall returns nothing: tokens spent on nothing, and a message the
+model has to learn to ignore. Injecting as `system`: a system message is trusted by construction and
+retrieved content is data. A compaction case now: the operation does not exist (#22, #25); the case
+joins when it does, and the suite says so.
+
+**What it does not cover.** Compaction, until #22 lands. The adapter's own framework seam and its
+filter configuration beyond the default: an adapter that lets an operator opt tool traffic in is
+conformant when the default is out. The wording a model sees beyond the prefix line: the document is
+JSON and adapters render the same fields.
+
+**Impact.** Security: the memory message is marked untrusted on the wire and by the adapter, and it
+is never stored, so retrieved content cannot re-enter memory as a person's words. Operations: an
+adapter's release runs the suite against a real deployment; the runner is the released binary.
+
+**How hard to undo.** The suite is a file and a package; the memory message shape is a contract
+adapters render, and changing it after the first adapter ships is `taisce-memory/v2` beside v1.
 ## D128 — The MCP surface is one route on the same server, with four tools and no erasure
 
 **Date:** 2026-09-10. **Tracking:** [#31](https://github.com/althunibat/taisce/issues/31).

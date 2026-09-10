@@ -1,0 +1,106 @@
+<!-- Copyright 2026 The Taisce Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# The adapter conformance suite
+
+One suite, expressed once in `cases.json`, run by every adapter against a live deployment. It holds
+the rules that are easy to get subtly wrong per language, and it is what stops the behaviour forking
+quietly while every adapter's own tests stay green (G8, D127).
+
+## The rules it holds
+
+| Case | Rule |
+|---|---|
+| `memory_is_one_untrusted_user_message` | Injected memory is exactly one `user` message, marked untrusted, carrying the watermark and the plan. Never `system`, never `assistant`. |
+| `recall_failure_is_not_fatal` | When recall is unavailable the agent runs without memory: no memory message, no error raised to the turn, and the turn is still stored. |
+| `write_failure_is_never_silent` | When the store is unavailable the failure is surfaced to the application. |
+| `store_only_on_success` | A failed turn is not a memory: when the model call fails, nothing is observed. |
+| `filters_default_to_external_messages` | Internal tool traffic does not become memory by default: only the person's message and the final reply are observed. |
+| `no_synthetic_message_reaches_observe` | A message the framework wrote, a summary or the injected memory itself, is never observed as though a person said it. |
+
+Compaction is not in the suite yet: it is a server operation ([#22](https://github.com/althunibat/taisce/issues/22))
+and its adapter seams ([#25](https://github.com/althunibat/taisce/issues/25)) do not exist; the case
+joins when the operation does.
+
+## What is real
+
+The deployment is real. The runner seeds each case's facts through `POST /v1/records/assert` under a
+data subject of its own, reads the stored offset from `GET /v1/freshness` before and after the turn,
+and stands a recording proxy between the driver and the deployment. The proxy forwards everything and
+records it; for the cases that need it, it answers `503` to one operation, which is what a deployment
+behind a load balancer answers when it is down and what an adapter must survive. Nothing about the
+deployment is mocked. The model is stubbed inside the driver, because the suite is about what the
+adapter hands the model and what it stores afterwards.
+
+## The driver protocol
+
+A driver is the adapter under test wrapped in a loop. The runner starts it once and exchanges one
+JSON line per turn on its stdin and stdout: an instruction in, a report out. Stderr is the driver's
+own.
+
+Instruction:
+
+```json
+{"case": "memory_is_one_untrusted_user_message",
+ "api": "http://127.0.0.1:53211", "token": "tsk_…", "data_subject_id": "…",
+ "turn": {"user": "Where does Marta work?",
+          "tool_calls": [{"call": "…", "result": "…"}],
+          "synthetic": [{"role": "assistant", "content": "…"}],
+          "assistant": "At Ensera.",
+          "model_failure": false}}
+```
+
+The driver configures the adapter with `api` and `token`, runs one agent turn for `data_subject_id`
+in which the person says `turn.user`, the framework generates the listed tool calls and results and
+the listed synthetic messages, and the stubbed model replies `turn.assistant` or fails when
+`model_failure` is set. It then answers:
+
+```json
+{"model_messages": [{"role": "user", "content": "taisce-memory/v1 untrusted\n{…}", "untrusted": true},
+                    {"role": "user", "content": "Where does Marta work?"}],
+ "fatal": false, "observed": true, "store_error": ""}
+```
+
+`model_messages` is every message the adapter handed the model, in order, with the adapter's own
+untrusted mark where it set one. `fatal` is whether the turn raised an error to the application.
+`observed` is whether the adapter attempted to store the turn. `store_error` is the error the adapter
+surfaced when storing failed, and empty otherwise; an adapter whose store failed and whose
+`store_error` is empty has failed silently.
+
+The reference driver is `taisce conformance --serve-reference`; an adapter's driver reproduces its
+behaviour, not its code.
+
+## The memory message
+
+Every adapter injects the same message: one `user` message whose content is the line
+`taisce-memory/v1 untrusted`, a newline, and a JSON document:
+
+```json
+{"watermark": {"stored": 12, "formed": 11, "parked": 0},
+ "plan": {"controls": {…}, "degraded": [], "reach": {…}},
+ "facts": [ … the recall's facts, unchanged … ],
+ "reports": [ … ], "passages": [ … ]}
+```
+
+`watermark` is `GET /v1/freshness` as read beside the recall; `plan` is what the recall did: its
+effective `controls`, the surfaces it named `degraded`, and its `reach`. `facts`, `reports` and
+`passages` are the recall's arrays unchanged. When the recall returns nothing, nothing is injected.
+The message is marked untrusted by whatever means the framework has for it, and it is never stored.
+
+## Running it
+
+```sh
+TAISCE_TOKEN=… taisce conformance --api https://memory.example --driver "python -m myadapter.conformance"
+TAISCE_TOKEN=… taisce conformance --api https://memory.example --reference
+```
+
+The credential must be write-enabled for one project. The run prints one verdict per case and a
+summary, and exits non-zero when any case fails or the driver cannot be used. `--reference` runs the
+adapter this suite ships with, to prove the deployment and the suite before an adapter is blamed.
+
+## How the suite is proved
+
+`internal/conformance` runs the reference through the suite against a live deployment and expects
+every case to pass; runs nine deliberately broken variants and expects each to fail exactly the case
+that holds its rule; and runs the reference over the subprocess protocol. A suite that has never
+been seen to fail has asserted nothing.
