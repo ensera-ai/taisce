@@ -6,6 +6,8 @@ Every operation is reached over HTTP with a bearer credential, and the credentia
 
 The version is in the path. It is permanent from the day the first client ships: a field is only ever added, and anything else is a new version.
 
+Version 1 is frozen (D126). The freeze is `internal/api/testdata/contract-v1.json`: every operation, its method, path and success status, every request and response field with its type, and every refusal code listed there is served by every later build of this version. What may change: a response field may be added, a request field may be added if a request without it is still accepted, a refusal code may be added, and an operation may be added. Anything else is `/v2`, served beside `/v1`, and `/v1` stops only by a decision recorded in the register, never by a patch.
+
 Requests must contain one complete UTF-8 JSON object followed only by whitespace. Duplicate keys (including case aliases), unknown fields, invalid Unicode escapes and nesting beyond 128 levels are refused with HTTP 400 and `invalid_body`. The 1 MiB limit includes all bytes of the body, including trailing whitespace.
 
 Recall questions are limited to 8192 UTF-8 bytes, 512 distinct candidate names and 256 matching entity/name pairs. Exceeding a limit returns HTTP 400 and `invalid_question`, with no partial bundle. The match count includes the selected speaker. Fact-budget cuts remain successful responses with `truncated: true`.

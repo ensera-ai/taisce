@@ -4475,3 +4475,49 @@ Operations: a project-wide document is erasable by nothing but retention, record
 
 **How hard to undo.** No storage change; the observations are ordinary turns. Removing the command
 leaves what it stored as conversation turns under the tool role.
+
+## D126 — Contract version 1 is frozen, and what may still change is enumerated
+
+**Date:** 2026-09-10. **Tracking:** [#36](https://github.com/althunibat/taisce/issues/36).
+
+**Decision.** The surface served under `/v1` is frozen at the snapshot
+`internal/api/testdata/contract-v1.json`, written by `make freeze-contract` from the same operation
+table and reflection the contract document is rendered from. Every operation in it, with its method,
+path and success status, every request and response field with its wire type, and every refusal
+code, is served by every later build of version 1. Four changes remain permitted: a response field
+may be added; a request field may be added when a request without it is still accepted; a refusal
+code may be added; an operation may be added. Anything else, a removal, a rename, a retyping, a
+changed route or status, is version 2, served beside version 1 under its own path. Version 1 stops
+being served only by a decision recorded here, never by a patch. `TestTheFrozenV1ContractIsStillServed`
+fails a build that breaks the freeze; the document test still surfaces every addition for review.
+Public copy is governed by `TestPublicCopyCarriesNoSecretAndNoUnmeasuredClaim`: no connection string
+with a password, no key-shaped credential, no key variable with a key-shaped value in any README or
+document; no unmeasured promise in the READMEs or the goals.
+
+**Why.** An open SDK makes the contract public in practice: any client can enumerate every operation,
+field and code, and a change to one is somebody else's outage. The document test made every change
+visible; it did not say which changes are forbidden, so a reviewer had to know, and a reviewer who
+did not would regenerate the document and ship the break. A freeze held by a test is a boundary the
+build enforces; a freeze held by review is a convention. The additions list is the one clients written
+against the freeze tolerate: a strict client that refuses unknown response fields is a client that has
+chosen its own outage, and the document has said since its first line that a field is only ever added.
+
+**What it does not cover.** Whether a newly added request field is optional in practice: the shape
+records its type, and "optional" in it means nullable on the wire, not accepted-when-absent. That
+promise is kept by the handler tests that send the earlier request body. Behaviour described in prose
+around the operations, which is held by the tests named in the goals and the register, not by the
+freeze. The claim guard names phrases; a claim in other words is found by a reader and added to the
+list, which only grows.
+
+**Rejected.** Pinning the operation count: a silently widened or narrowed shape passes it. A
+hand-written version-1 document: a second statement of the same thing, and the two diverge on the
+first field somebody adds without knowing it exists. A deprecation window measured in releases:
+nothing here yet has a release cadence a window could be measured in, so the rule is the decision
+record rather than a number nobody can defend. Governing public copy by review: the line that is
+false six months later was fine when it was reviewed.
+
+**Impact.** Security: no surface change; the public-copy guard is a control over what the next snapshot
+carries. Operations: a breaking change costs a version, which is the point.
+
+**How hard to undo.** Deleting the snapshot and its test removes the freeze and nothing else; the
+document and its test remain. Reversing a freeze is a decision here.

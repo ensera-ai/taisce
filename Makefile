@@ -14,7 +14,7 @@ PERF_COMPOSE = TAISCE_PORT=$(PERF_PORT) TAISCE_PERF_POSTGRES_PORT=$(PERF_POSTGRE
 	TAISCE_PERF_POSTGRES_PASSWORD=$(PERF_POSTGRES_PASSWORD) \
 	docker compose --project-name $(PERF_PROJECT) -f compose.yaml -f compose.perf.yaml
 
-.PHONY: substrate db-up db-down test licence signoff version test-inference golden build contract \
+.PHONY: substrate db-up db-down test licence signoff version test-inference golden build contract freeze-contract \
 	perf-config perf-up perf-down perf-reset-stats perf-workload perf-stats
 
 substrate:
@@ -96,6 +96,11 @@ licence:
 # disagree, so running this is a deliberate step and never an automatic one.
 contract:
 	go run scripts/contract.go
+
+# Freezing is a decision, not a regeneration: it writes the snapshot every later build of the
+# version is held to (D126). Run it when a version is declared frozen, and read the diff.
+freeze-contract:
+	go run scripts/contract.go -freeze internal/api/testdata/contract-v1.json
 
 # Who authored the commits in a change. It cannot decide who has signed the contributor agreement —
 # that record lives with the signing service — and it makes the question answerable.

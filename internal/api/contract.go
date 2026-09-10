@@ -48,7 +48,14 @@ func Contract() string {
 			"Every operation is reached over HTTP with a bearer credential, and the credential " +
 			"decides which project the operation acts on — a request never names one.\n\n" +
 			"The version is in the path. It is permanent from the day the first client ships: " +
-			"a field is only ever added, and anything else is a new version.\n")
+			"a field is only ever added, and anything else is a new version.\n\n" +
+			"Version 1 is frozen (D126). The freeze is `internal/api/testdata/contract-v1.json`: every " +
+			"operation, its method, path and success status, every request and response field with its " +
+			"type, and every refusal code listed there is served by every later build of this version. " +
+			"What may change: a response field may be added, a request field may be added if a request " +
+			"without it is still accepted, a refusal code may be added, and an operation may be added. " +
+			"Anything else is `/v2`, served beside `/v1`, and `/v1` stops only by a decision recorded in " +
+			"the register, never by a patch.\n")
 
 	b.WriteString("\nRequests must contain one complete UTF-8 JSON object followed only by whitespace. " +
 		"Duplicate keys (including case aliases), unknown fields, invalid Unicode escapes and " +
@@ -178,6 +185,70 @@ func writeShape(b *strings.Builder, v any) {
 }
 
 type field struct{ name, kind string }
+
+// Field is one wire field as a client sees it: its JSON name and the type wireType names.
+type Field struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+// OperationShape is one operation of the surface with the shapes it takes and returns, the form
+// the freeze is taken in and compared against.
+type OperationShape struct {
+	Name    string `json:"name"`
+	Method  string `json:"method"`
+	Path    string `json:"path"`
+	Success int    `json:"success"`
+	// NoBody marks an operation that takes none, which is different from one taking an object
+	// with no fields: a client that sends a body to the first is refused.
+	NoBody   bool    `json:"no_body,omitempty"`
+	Request  []Field `json:"request,omitempty"`
+	Response []Field `json:"response"`
+}
+
+// Frozen is the whole surface in the form that is compared across time: what a client of the
+// version can rely on. It carries no prose, because prose is not something a test can hold to.
+type Frozen struct {
+	Version    string           `json:"version"`
+	Operations []OperationShape `json:"operations"`
+	Codes      []string         `json:"codes"`
+}
+
+// Surface reports the served surface in the frozen form, from the same operation table and the
+// same reflection the document is rendered from, so the two cannot disagree.
+func Surface() Frozen {
+	out := Frozen{Version: Version}
+	for _, o := range operations {
+		shape := OperationShape{Name: o.Name, Method: o.Method, Path: "/" + Version + o.Path, Success: o.Success}
+		if o.request == nil {
+			shape.NoBody = true
+		} else {
+			shape.Request = exported(shapeOf(reflect.TypeOf(o.request)))
+		}
+		shape.Response = exported(shapeOf(reflect.TypeOf(o.response)))
+		out.Operations = append(out.Operations, shape)
+	}
+	out.Codes = ErrorCodes()
+	return out
+}
+
+func exported(fields []field) []Field {
+	out := make([]Field, 0, len(fields))
+	for _, f := range fields {
+		out = append(out, Field{Name: f.name, Kind: f.kind})
+	}
+	return out
+}
+
+// FreezeJSON renders the surface as the snapshot a freeze commits: indented and in declaration
+// order, so a diff against an earlier freeze reads as a list of what changed.
+func FreezeJSON() ([]byte, error) {
+	body, err := json.MarshalIndent(Surface(), "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(body, '\n'), nil
+}
 
 // shapeOf walks a struct in field order and reports what a client sees.
 //
