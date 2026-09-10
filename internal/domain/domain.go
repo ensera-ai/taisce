@@ -559,6 +559,15 @@ const (
 	// of the two: a denial at least reads as absent, while this would come back as the answer to
 	// "where do they live" with a verbatim quote behind it.
 	ReasonNotCurrent = "not_current"
+	// ReasonConflictingValue — the message asserts a second current value for a single-cardinality
+	// relation it has already given a value in this same message, and the two share one occurrence
+	// time, so neither can supersede the other. "X was appointed director. Y is the director."
+	//
+	// The exclusion constraint refuses the second row; that is G4 working. What makes this a refusal
+	// rather than a failure is that the claim was genuinely made and cannot be stored beside its
+	// rival, which is exactly what a duplicate or a paraphrase is: an outcome with a reason, not a
+	// transport error to retry six times and park. The first value in message order wins.
+	ReasonConflictingValue = "conflicting_value"
 )
 
 // Vocabulary is the closed sets an extractor is given, read from the tables that enforce them.

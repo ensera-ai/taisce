@@ -159,7 +159,18 @@ func (s *FactStore) ApplyGeneration(ctx context.Context, schema Schema, snapshot
 		seen := map[string]bool{}
 		for _, claim := range claims {
 			m := messages[claim.SourceOrdinal]
-			id, err := assertFactVersionTx(ctx, tx, schema, current.Scope, current.SourceID, m.Role, current.Owner, claim, version, out.AppliedAt, gen)
+			// One claim per savepoint: a refused insert aborts a PostgreSQL transaction, and a
+			// generation must be able to refuse one claim and keep the rest.
+			savepoint, err := tx.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			id, err := assertFactVersionTx(ctx, savepoint, schema, current.Scope, current.SourceID, m.Role, current.Owner, claim, version, out.AppliedAt, gen)
+			if err == nil {
+				err = savepoint.Commit(ctx)
+			} else {
+				_ = savepoint.Rollback(ctx)
+			}
 			switch {
 			case err == nil:
 				if seen[id] {
@@ -176,6 +187,8 @@ func (s *FactStore) ApplyGeneration(ctx context.Context, schema Schema, snapshot
 				out.RefusedRole++
 			case errors.Is(err, ErrUnboundSpeaker):
 				plan.Rejected = append(plan.Rejected, domain.RejectedClaim{Statement: claim.Statement, Predicate: claim.Predicate, Quote: claim.Quote, SourceOrdinal: claim.SourceOrdinal, Reason: domain.ReasonUnresolvableSubject})
+			case errors.Is(err, ErrConflictingValue):
+				plan.Rejected = append(plan.Rejected, domain.RejectedClaim{Statement: claim.Statement, Predicate: claim.Predicate, Quote: claim.Quote, SourceOrdinal: claim.SourceOrdinal, Reason: domain.ReasonConflictingValue})
 			default:
 				return err
 			}

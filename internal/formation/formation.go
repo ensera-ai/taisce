@@ -141,6 +141,13 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 				})
 			case errors.Is(err, pg.ErrNotSpokenByPrincipal):
 				report.ClaimsRefusedByRole++
+			case errors.Is(err, pg.ErrConflictingValue):
+				// The constraint refused a second current value from this same message. An outcome
+				// with a reason, recorded like the others; retrying it would produce the same row.
+				result.Rejected = append(result.Rejected, domain.RejectedClaim{
+					Statement: claim.Statement, Predicate: claim.Predicate,
+					Quote: claim.Quote, SourceOrdinal: claim.SourceOrdinal, Reason: domain.ReasonConflictingValue,
+				})
 			default:
 				return report, fmt.Errorf("assert claim from message %d: %w", message.Ordinal, err)
 			}

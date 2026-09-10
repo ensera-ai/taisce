@@ -2290,3 +2290,47 @@ func TestAStoreThatCannotReadDoesNotReportAnEmptyMemory(t *testing.T) {
 		t.Error("reading facts returned no error")
 	}
 }
+
+// Two current values for a single-cardinality relation from one message share one occurrence time,
+// so neither supersedes the other and the constraint refuses the second. The store must name that
+// refusal, keep the constraint in the chain, and leave exactly one current fact.
+func TestASecondCurrentValueFromOneMessageIsRefusedByName(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_conflict")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+	stored, err := obs.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I live in Dublin. I live in Amman."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	at := time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
+	claim := func(object string, start int) domain.Claim {
+		return domain.Claim{
+			Subject: "the user", Predicate: "lives_in", Object: object,
+			Statement: "The user lives in " + object + ".", Confidence: 0.9,
+			Quote: "I live in " + object, ByteStart: start, ByteEnd: start + len("I live in "+object), SourceOrdinal: 0,
+			SemanticType: "identity", Cardinality: domain.CardinalityOne, ValidFrom: at,
+		}
+	}
+	if _, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", claim("Dublin", 0)); err != nil {
+		t.Fatalf("first value: %v", err)
+	}
+	_, err = facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleUser, "subject-1", claim("Amman", 18))
+	if !errors.Is(err, pg.ErrConflictingValue) {
+		t.Fatalf("expected the named refusal, got %v", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "fact_single_cardinality_excl") {
+		t.Fatalf("the constraint that refused it is not in the chain: %v", err)
+	}
+	var current int
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT count(*) FROM {schema}.fact WHERE scope='p1' AND predicate='lives_in' AND upper_inf(valid)`)).Scan(&current); err != nil {
+		t.Fatalf("count current: %v", err)
+	}
+	if current != 1 {
+		t.Fatalf("expected exactly one current value, got %d", current)
+	}
+}

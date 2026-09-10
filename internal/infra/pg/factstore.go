@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,6 +40,12 @@ var ErrNotSpokenByPrincipal = errors.New("claim is not the principal's to make")
 
 // ErrUnboundSpeaker refuses a relative reference without matching stored user attribution.
 var ErrUnboundSpeaker = errors.New("speaker reference needs the observation's attributed user")
+
+// ErrConflictingValue is returned when a claim would be a second current value for a single-cardinality
+// relation whose existing value it cannot supersede, because both start at the same instant. The
+// exclusion constraint is what refuses it; this names the refusal so a caller can record it as one
+// rather than retry it. The database error stays in the chain, so the constraint name is readable.
+var ErrConflictingValue = errors.New("a second current value for a single-cardinality relation")
 
 // Assert resolves both entity ends and writes the fact with its evidence, in one transaction.
 //
@@ -192,6 +199,10 @@ func assertFactVersionTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, o
 			id, scope, nullIfEmptyString(subjectID), nullIfEmptyString(objectID),
 			claim.Predicate, claim.Statement, validFrom, claim.Confidence,
 			nullIfEmpty(dataSubjectID), string(claim.Cardinality), string(speaker), learnedAt, boundary.Until, boundary.Successor, boundary.Source); err != nil {
+			var databaseError *pgconn.PgError
+			if errors.As(err, &databaseError) && databaseError.Code == "23P01" && databaseError.ConstraintName == "fact_single_cardinality_excl" {
+				return fmt.Errorf("insert fact: %w: %w", ErrConflictingValue, err)
+			}
 			return fmt.Errorf("insert fact: %w", err)
 		}
 

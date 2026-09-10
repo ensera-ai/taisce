@@ -82,6 +82,15 @@ func (scriptedModel) Propose(_ context.Context, message domain.Message, _ domain
 			Quote: message.Content[i : i+len("love Dublin")],
 		})
 	}
+	for _, city := range []string{"Dublin", "Amman"} {
+		if i := strings.Index(message.Content, "live in "+city); i >= 0 {
+			out = append(out, extract.Proposal{
+				Subject: "user", Predicate: "lives_in", Polarity: domain.PolarityAsserted, Tense: domain.TensePresent, Object: city,
+				Statement: "The user lives in " + city + ".", Confidence: 0.9,
+				Quote: message.Content[i : i+len("live in "+city)],
+			})
+		}
+	}
 	if strings.Contains(message.Content, "commutes by bicycle") {
 		out = append(out, extract.Proposal{
 			// Not in the vocabulary. Refused before the span is considered.
@@ -1049,5 +1058,40 @@ func TestACancelledPassStops(t *testing.T) {
 	}
 	if err := driver.SweepRetention(cancelled); err == nil {
 		t.Fatal("a cancelled retention sweep reported success")
+	}
+}
+
+// A message that gives one single-cardinality relation two current values forms rather than parks:
+// the first value is the fact, the second is a refusal with its own reason, and the watermark moves.
+// Measured on a news corpus before this, such turns were retried six times and parked with nothing
+// stored (#155).
+func TestATurnWithTwoCurrentValuesFormsWithOneFactAndOneRefusal(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_conflict")
+	worker, observations := former(t, pool, schema)
+	stored, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "I live in Dublin. I live in Amman."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	reports, err := worker.Drain(ctx, schema, "p1")
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if len(reports) != 1 || reports[0].FactsAsserted != 1 || reports[0].ClaimsRejected != 1 {
+		t.Fatalf("expected one fact and one refusal, got %+v", reports)
+	}
+	var formed bool
+	var reason string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT o.formed_at IS NOT NULL, r.reason FROM {schema}.observation o
+		 JOIN {schema}.rejected_claim r ON r.source_observation_id = o.observation_id
+		 WHERE o.observation_id = $1`), stored.ID).Scan(&formed, &reason); err != nil {
+		t.Fatalf("read outcome: %v", err)
+	}
+	if !formed || reason != domain.ReasonConflictingValue {
+		t.Fatalf("formed=%v reason=%q; the turn should be formed and the second value refused as conflicting", formed, reason)
 	}
 }

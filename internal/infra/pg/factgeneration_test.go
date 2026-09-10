@@ -162,3 +162,31 @@ func TestGenerationAdvancesLineageForASecondInterpretation(t *testing.T) {
 		t.Fatalf("generation lineage was not retained: previous=%s first=%s", previous, first.ID)
 	}
 }
+
+// A generation whose plan carries two current values for one single-cardinality relation admits the
+// first and refuses the second, instead of aborting the whole generation on the constraint.
+func TestGenerationRefusesASecondCurrentValueAndKeepsTheRest(t *testing.T) {
+	ctx := context.Background()
+	f := generationSource(t, "generation_conflict")
+	first := f.claim
+	first.Predicate, first.Object, first.Cardinality = "lives_in", "Dublin", domain.CardinalityOne
+	first.Statement = "The speaker lives in Dublin"
+	second := first
+	second.Object, second.Statement = "Amman", "The speaker lives in Amman"
+	result, err := f.facts.ApplyGeneration(ctx, f.schema, f.snapshot, uuid.NewString(), f.version, uuid.NewString(),
+		pg.GenerationPlan{Claims: []domain.Claim{first, second}})
+	if err != nil {
+		t.Fatalf("generation: %v", err)
+	}
+	if result.Asserted != 1 || result.Rejected != 1 {
+		t.Fatalf("expected one admitted and one refused, got %+v", result)
+	}
+	var reason string
+	if err := f.pool.QueryRow(ctx, f.schema.SQL(
+		`SELECT reason FROM {schema}.rejected_claim WHERE scope='p1' AND predicate='lives_in'`)).Scan(&reason); err != nil {
+		t.Fatalf("read refusal: %v", err)
+	}
+	if reason != domain.ReasonConflictingValue {
+		t.Fatalf("refused for the wrong reason: %q", reason)
+	}
+}
