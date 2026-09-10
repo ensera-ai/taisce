@@ -19,6 +19,12 @@ type Controls struct {
 	MaxCharacters *int     `json:"max_characters,omitempty"`
 	SourceRoles   []string `json:"source_roles,omitempty"`
 	Hops          int      `json:"hops,omitempty"`
+	// Surfaces selects which composed surfaces may answer (D124): facts, reports, passages. Nil is
+	// all three; an empty list, a repeat or an unknown name is refused.
+	Surfaces []string `json:"surfaces,omitempty"`
+	// Themes forces the report surface even when the question anchored, for a caller who wants
+	// the subjects around an entity as well as the facts about it.
+	Themes bool `json:"themes,omitempty"`
 }
 
 type EffectiveControls struct {
@@ -26,6 +32,8 @@ type EffectiveControls struct {
 	MaxRows       int      `json:"max_rows"`
 	SourceRoles   []string `json:"source_roles"`
 	Hops          int      `json:"hops"`
+	Surfaces      []string `json:"surfaces"`
+	Themes        bool     `json:"themes"`
 }
 
 // RecallWithControls copies the recaller's small configuration value so simultaneous callers can
@@ -54,6 +62,29 @@ func (r *Recaller) RecallWithControls(ctx context.Context, scopes []string, ques
 		seen[role] = true
 	}
 	effective.SourceRoles = slices.Clone(roles)
+	surfaces := controls.Surfaces
+	if surfaces == nil {
+		surfaces = AllSurfaces
+	}
+	if len(surfaces) < 1 || len(surfaces) > len(AllSurfaces) {
+		return domain.Bundle{}, EffectiveControls{}, ErrInvalidControls
+	}
+	selected := map[string]bool{}
+	for _, surface := range surfaces {
+		if !validSurface(surface) || selected[surface] {
+			return domain.Bundle{}, EffectiveControls{}, ErrInvalidControls
+		}
+		selected[surface] = true
+	}
+	effective.Surfaces = slices.Clone(surfaces)
+	effective.Themes = controls.Themes
+	// Only an explicit selection is recorded: on a deployment without semantic surfaces, a caller who
+	// named none gets the exact path and nothing about surfaces, and one who named them is told
+	// which did not run.
+	if controls.Surfaces != nil {
+		local.surfaces = selected
+	}
+	local.themes = controls.Themes
 	local.budget.Characters = effective.MaxCharacters
 	bundle, err := local.RecallForSubjectAsOf(ctx, scopes, question, effective.SourceRoles, at, effective.Hops, subject)
 	return bundle, effective, err

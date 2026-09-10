@@ -4398,3 +4398,42 @@ false-current-fact the rule exists to refuse.
 
 **How hard to undo.** One column with a default; clearing the flag restores the refusal. Facts
 admitted as events would remain, correctly stamped with their tense-independent validity.
+
+## D124 — Recall composes exact anchors, semantic anchors, the report hierarchy and passages under one budget
+
+**Decision.** `POST /v1/recalls` consults four surfaces in a fixed order, each charged to the same
+character and row budget D82 defines. Exact anchoring on canonical names and aliases runs first, as
+before. When it finds nothing, the entity-candidate retriever is asked once for the whole question
+and up to four candidates become anchors, marked `semantic:<similarity>` so a caller sees a meaning
+match was used; a candidate never merges identities (D110). Facts are expanded over the union as
+before. When nothing anchored, or the caller sets `themes`, the report-candidate retriever returns up
+to three community reports, and the best match's children are read from the stored hierarchy, depth
+one, up to five, with no model call; each is returned in `reports` with its title, summary and the
+observations it was registered against. When the budget is not spent and the passage capability is
+on, up to eight source messages nearest the question are returned in `passages` with their role,
+identity, offsets and a bounded quote. A passage is evidence and is never a fact. A new `surfaces`
+control selects a subset of `facts`, `reports`, `passages`; nil is all three; an empty list, a repeat
+or an unknown name is refused. `controls` echoes what applied.
+
+**What does not change.** The exact-anchor path's queries, plans and rows when the embedding
+revision is unset: a deployment without semantic surfaces answers exactly as before and says nothing
+about surfaces unless the caller selected them by name, in which case each surface that did not run
+is named in `degraded`. A surface that refuses at call time is named the same way and the rest of the
+bundle answers. The source-role default, the project boundary every retriever already enforces
+through the credential's scope, and the content-free audit row are unchanged. The only model work on
+the read path is the question embedding D106 already opted into; there is no generation call.
+
+**Why.** G5 promises that a question with no anchor is answered from themes the graph already holds
+and G2 that an entity is reachable by meaning. Both surfaces existed as separate routes, so both
+promises held only for a caller who assembled the answer, which G8 forbids putting in an adapter. The
+LazyGraphRAG reading (#148) found every surface a single query-time search reaches present here as a
+stored projection and missing only the one read that composes them.
+
+**Rejected.** A model-driven query-time search loop, which puts a budgeted number of model calls
+into every agent turn and produces claims that cannot be counted after a delete (#148). Composition
+in adapters, which forks per language (G8). One fused index over the three inputs, which loses that
+each input shape wins its own question (D113). Ranking across surfaces, which nothing here has
+measured; the order is fixed and stated, and the cut is reported as a cut.
+
+**How hard to undo.** No storage change. Removing the semantic wiring returns the exact path; the
+two response arrays would then be empty and `surfaces` refused. Tracking: #149.

@@ -457,14 +457,18 @@ POST `/v1/recalls` → 200
 | `max_characters` | integer, optional |
 | `source_roles` | array of string |
 | `hops` | integer |
+| `surfaces` | array of string |
+| `themes` | boolean |
 
 ### Response
 
 | Field | Type |
 |---|---|
-| `controls` | {max_characters: integer, max_rows: integer, source_roles: array of string, hops: integer} |
+| `controls` | {max_characters: integer, max_rows: integer, source_roles: array of string, hops: integer, surfaces: array of string, themes: boolean} |
 | `anchors` | array of {entity_id: string, name: string, type: string, matched: string} |
 | `facts` | array of {fact_id: string, subject: string, predicate: string, object: string, statement: string, confidence: number, valid_from: timestamp (RFC 3339), valid_until: timestamp (RFC 3339), optional, anchored_on: string, source_role: string, hops: integer, path: array of string, via: array of string, co_derived_with: array of string, evidence: {observation_id: string, source_ordinal: integer, quote: string, byte_start: integer, byte_end: integer, context: string, context_start: integer, context_complete: boolean}} |
+| `reports` | array of {community_id: string, report_id: string, title: string, summary: string, importance: number, similarity: number, level: integer, parent: string, sources: array of string} |
+| `passages` | array of {chunk_id: string, source_id: string, ordinal: integer, role: string, quote: string, similarity: number, occurred_at: timestamp (RFC 3339), complete: boolean} |
 | `truncated` | boolean |
 | `characters` | integer |
 | `degraded` | array of string |

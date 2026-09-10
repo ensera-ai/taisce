@@ -560,6 +560,11 @@ type recallResponse struct {
 	Controls recall.EffectiveControls `json:"controls"`
 	Anchors  []anchorPayload          `json:"anchors"`
 	Facts    []factPayload            `json:"facts"`
+	// Reports and Passages are the composed surfaces (D124): themes the graph holds, and source
+	// words by similarity. Present and empty when a surface returned nothing, so a caller can
+	// tell an empty surface from a surface that did not run, which `degraded` names.
+	Reports  []reportPayload  `json:"reports"`
+	Passages []passagePayload `json:"passages"`
 	// Truncated says the limit cut the result, and it is not a ranking verdict: nothing has ranked
 	// these, so a cut bundle is missing arbitrary members rather than the least relevant ones. A
 	// caller told only the facts would read the cut as a judgement.
@@ -703,6 +708,29 @@ func (s *Server) recallHandler(w http.ResponseWriter, r *http.Request, grant cre
 	writeJSON(w, http.StatusOK, out)
 }
 
+type reportPayload struct {
+	CommunityID string   `json:"community_id"`
+	ReportID    string   `json:"report_id"`
+	Title       string   `json:"title"`
+	Summary     string   `json:"summary"`
+	Importance  float32  `json:"importance"`
+	Similarity  float64  `json:"similarity"`
+	Level       int      `json:"level"`
+	Parent      string   `json:"parent,omitempty"`
+	Sources     []string `json:"sources"`
+}
+
+type passagePayload struct {
+	ChunkID    string    `json:"chunk_id"`
+	SourceID   string    `json:"source_id"`
+	Ordinal    int       `json:"ordinal"`
+	Role       string    `json:"role"`
+	Quote      string    `json:"quote"`
+	Similarity float64   `json:"similarity"`
+	OccurredAt time.Time `json:"occurred_at"`
+	Complete   bool      `json:"complete"`
+}
+
 func renderBundle(b domain.Bundle) recallResponse {
 	perAnchor := b.Reach.FactsPerAnchor
 	if perAnchor == nil {
@@ -718,6 +746,8 @@ func renderBundle(b domain.Bundle) recallResponse {
 		Degraded:   degraded,
 		Anchors:    []anchorPayload{},
 		Facts:      []factPayload{},
+		Reports:    []reportPayload{},
+		Passages:   []passagePayload{},
 		Reach: reachPayload{
 			Terms: b.Reach.Terms, Anchored: b.Reach.Anchored,
 			NamedNothingKnown: b.Reach.NamedNothingKnown(), FactsPerAnchor: perAnchor,
@@ -746,6 +776,22 @@ func renderBundle(b domain.Bundle) recallResponse {
 				ContextStart:    f.Evidence.Context.ByteStart,
 				ContextComplete: f.Evidence.Context.Complete,
 			},
+		})
+	}
+	for _, h := range b.Reports {
+		sources := h.Sources
+		if sources == nil {
+			sources = []string{}
+		}
+		out.Reports = append(out.Reports, reportPayload{
+			CommunityID: h.CommunityID, ReportID: h.ReportID, Title: h.Title, Summary: h.Summary,
+			Importance: h.Importance, Similarity: h.Similarity, Level: h.Level, Parent: h.Parent, Sources: sources,
+		})
+	}
+	for _, p := range b.Passages {
+		out.Passages = append(out.Passages, passagePayload{
+			ChunkID: p.ChunkID, SourceID: p.SourceID, Ordinal: p.Ordinal, Role: p.Role, Quote: p.Quote,
+			Similarity: p.Similarity, OccurredAt: p.OccurredAt, Complete: p.Complete,
 		})
 	}
 	return out

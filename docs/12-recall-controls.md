@@ -42,3 +42,14 @@ The [conformance fixture](../internal/api/testdata/recall-controls.json) is exer
 HTTP/PostgreSQL by `TestRecallControlConformanceOverHTTP`. SDK runners can reuse its requests and
 expectations with the documented 100,000-character test ceiling and one seeded named fact for each
 stored source role. [D82](01-decisions.md) records the accounting and trust decisions.
+
+## Composed surfaces
+
+A recall consults up to four surfaces in a fixed order under the same budget (D124): exact anchors,
+then semantic anchor candidates when no name matched, then the report hierarchy when nothing anchored
+or when `themes` is true, then passages under what the budget has left. `surfaces` selects a subset of
+`facts`, `reports` and `passages`; omitting it selects all three; an empty list, a repeat or an unknown
+name is refused. Reports come back with their title, summary and source observations; passages with
+their role, identity, offsets and a bounded quote. A passage is evidence, never a fact. On a deployment
+without an embedding revision only the exact path runs, and `degraded` names the surfaces that did
+not run only when the caller selected them by name.

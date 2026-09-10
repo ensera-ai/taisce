@@ -201,12 +201,13 @@ func run(ctx context.Context, log *slog.Logger) error {
 	}
 	server := api.NewServer(
 		credential.NewStore(registry, string(migrate.ControlSchema)), api.Stores{
-			Audit:            pg.NewAuditStore(memory, schema),
-			Exporter:         pg.NewExporter(memory, schema),
-			Projects:         pg.NewProjectStore(memory, schema),
-			Observations:     pg.NewObservationStore(memory),
-			Eraser:           pg.NewEraser(memory),
-			Recaller:         recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()),
+			Audit:        pg.NewAuditStore(memory, schema),
+			Exporter:     pg.NewExporter(memory, schema),
+			Projects:     pg.NewProjectStore(memory, schema),
+			Observations: pg.NewObservationStore(memory),
+			Eraser:       pg.NewEraser(memory),
+			Recaller: recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget()).
+				WithSemantic(api.NewSemanticSurfaces(entityCandidates, reportCandidates, passages, pg.NewCommunityStore(memory, schema))),
 			Citations:        pg.NewCitationStore(memory, schema),
 			Records:          pg.NewRecordStore(memory, schema),
 			Artifacts:        pg.NewArtifactStore(memory, schema),

@@ -80,6 +80,12 @@ func DefaultBudget() Budget { return Budget{Characters: 16000, MaxRows: 200} }
 type Recaller struct {
 	store  Store
 	budget Budget
+	// semantic is nil when the deployment has no embedding revision; then only the exact path runs.
+	semantic Semantic
+	// surfaces and themes are per-call selections copied in by RecallWithControls; the zero value
+	// selects every surface and no forced theme lookup.
+	surfaces map[string]bool
+	themes   bool
 }
 
 // There is deliberately no constructor taking a bare number.
@@ -213,11 +219,47 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 		return domain.Bundle{}, domain.ErrRecallMatches
 	}
 	reach.Anchored = len(anchors)
+	bundle := domain.Bundle{}
+	wants := func(surface string) bool { return r.surfaces == nil || r.surfaces[surface] }
+	degrade := func(name string) {
+		for _, d := range bundle.Degraded {
+			if d == name {
+				return
+			}
+		}
+		bundle.Degraded = append(bundle.Degraded, name)
+	}
+	// Semantic anchors, only when exact anchoring found nothing (D124): an entity named by meaning
+	// rather than by a stored name. A proposal is a place to start a walk, marked as such so the
+	// caller can see a meaning match was used; it never merges identities.
+	// A deployment without semantic surfaces answers exactly as before and says nothing about them,
+	// unless the caller selected surfaces by name and so asked for something it cannot do.
+	if len(anchors) == 0 && wants(SurfaceFacts) {
+		if r.semantic == nil {
+			if r.surfaces != nil {
+				degrade(domain.DegradedSemanticAnchors)
+			}
+		} else {
+			for _, scope := range scopes {
+				proposed, err := r.semantic.EntityAnchors(ctx, scope, question, MaxSemanticAnchors)
+				if err != nil {
+					degrade(domain.DegradedSemanticAnchors)
+					break
+				}
+				anchors = append(anchors, proposed...)
+				if len(anchors) >= MaxSemanticAnchors {
+					anchors = anchors[:MaxSemanticAnchors]
+					break
+				}
+			}
+		}
+	}
 	if len(anchors) == 0 {
-		// Empty, and saying why. "We have never heard of what you asked about" and "we know that and
+		// Nothing to walk from. "We have never heard of what you asked about" and "we know that and
 		// have nothing to say" are different answers, and a caller that cannot tell them apart
-		// cannot decide whether to write something or ask differently.
-		return domain.Bundle{Reach: reach}, nil
+		// cannot decide whether to write something or ask differently. Themes and passages may
+		// still answer below, which is what makes an unanchored question answerable at all (G5).
+		return r.composeUnanchored(ctx, scopes, question, sources, bundle, reach)
 	}
 
 	ids := make([]string, 0, len(anchors))
@@ -233,7 +275,7 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 		return domain.Bundle{}, err
 	}
 
-	bundle := domain.Bundle{Anchors: anchors}
+	bundle.Anchors = anchors
 	if len(facts) > r.budget.MaxRows {
 		facts = facts[:r.budget.MaxRows]
 		bundle.Truncated = true
@@ -275,7 +317,82 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 		}
 	}
 	bundle.Reach = reach
-	return bundle, nil
+	return r.composeRest(ctx, scopes, question, sources, bundle, spent), nil
+}
+
+// composeUnanchored answers a question that anchored nothing: reports by theme, then passages, each
+// charged to the budget. The reach still says nothing was anchored, because that is still true.
+func (r *Recaller) composeUnanchored(ctx context.Context, scopes []string, question string, sources []string,
+	bundle domain.Bundle, reach domain.Reach) (domain.Bundle, error) {
+	bundle.Reach = reach
+	return r.composeRest(ctx, scopes, question, sources, bundle, 0), nil
+}
+
+// composeRest adds the report and passage surfaces after the facts, in that order, under what the
+// budget has left. Reports run when nothing anchored or the caller asked for themes; passages run
+// whenever the budget is not yet spent. A surface that is off, unavailable or refusing is named in
+// Degraded and the bundle answers with the rest.
+func (r *Recaller) composeRest(ctx context.Context, scopes []string, question string, sources []string,
+	bundle domain.Bundle, spent int) domain.Bundle {
+	wants := func(surface string) bool { return r.surfaces == nil || r.surfaces[surface] }
+	degrade := func(name string) {
+		for _, d := range bundle.Degraded {
+			if d == name {
+				return
+			}
+		}
+		bundle.Degraded = append(bundle.Degraded, name)
+	}
+	if wants(SurfaceReports) && (r.themes || bundle.Reach.Anchored == 0) {
+		if r.semantic == nil {
+			if r.surfaces != nil {
+				degrade(domain.DegradedReports)
+			}
+		} else {
+			for _, scope := range scopes {
+				hits, err := r.semantic.Reports(ctx, scope, question, MaxReportHits, MaxReportChildren)
+				if err != nil {
+					degrade(domain.DegradedReports)
+					break
+				}
+				for _, h := range hits {
+					size := reportSize(h)
+					if size > r.budget.Characters-spent {
+						bundle.Truncated = true
+						break
+					}
+					bundle.Reports = append(bundle.Reports, h)
+					spent += size
+				}
+			}
+		}
+	}
+	if wants(SurfacePassages) && spent < r.budget.Characters {
+		if r.semantic == nil {
+			if r.surfaces != nil {
+				degrade(domain.DegradedPassages)
+			}
+		} else {
+			for _, scope := range scopes {
+				passages, err := r.semantic.Passages(ctx, scope, question, MaxPassageHits, sources)
+				if err != nil {
+					degrade(domain.DegradedPassages)
+					break
+				}
+				for _, p := range passages {
+					size := passageSize(p)
+					if size > r.budget.Characters-spent {
+						bundle.Truncated = true
+						break
+					}
+					bundle.Passages = append(bundle.Passages, p)
+					spent += size
+				}
+			}
+		}
+	}
+	bundle.Characters = spent
+	return bundle
 }
 
 // Terms returns the candidate entity names a question might be naming.

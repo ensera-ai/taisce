@@ -698,6 +698,46 @@ type Anchor struct {
 // that stopped explaining itself rather than like an erasure that did its job.
 const DegradedCitationContext = "citation_context"
 
+// The three composed surfaces a recall consults after exact anchoring (D124). Each is named here so
+// a bundle can say which one did not run: because the deployment has no embedding revision, because
+// the caller left it out of `surfaces`, or because the surface's own retriever refused.
+const (
+	DegradedSemanticAnchors = "semantic_anchors"
+	DegradedReports         = "reports"
+	DegradedPassages        = "passages"
+)
+
+// ReportHit is a community report reached by theme rather than by anchor: the written summary of a
+// group of entities the graph found densely connected, carrying the observations it was registered
+// against so a caller can cite the words behind it rather than trust the paragraph.
+type ReportHit struct {
+	CommunityID string
+	ReportID    string
+	Title       string
+	Summary     string
+	Importance  float32
+	Similarity  float64
+	Level       int
+	// Parent is the community this report was reached from when it is a child substituted into
+	// the answer, and empty for a report the question matched directly.
+	Parent  string
+	Sources []string
+}
+
+// Passage is a source message reached by similarity. It is evidence and never a fact: it carries
+// the role that said it, its identity and offsets, and a bounded quote, and nothing downstream may
+// treat it as an assertion about anything.
+type Passage struct {
+	ChunkID    string
+	SourceID   string
+	Ordinal    int
+	Role       string
+	Quote      string
+	Similarity float64
+	OccurredAt time.Time
+	Complete   bool
+}
+
 // AsOf is the pair of instants a bitemporal read is taken at.
 //
 // # Why two times and not one
@@ -801,6 +841,11 @@ type CitedFact struct {
 type Bundle struct {
 	Anchors []Anchor
 	Facts   []CitedFact
+	// Reports and Passages are the composed surfaces (D124): themes the graph already holds, and
+	// source words by similarity. Both are charged to the same budget as the facts and both are
+	// labelled for what they are; neither is a fact.
+	Reports  []ReportHit
+	Passages []Passage
 	// Truncated says the limit cut the result. It matters because the order carries no judgment:
 	// nothing here has ranked the facts, so a truncated bundle is missing arbitrary members rather
 	// than the least relevant ones, and a caller that does not know that will read the cut as a
