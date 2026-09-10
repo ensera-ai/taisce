@@ -108,9 +108,13 @@ func (f *reportCandidateFixture) activate(t *testing.T, scope string) pg.ReportE
 	}
 	for {
 		page, err := f.store.BuildPage(ctx, scope, generation.ID, actor, f.model, 64, func(_ context.Context, texts []string) ([][]float32, error) {
+			// The same rule as the provider above, so a report is near the questions its words are near.
 			vectors := make([][]float32, len(texts))
-			for i := range vectors {
-				vectors[i] = []float32{1, 0, 0}
+			for i, text := range texts {
+				vectors[i] = []float32{0, 1, 0}
+				if strings.Contains(strings.ToLower(text), "growth") {
+					vectors[i] = []float32{1, 0, 0}
+				}
 			}
 			return vectors, nil
 		})

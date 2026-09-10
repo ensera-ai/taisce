@@ -64,7 +64,13 @@ func (s *semanticSurfaces) Reports(ctx context.Context, scope, question string, 
 		return nil, err
 	}
 	var hits []domain.ReportHit
+	// A child of the best match can also be a direct match; it is one report and is listed once,
+	// with its lineage, because a bundle that repeats a report spends budget on nothing.
+	seen := make(map[string]bool, limit+children)
 	for i, c := range page.Candidates {
+		if seen[c.CommunityID] {
+			continue
+		}
 		full, ok, err := s.communities.Report(ctx, scope, c.CommunityID)
 		if err != nil {
 			return nil, err
@@ -72,6 +78,7 @@ func (s *semanticSurfaces) Reports(ctx context.Context, scope, question string, 
 		if !ok {
 			continue
 		}
+		seen[c.CommunityID] = true
 		hits = append(hits, domain.ReportHit{
 			CommunityID: c.CommunityID, ReportID: c.ReportID, Title: full.Title, Summary: full.Summary,
 			Importance: full.Importance, Similarity: c.Similarity, Sources: full.SourceObservationIDs,
@@ -91,9 +98,10 @@ func (s *semanticSurfaces) Reports(ctx context.Context, scope, question string, 
 				if err != nil {
 					return nil, err
 				}
-				if !ok {
+				if !ok || seen[kid.ID] {
 					continue
 				}
+				seen[kid.ID] = true
 				hits = append(hits, domain.ReportHit{
 					CommunityID: kid.ID, Title: child.Title, Summary: child.Summary, Importance: child.Importance,
 					Level: kid.Level, Parent: c.CommunityID, Sources: child.SourceObservationIDs,
