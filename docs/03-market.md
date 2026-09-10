@@ -117,3 +117,90 @@ That constraint is ours and shapes what a report may be.
 Nothing here is a comparison of quality, and no number in this section came from running their system.
 The documentation says what it does; it does not say how well, and neither do we. A head-to-head is
 #15's and #16's business, on hardware that can be held still.
+
+---
+
+## Microsoft LazyGraphRAG
+
+Read **2026-09-10**, from the Microsoft Research announcement of 2024-11-25, the BenchmarkQED
+announcement, the `benchmark-qed` documentation and repository, and graphrag discussion #1490. No
+code was read, because none is published: the last maintainer statement (2024-12-09) names it the
+next release and nothing has shipped in the open-source library since; it is offered inside
+Microsoft Discovery and Azure Local. Tracking: [#148](https://github.com/althunibat/taisce/issues/148).
+
+### What it does, as a capability list
+
+**Fact.** Indexing uses no model. Noun phrases are extracted with NLP, a co-occurrence graph is
+built over them, and communities are detected hierarchically. The stated index cost is identical to
+vector RAG and 0.1% of full GraphRAG.
+
+**Fact.** At query time a model expands the question into three to five subqueries, each subquery
+ranks text chunks by embedding similarity and ranks communities by their best chunks, a model rates
+the relevance of the top untested chunks sentence by sentence, the search recurses into
+sub-communities after a run of communities yields nothing, and it stops when no relevant community
+remains or the relevance-test budget divided by the subquery count is spent. The surviving chunks are
+grouped by community, a model extracts claims from them, the claims are ranked and filtered, and the
+answer is written map-reduce.
+
+**Fact.** One parameter, the relevance-test budget, moves cost against quality. The announcement
+measured budgets of 100, 500 and 1,500 on 5,590 AP news articles with 100 synthetic queries, and
+claims quality comparable to GraphRAG global at more than 700 times lower query cost, and better
+than vector RAG and DRIFT on local queries at comparable cost.
+
+**Fact.** On BenchmarkQED, with GPT-4o writing every system's answers, it won all 96 pairwise
+comparisons against vector RAG at three context sizes, GraphRAG local, global and DRIFT, LightRAG,
+RAPTOR and TREX, across the four query classes and four criteria. The judge was GPT-4.1 or GPT-4o.
+The announcement notes that data-local queries benefit most from vector RAG's direct chunk ranking,
+so its relevance margin is narrowest there.
+
+**Fact.** BenchmarkQED is MIT, Python 3.11 or later, and evaluates answer files offline: a system
+produces `{question_id, question_text, answer}` per question set and the harness scores them. AutoQ
+writes questions and assertions in four classes plus data-linked multi-hop questions typed bridge,
+comparison, intersection and temporal; AutoE scores pairwise, against references, or against
+assertions with significance tests. Its judge configuration names OpenAI and Azure providers and
+admits a custom provider class; whether the OpenAI provider accepts a foreign base URL is
+**unverified** here and is settled by running it.
+
+### What obliges us, re-derived
+
+**The bet is opposite, and the reason is the reader.** Their reader is a person with a question and
+a budget; ours is an agent turn, and a memory injected into every turn cannot pay hundreds of model
+calls to be assembled (rule 9, G1, G8). Their claims exist for one answer and are gone; ours are rows
+with a verbatim quote, a validity interval and an erasure registration (G6). So every model call they
+make at query time, we make once at write time, and nothing on the read path asks a model to write.
+That divergence is the design and is not reopened here.
+
+**What crosses is the spectrum.** Their single mechanism answers local, global and linked questions,
+and their benchmark measures all of them. A developer evaluating this will ask the same four kinds of
+question, and each kind must have a stored surface behind it. Each does: typed edges with two-hop
+chains and bitemporal reads for the linked classes, exact anchoring for a named entity, entity
+candidates (D110) for an entity named by meaning, hierarchical reports (D57, D58, D112) for a theme,
+and passages (D106) for a statement the vocabulary did not admit.
+
+**What we are missing, and it is the finding.** Recall reads only the first two. The other three are
+separate routes a caller has to know about, so G5's promise that an unanchored question is answered
+from themes holds only for a caller who composes the answer themselves, which G8 forbids putting in
+an adapter. The decision to make recall the one composed read, in a fixed order and under the budget
+D82 already defines, is [#149](https://github.com/althunibat/taisce/issues/149). Their budget knob
+crosses as the budget we have; their search loop does not.
+
+**The risk their benchmark would expose first is the vocabulary, not retrieval.** Their claims are
+whatever a model can phrase about a chunk; ours are the relations a closed ontology admits, and it
+was written for what an agent learns about people, organisations and places. Applied to health news,
+much of what a judge rewards will have been refused as `unmapped_relation`. The unmapped rate
+([#43](https://github.com/althunibat/taisce/issues/43)) is therefore measured on the benchmark corpus
+before any quality number is quoted, because it decides whether the gap closes by falling back to
+passages or by widening the vocabulary, and because without it a result measures the ontology and is
+reported as retrieval.
+
+**Rejected, so it is not proposed again.** A query-time relevance-test loop in recall. Its cost lands
+on every agent turn, its claims cannot be counted after a delete, and it trades the flat read cost G1
+exists for. A co-occurrence graph as the substrate, which G3 already rejects: an edge with no
+direction and no predicate gives a multi-hop question nothing to follow.
+
+### What this does not tell us
+
+No number here came from running their system or ours on the same corpus. Their published wins are
+against their comparison conditions, with their writer and their judge, on their datasets. Whether
+this design is close in outcome is #15's business, on hardware that can be held still, and only after
+#149 has made recall the thing being measured.
