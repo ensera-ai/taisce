@@ -181,7 +181,7 @@ before the freeze.
 **Pass 2 — SDK and adapters.** [#26](https://github.com/althunibat/taisce/issues/26) conformance suite against a live deployment; [#27](https://github.com/althunibat/taisce/issues/27) .NET
 client and MAF adapter as the reference; [#31](https://github.com/althunibat/taisce/issues/31) MCP plugin early as the dogfood path; [#28](https://github.com/althunibat/taisce/issues/28) Python
 and [#29](https://github.com/althunibat/taisce/issues/29) LangGraph, LangChain4j, Spring AI; [#22](https://github.com/althunibat/taisce/issues/22) and [#25](https://github.com/althunibat/taisce/issues/25) compaction after the first adapter
-exists; [#24](https://github.com/althunibat/taisce/issues/24) head-to-head; [#97](https://github.com/althunibat/taisce/issues/97) Go client, recommended rejected.
+exists; [#24](https://github.com/althunibat/taisce/issues/24) head-to-head; [#97](https://github.com/althunibat/taisce/issues/97) Go client, deferred (D132).
 
 **Pass 3 — operate it.** A management API for credentials, projects, grants, refusal inspection and
 erasure receipts with the CLI moved onto it; [#77](https://github.com/althunibat/taisce/issues/77) the portal; [#76](https://github.com/althunibat/taisce/issues/76) the Helm chart with the
@@ -241,7 +241,7 @@ development and the separate Apache-2.0 public `x.y.0` snapshot publication jour
 | P2 | [#94](https://github.com/althunibat/taisce/issues/94) | Expose operational readiness and formation health without memory content |
 | P2 | [#95](https://github.com/althunibat/taisce/issues/95) | Define subject inventory and identifier handling for governed memory |
 | P2 | [#96](https://github.com/althunibat/taisce/issues/96) | Decide and enforce sensitivity-aware access within a project |
-| P2 | [#97](https://github.com/althunibat/taisce/issues/97) | Decide and track a Go client and agent adapter under the shared conformance contract |
+| P2 | [#97](https://github.com/althunibat/taisce/issues/97) | Decide and track a Go client and agent adapter under the shared conformance contract. Decided D132: deferred; a Go application integrates over the raw contract, and a named Go seam or an adopter reopens it. |
 
 ## Capability inventory
 

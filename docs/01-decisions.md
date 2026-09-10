@@ -4752,3 +4752,41 @@ per compaction, no model call.
 
 **How hard to undo.** Adapter-side only: one class per adapter and two cases in the suite. Removing
 a seam leaves the operation and the rest of the adapter untouched.
+
+## D132 — A Go client is deferred; a Go application integrates over the raw contract
+
+**Date:** 2026-09-10. **Tracking:** [#97](https://github.com/althunibat/taisce/issues/97).
+
+**Decision.** No Go client and no Go agent adapter are built. D40's ordering stands: Python, Java and
+.NET are the adapters, and TypeScript is the next candidate when adoption evidence reopens it (#30).
+A Go application integrates over the wire contract in `docs/02-contract.md` directly: the `net/http`
+calls are the contract, the credential goes in the `Authorization` header from the environment, an
+observation is retried with the same `idempotency_key` (D-frozen under D126), a recall's arrays are
+handed to the model as one untrusted user message under the memory prefix the conformance suite
+defines (D127), and a read failure is swallowed while a write failure is surfaced. The one Go
+implementation of that pattern that exists is the reference adapter in `internal/conformance`, which
+is a test fixture and is not published as a library; a Go application that wants a typed client may
+copy the shape, not the package.
+
+**Revisit criterion.** A Go agent framework with a memory or context-provider seam that a developer
+can name, or an adopter asking for Go with an application behind the ask. Either reopens this as a
+`decision` issue; the conformance suite then holds a Go adapter to the same eight cases before it is
+called one.
+
+**Why.** An adapter is the product where a framework has a seam (D40). Go has agent libraries but no
+first-party memory seam with an incumbent to displace, so a Go client would be a typed HTTP wrapper
+with no framework mapping to carry, and every wrapper is a second place the contract lives. The
+service itself is Go, which makes a client look cheap; it is not cheap to keep, because it is released
+on its own cadence (D44) and held by the conformance suite like the others.
+
+**Rejected.** Publishing `internal/conformance`'s reference as the Go client: it exists to break the
+rules on purpose and its knobs would ship with it. A Go module inside the service repository: D44
+puts every adapter in its own repository, and a client that moves with the server's version pair is
+the drift the suite exists to catch. Building it now because the language is at hand: the second use
+case is what reveals an adapter's shape, and there is no first.
+
+**Impact.** Operations: none; nothing is shipped. Cost: a Go application carries its own HTTP calls,
+which is the documented pattern rather than an omission.
+
+**How hard to undo.** Easy: a repository and a conformance driver, under the ordering D40 already
+allows.
