@@ -4205,3 +4205,74 @@ held about 75.7 GiB; per-replica logs proved traffic reached all seven. The depl
 all nine runner gates, logical wipe and provider termination passed. This is a controlled benchmark,
 not a production service objective. Full evidence is in `docs/27-vector-layout-qualification.md`.
 Tracking: #140.
+
+## D117 — The qualification topology is sized by the cards the node exposes
+
+**Decision.** `compose.gpu.yaml` remains the eight-card reference D116 records. The runner counts the
+A100s the node actually exposes and generates a third compose file and load-balancer configuration
+from that count: N−1 generation replicas on cards 0 to N−2, the embedding model on card N−1, and only
+those services started. Eight cards reproduce the reference exactly; fewer narrow it; fewer than two
+is refused. The generated files are ignored like the TLS material and never committed. Coverage mode
+runs several workers per replica and deals its corpus across that many projects, because formation
+drains one project per worker while a replica batches many sequences; qualification mode keeps one
+worker per replica, the arrangement D116 measured.
+
+**Why.** On 2026-09-10 the provider's eight-A100 pool delivered nothing usable in eight attempts:
+two nodes errored during boot, three stalled in starting past twelve minutes, two booted with seven
+cards visible, one was aborted; its four-card VM of the same class was available throughout. A
+topology asserted at eight cards made the run impossible on hardware that could have run it.
+
+**Rejected.** Editing the reference overlay per node, which would leave no committed record of the
+measured topology. Templating the overlay itself, which would make D116's record a rendering rather
+than a file. Accepting a seven-card node by dropping the embedding model, which would silently change
+what the run measures.
+
+**How hard to undo.** No storage change. Deleting the generator returns the runner to asserting eight
+cards. Tracking: #151.
+
+## D118 — The formation turn budget is an operator setting, and the model client is bounded by it
+
+**Decision.** `TAISCE_FORMATION_TURN_BUDGET` bounds one formation attempt, defaulting to the five
+minutes the default policy already chose, and refuses any value that is not a positive duration. The extraction
+client's HTTP timeout follows the budget instead of carrying its own two-minute constant, so the
+deadline that fires is the one the operator configured and the one the failure reports. The explicit
+single-source rebuild uses the same setting.
+
+**Why.** Measured on the AP news corpus with twelve formations sharing one tensor-parallel server:
+eleven of 1,397 articles were cut off by the client bound at least once, two were parked after six
+attempts, and the affected articles averaged 10.7 KB against 4.5 KB for the rest. A conversational
+turn never approaches the bound; a document-sized turn under constrained decoding does, and until
+documents are segmented on the way in (#91) this is the only knob.
+
+**Rejected.** Raising the constants, which fixes one corpus and hides the next. Retrying past the
+attempt limit, which would hold a project's lock for a working day on a poisonous turn. Splitting the
+document in the harness, which would make two observations of one source and corrupt citation offsets.
+
+**How hard to undo.** No storage change; removing the setting restores the constants. What cannot be
+undone by configuration: raising the budget changes the extractor implementation digest's file only
+if the extractor changes, and a change to that file invalidates D96's source pins for any source with
+an earlier attempt, which the coverage run demonstrated and recovered from with explicit rebuilds.
+Tracking: #152.
+
+## D119 — A coverage corpus is observed without a data subject, and the reason is a finding
+
+**Decision.** The vocabulary-coverage harness observes each document as one tool-role message with a
+deterministic retry key and no data subject, deals the corpus across one project per worker, and reads
+admitted facts against every stored refusal reason from the database, with unmapped refusals broken
+down by the relation the model tried to use. The unmapped count is complete whatever else happens,
+because the vocabulary check is the first admission check in the extractor.
+
+**Why no subject.** The fact store refuses every claim from a non-user message whenever the observation
+names a data subject, not only claims about that subject. Observed under a synthetic subject, 535
+articles formed zero facts and every extractor-admitted claim died at that gate uncounted, so the
+denominator was short. Without a subject, tool-role facts are admitted and the denominator is facts
+plus stored refusals. That the rule is wider than its own comment, and that role refusals are counted
+but never stored, are findings filed as #153; whether documents belong to a subject at all is that
+issue's decision, not this one's.
+
+**Rejected.** Observing documents as user messages, which would make a news agency's words the
+subject's own statements. Counting role refusals from worker logs, which are per-pass aggregates.
+Deriving the denominator from a sample rebuild, which is one article's ratio presented as a corpus's.
+
+**How hard to undo.** The harness flag is one environment variable. The measurement itself is
+re-runnable from the committed harness against any corpus the operator licenses. Tracking: #43.
