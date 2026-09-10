@@ -22,8 +22,6 @@
 --  Two decisions are taken NOW because retrofitting either is a migration rather than an edit —
 --  see the sections marked ── DECIDED HERE ──.
 
-CREATE SCHEMA IF NOT EXISTS memory;
-
 -- ── The observation log ────────────────────────────────────────────────────────────────────────
 --
 -- Append-only, and the root of every erasure. Nothing else in this schema is authoritative: every
