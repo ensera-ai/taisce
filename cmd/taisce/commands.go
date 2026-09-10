@@ -50,6 +50,7 @@ const usage = `taisce — memory for agents
   taisce rebuild status            inspect a project rebuild (--project, --key required)
   taisce rebuild cancel            cancel a project rebuild (--project, --key required)
   taisce health                    show content-free operational aggregates using the operator connection
+  taisce ingest <file>...          observe documents through the API as segments (--api, TAISCE_TOKEN)
   taisce embeddings               start, build, inspect, activate, repair, cancel, prune or search model generations
   taisce entity-embeddings        manage source-owned entity candidate generations
   taisce report-embeddings        manage source-owned thematic report generations
@@ -90,6 +91,8 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 		return rebuildCommand(ctx, args[1:], os.Stdout)
 	case "health":
 		return healthCommand(ctx, args[1:], os.Stdout)
+	case "ingest":
+		return ingestCommand(ctx, args[1:], os.Stdout)
 	case "embeddings":
 		return embeddingsCommand(ctx, args[1:], os.Stdout)
 	case "entity-embeddings":

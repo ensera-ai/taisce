@@ -4437,3 +4437,41 @@ measured; the order is fixed and stated, and the cut is reported as a cut.
 
 **How hard to undo.** No storage change. Removing the semantic wiring returns the exact path; the
 two response arrays would then be empty and `surfaces` refused. Tracking: #149.
+
+## D125 — A document is ingested as segments, each an observation under the public write contract
+
+**Date:** 2026-09-10. **Tracking:** [#91](https://github.com/althunibat/taisce/issues/91).
+
+**Decision.** `taisce ingest` sends a document through `POST /v1/observations` as one observation per
+segment, one message each, `group_ordinal` 0, under the role the operator names (`tool` by default,
+`user` for the person's own writing), the data subject if one is named, and the time the document says
+it happened. Segments are at most 8 KiB by default (bounds 256 bytes to the message ceiling), cut at a
+paragraph, else a sentence, else whitespace, else a code point, and concatenate to the text exactly.
+A segment's idempotency key is a version-5 UUID over the document digest, ordinal, role and subject.
+The command reads `.txt`, `.md` and one JSON shape (`title`, `text`, `occurred_at`); it refuses a file
+whole, before sending, when it is over the size ceiling, not UTF-8, carries NUL, is empty, is another
+format, or is malformed JSON. A manifest per document records digests, offsets and receipts, never
+text. The token is read from the environment only. Details in `docs/32-document-ingestion.md`.
+
+**Why.** Formation extracts one message per model call and parks a turn whole, so a message is the
+unit of cost, retry and citation; a document cut into observations is formed, retried and cited piece
+by piece, and a segment's offset maps a citation back to the file exactly. Going through the public
+contract means every rule about roles, subjects, sizes, admission and audit applies unchanged and no
+citation exists that a client could not have made. Keys derived from content make a rerun a replay
+without a resume file to lose or trust. The 8 KiB ceiling is the measured margin under the articles
+that overran a two-minute budget on the docs/31 corpus.
+
+**Rejected.** One long message per document: one model call carrying the whole cost, parked whole,
+with the turn budget as the only bound. A document column on the observation: nothing reads it; the
+manifest holds the identity on the operator's side and the key derives from the content. A private
+ingestion path into the store: no credential, no audit, no admission. Converters for PDF, Office or
+HTML: dependencies whose failures become this system's. A token flag: visible in the process list.
+Token-based segmentation: the count depends on the model's tokenizer, which the command does not have.
+
+**Impact.** Security: the boundary is the existing one; the command holds a credential like any client
+and the manifest carries no text. Cost: model calls per document equal segment count and are printed.
+Operations: a project-wide document is erasable by nothing but retention, recorded as a limit and as
+[#170](https://github.com/althunibat/taisce/issues/170).
+
+**How hard to undo.** No storage change; the observations are ordinary turns. Removing the command
+leaves what it stored as conversation turns under the tool role.
