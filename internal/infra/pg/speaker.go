@@ -28,7 +28,12 @@ func bindSpeaker(ctx context.Context, tx pgx.Tx, schema Schema, scope, observati
 	if !left && !right {
 		return false, false, nil
 	}
-	if subject == "" || !role.SpeaksForPrincipal() {
+	if !role.SpeaksForPrincipal() {
+		// The words speak for the principal and the message was not the principal speaking. The
+		// caller's role argument cannot lend that authority; only the stored user message has it.
+		return false, false, fmt.Errorf("%w: message %d has role %q", ErrNotSpokenByPrincipal, claim.SourceOrdinal, role)
+	}
+	if subject == "" {
 		return false, false, ErrUnboundSpeaker
 	}
 	var storedSubject *string

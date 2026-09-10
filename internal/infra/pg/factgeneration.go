@@ -185,6 +185,7 @@ func (s *FactStore) ApplyGeneration(ctx context.Context, schema Schema, snapshot
 				out.Retracted++
 			case errors.Is(err, ErrNotSpokenByPrincipal):
 				out.RefusedRole++
+				plan.Rejected = append(plan.Rejected, domain.RejectedClaim{Statement: claim.Statement, Predicate: claim.Predicate, Quote: claim.Quote, SourceOrdinal: claim.SourceOrdinal, Reason: domain.ReasonNotSpokenByPrincipal})
 			case errors.Is(err, ErrUnboundSpeaker):
 				plan.Rejected = append(plan.Rejected, domain.RejectedClaim{Statement: claim.Statement, Predicate: claim.Predicate, Quote: claim.Quote, SourceOrdinal: claim.SourceOrdinal, Reason: domain.ReasonUnresolvableSubject})
 			case errors.Is(err, ErrConflictingValue):

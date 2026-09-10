@@ -4330,3 +4330,44 @@ the count that says how often a corpus does this.
 
 **How hard to undo.** A migration narrows the reason set again; rows already written with the reason
 would have to be deleted first. The store mapping is one clause.
+
+## D122 — The role gate is on the speaker reference, not on the role alone
+
+**Decision.** A non-user message observed under a data subject may assert facts about named third
+parties, and they are stored under that message's own role and registered under the observation's
+subject. What such a message may never write is a claim that speaks for the principal: a claim whose
+subject or object is a speaker term is refused as `not_spoken_by_principal` unless the message's
+stored role is `user`, and that refusal is now a `rejected_claim` row beside the others as well as a
+count. Migration 0053 widens the closed reason set to eight.
+
+**What is protected, and from whom.** The asset is the principal's own statements: facts recall
+returns by default and erasure walks by subject. The actor is anything that is not the principal
+speaking, which includes the model's own turn and any fetched text. The boundary is the stored
+message role, read from the observation, never the caller's argument. The worst path was and remains
+a model or a document putting words in the person's mouth; that path is unchanged, and the test that
+an assistant's inference cannot become the user's fact still holds.
+
+**What changes, and what covers it.** A fetched document's claims about others become tool-role
+facts inside a subject's observation. They are excluded from recall unless the caller selects the
+role (D82), they are labelled at every read with the role that said them, and the subject's erasure
+reaches them because registration carries the subject. A planted instruction in a document can
+therefore become a labelled tool-role fact about a third party, which is exactly what it could
+already become in an observation with no subject, and which the extractor's own refusal of
+instructing text is measured against in the inference corpus.
+
+**Why.** Measured on a news corpus observed under a subject, the wide rule refused every claim from
+every tool-role message, 535 articles to zero facts, and the refusals were counted but never stored.
+The recall controls already describe fetched text as served under its stored role, which the wide
+rule made impossible to reach with a subject attached. D119's reason for observing a coverage corpus
+without a subject no longer applies; the harness keeps that default because a benchmark corpus is
+nobody's turn, not because the store requires it.
+
+**Rejected.** Keeping the wide rule and giving documents a subject-independent provenance and
+erasure path, which duplicates the walk erasure already makes and leaves documents outside a
+person's erasure. Admitting first-person claims from tool text when the document is "about" the
+subject, which is the forged-attribution path D66 exists to close. Counting role refusals without
+storing them, which hides from an operator the largest refusal class a document corpus produces.
+
+**How hard to undo.** The gate is one condition in the speaker binding; restoring the wide rule is
+one line. Rows written with the new reason would be deleted before a migration narrowed the set.
+Tracking: #153.

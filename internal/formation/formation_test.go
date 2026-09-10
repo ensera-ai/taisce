@@ -1095,3 +1095,36 @@ func TestATurnWithTwoCurrentValuesFormsWithOneFactAndOneRefusal(t *testing.T) {
 		t.Fatalf("formed=%v reason=%q; the turn should be formed and the second value refused as conflicting", formed, reason)
 	}
 }
+
+// A refusal by role is a row, not only a number: an operator reading what a document was refused
+// sees the assistant's first-person claims beside the other reasons.
+func TestAClaimRefusedByRoleIsRecordedWithItsReason(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "fm_rolerow")
+	worker, observations := former(t, pool, schema)
+	stored, err := observations.Append(ctx, schema, turnOf(
+		domain.Message{Ordinal: 0, Role: domain.RoleUser, Content: "Hello."},
+		domain.Message{Ordinal: 1, Role: domain.RoleAssistant, Content: "So you work at Ensera, then."},
+	))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	reports, err := worker.Drain(ctx, schema, "p1")
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if len(reports) != 1 || reports[0].ClaimsRefusedByRole != 1 || reports[0].FactsAsserted != 0 {
+		t.Fatalf("expected one claim refused by role and no fact, got %+v", reports)
+	}
+	var reason string
+	var ordinal int
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT reason, source_ordinal FROM {schema}.rejected_claim WHERE source_observation_id = $1`), stored.ID).
+		Scan(&reason, &ordinal); err != nil {
+		t.Fatalf("read the refusal row: %v", err)
+	}
+	if reason != domain.ReasonNotSpokenByPrincipal || ordinal != 1 {
+		t.Fatalf("expected the assistant's claim recorded as not spoken by the principal, got %q at ordinal %d", reason, ordinal)
+	}
+}

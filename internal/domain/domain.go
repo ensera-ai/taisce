@@ -568,6 +568,15 @@ const (
 	// rival, which is exactly what a duplicate or a paraphrase is: an outcome with a reason, not a
 	// transport error to retry six times and park. The first value in message order wins.
 	ReasonConflictingValue = "conflicting_value"
+	// ReasonNotSpokenByPrincipal — the claim speaks in the first person, and the message it came
+	// from was not the principal speaking. An assistant's "so you work at Ensera" is the assistant's
+	// inference, not the person's statement, and a fetched document's "I" is somebody else's.
+	//
+	// Recorded as a row rather than only counted, because a corpus of documents refuses many of these
+	// and an operator reading the refusals should see them beside the others. The refusal is about the
+	// speaker reference, never about the role alone: the same message's claims about named third
+	// parties are admitted under the message's own role, which recall separates from user statements.
+	ReasonNotSpokenByPrincipal = "not_spoken_by_principal"
 )
 
 // Vocabulary is the closed sets an extractor is given, read from the tables that enforce them.

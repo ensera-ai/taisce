@@ -89,9 +89,11 @@ func assertFactTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observat
 func assertFactVersionTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, observationID string,
 	speaker domain.Role, dataSubjectID string, claim domain.Claim, extractorVersion string, knownAt time.Time, generation uuid.UUID) (string, error) {
 
-	if dataSubjectID != "" && !speaker.SpeaksForPrincipal() {
-		return "", fmt.Errorf("%w: message %d has role %q", ErrNotSpokenByPrincipal, claim.SourceOrdinal, speaker)
-	}
+	// The role gate is on the speaker reference, not on the role alone: bindSpeaker refuses a
+	// first-person claim from a message the principal did not speak, and admits the same message's
+	// claims about named third parties under its own role. A claim that speaks for the principal
+	// is the only thing a non-user message must never write; everything else it says is its own,
+	// labelled with its role, and recall selects user statements by default (D82).
 	// Refused here rather than by the foreign key, which would also refuse it — as a constraint
 	// violation from four frames down, naming a column instead of the mistake. Cardinality decides
 	// whether this assertion supersedes an earlier fact or sits beside it, so a claim that does not

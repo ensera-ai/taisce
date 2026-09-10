@@ -2334,3 +2334,46 @@ func TestASecondCurrentValueFromOneMessageIsRefusedByName(t *testing.T) {
 		t.Fatalf("expected exactly one current value, got %d", current)
 	}
 }
+
+// A tool message observed under a data subject may assert facts about named third parties. They carry
+// the tool role, so default recall does not return them, and they register under the subject, so the
+// subject's erasure reaches them. What it still may not do is speak for the principal.
+func TestAToolMessageUnderASubjectAssertsAboutOthersButNotForThePrincipal(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_toolrole")
+	obs := pg.NewObservationStore(pool)
+	facts := pg.NewFactStore(pool)
+	stored, err := obs.Append(ctx, schema, domain.Turn{Scope: "p1", DataSubjectID: "subject-1", Messages: []domain.Message{
+		{Ordinal: 0, Role: domain.RoleTool, GroupOrdinal: 0, Content: "Acme Corp is an approved supplier. I work at Acme."},
+	}})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	admitted, err := facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleTool, "subject-1", domain.Claim{
+		Subject: "Acme Corp", Predicate: "has_status", Cardinality: domain.CardinalityOne, Object: "approved supplier",
+		Statement: "Acme Corp is an approved supplier.", Confidence: 0.9,
+		Quote: "Acme Corp is an approved supplier", ByteStart: 0, ByteEnd: 33, SourceOrdinal: 0,
+	})
+	if err != nil {
+		t.Fatalf("a third-party claim from a tool message must be admitted under its role: %v", err)
+	}
+	var role, registeredFor string
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT f.source_role, d.data_subject_id FROM {schema}.fact f
+		 JOIN {schema}.projection_dependency d ON d.projection_kind = 'fact' AND d.projection_id = f.fact_id::text
+		 WHERE f.fact_id = $1`), admitted).Scan(&role, &registeredFor); err != nil {
+		t.Fatalf("read the admitted fact: %v", err)
+	}
+	if role != "tool" || registeredFor != "subject-1" {
+		t.Fatalf("expected a tool-role fact registered under the subject, got role=%q subject=%q", role, registeredFor)
+	}
+	_, err = facts.Assert(ctx, schema, "p1", stored.ID, domain.RoleTool, "subject-1", domain.Claim{
+		Subject: "I", Predicate: "works_at", Cardinality: domain.CardinalityMany, Object: "Acme",
+		Statement: "The speaker works at Acme.", Confidence: 0.9,
+		Quote: "I work at Acme", ByteStart: 35, ByteEnd: 49, SourceOrdinal: 0,
+	})
+	if !errors.Is(err, pg.ErrNotSpokenByPrincipal) {
+		t.Fatalf("a first-person claim from a tool message must be refused as not the principal's; got %v", err)
+	}
+}
