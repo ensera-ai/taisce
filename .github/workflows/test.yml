@@ -1,0 +1,57 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The build checks the floor (rule 6). This is the same target a developer runs, against the same
+# substrate image, on every push and pull request: the complete uncached suite with cross-package
+# coverage, the coverage gate, vet, the licence gate and the contract check. There is no
+# skip-when-absent arm anywhere below: a missing database fails the run rather than passing it empty.
+# The live-inference target is deliberately not here; it costs money and sends text to a provider,
+# which is a command somebody types on purpose (`make test-inference`).
+name: test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The substrate is the project's own image, built from deploy/postgres, so the extensions and
+      # settings the tests need are the ones a deployment has. `make db-up` waits until it answers.
+      - name: Start the substrate
+        run: make db-up
+
+      # `make test` is licence gate, then the suite with -coverpkg=./..., then the coverage gate.
+      - name: Test, coverage gate, licence gate
+        run: make test COVER_PROFILE=coverage.out
+
+      - name: Vet
+        run: go vet ./...
+
+      # The contract document is generated from the surface that serves; a change to the surface
+      # without the regenerated document is a public contract nobody reviewed.
+      - name: Contract document is current
+        run: |
+          make contract
+          git diff --exit-code -- docs/02-contract.md
+
+      - name: Stop the substrate
+        if: always()
+        run: make db-down
