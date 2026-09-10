@@ -4698,3 +4698,57 @@ writing reports on its next tick.
 
 **How hard to undo.** Dropping the table and the pass returns the deployment to verbatim history;
 the operation would then return turns only. The scheduling of the subject pass stays either way.
+
+## D131 — An adapter compacts by replacement with the deployment's context, never by summarising
+
+**Date:** 2026-09-10. **Tracking:** [#25](https://github.com/althunibat/taisce/issues/25), [#179](https://github.com/althunibat/taisce/issues/179).
+
+**Decision.** When a framework's compaction trigger fires, the adapter makes one call, `POST
+/v1/contexts` for the data subject under its configured budget, and replaces every message before
+the person's current message, except system messages, with one user message marked untrusted that
+carries the answer unchanged: the watermark, the assembly's `characters` and `truncated` as the
+plan, the segments and the verbatim turns. The adapter writes no summary of its own and decides
+nothing about what the context holds. A context that cannot be fetched leaves the history as the
+framework held it and reports through the adapter's error callback; the turn is not fatal. The
+message carries the memory prefix, so the store path never observes it. The trigger is the
+framework's own vocabulary where it has one: a `CompactionTrigger` in the .NET Agent Framework's
+`CompactionStrategy`, registered through a `CompactionProvider` on the chat client builder; a
+message count in the Python Agent Framework's context provider, which replaces the history other
+providers loaded for the run and leaves the stored history to the application (D129); LangGraph's
+state rewrite before the model call with the framework's own remove-all message, as its summarisation
+middleware does; and a message count in the Spring AI advisor and the LangChain4j decorator, which
+rewrite the request the model sees and leave the application's chat memory alone. The MCP surface
+gains a `context` tool over the same operation.
+
+The conformance suite holds every adapter to this with two cases. The proxy answers a context the
+case states, because a segment is written by the worker's pass from a model's summary and a
+conformance run has no model; the adapter's obligation is fidelity to the answer, which a stated
+answer is the one way to check, and the deployment's side is proved by the service's own tests. Four
+broken variants of the reference adapter, one per rule, each fail the case that holds their rule.
+
+**Why.** The history the model needs after a long conversation is the history the deployment already
+holds, rolled up under D130 off the read path. An adapter that summarises locally produces prose in
+each language's own way, prose the deployment cannot register, erase or re-derive, and prose that
+enters the framework's own history as though somebody said it. Replacement with the deployment's
+answer keeps one behaviour across five frameworks and keeps every word the model reads traceable to a
+turn or a segment the deployment can erase.
+
+**Rejected.** Summarising in the adapter, for the reasons above. Merging the deployment's segments
+with the framework's own recent messages by count: the framework counts messages and the deployment
+counts turns, and the two never line up, so a turn falls into the gap between the last segment and
+the framework's preserved window or is read twice; the deployment's verbatim turns are the authority
+on what was said recently. A live compaction case in the suite: it needs a worker and a summarising
+model on the deployment under test, and would prove the deployment rather than the adapter. A role
+other than `user` for the context message: the memory rule of D129 applies unchanged, because a
+segment is somebody's words condensed and an instruction-bearing role would make them instructions.
+
+**Impact.** Security: what reaches the model after compaction is the deployment's answer at role
+`user`, marked untrusted, and nothing an adapter wrote; the observe path recognises it by prefix, so
+it is never stored. Operations: where the framework's seam is request-only (Spring AI, LangChain4j),
+the context is fetched on every model call while the application's chat memory stays over the
+trigger, one read per call until the memory window shrinks; the two Agent Framework SDKs and LangGraph
+persist the replacement, so the fetch happens once per trigger. Cost is one read of `/v1/contexts`
+per compaction, no model call.
+
+**How hard to undo.** Adapter-side only: one class per adapter and two cases in the suite. Removing
+a seam leaves the operation and the rest of the adapter untouched.

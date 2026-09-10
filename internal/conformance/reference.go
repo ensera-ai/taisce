@@ -32,6 +32,10 @@ type Reference struct {
 	StoreToolTraffic   bool   // store the tool call and result as memory
 	StoreSynthetic     bool   // store a framework-written message as memory
 	StoreMemoryMessage bool   // store the injected memory message as a user message
+	CompactLocally     bool   // replace the history with a summary written here instead of the deployment's context
+	KeepHistory        bool   // hand the model the history beside the context that replaced it
+	DropInput          bool   // hand the model the context and not the person's message
+	ContextFatal       bool   // raise a context failure to the application
 }
 
 func (r *Reference) Run(ctx context.Context, in Instruction) (Report, error) {
@@ -49,6 +53,27 @@ func (r *Reference) Run(ctx context.Context, in Instruction) (Report, error) {
 		memory = nil
 	}
 	var toModel []Message
+	// The session's history is what the framework holds; a compaction, when it is due, replaces
+	// it with the deployment's context and nothing else. Failing to fetch that context leaves the
+	// history as it was: the model reads more, not less, and the turn goes on.
+	history := in.Turn.History
+	if in.Turn.Compact {
+		if r.CompactLocally {
+			toModel = append(toModel, Message{Role: "assistant", Content: "Summary of earlier conversation: " + summarise(history)})
+			history = nil
+		} else if content, err := r.compact(ctx, client, in); err != nil {
+			if r.ContextFatal {
+				report.Fatal = true
+				return report, nil
+			}
+		} else {
+			if !r.KeepHistory {
+				history = nil
+			}
+			toModel = append(toModel, Message{Role: "user", Content: content, Untrusted: true})
+		}
+	}
+	toModel = append(toModel, history...)
 	toModel = append(toModel, in.Turn.Synthetic...)
 	if memory != nil {
 		role := "user"
@@ -57,7 +82,9 @@ func (r *Reference) Run(ctx context.Context, in Instruction) (Report, error) {
 		}
 		toModel = append(toModel, Message{Role: role, Content: *memory, Untrusted: !r.UnmarkedMemory})
 	}
-	toModel = append(toModel, Message{Role: "user", Content: in.Turn.User})
+	if !(r.DropInput && in.Turn.Compact) {
+		toModel = append(toModel, Message{Role: "user", Content: in.Turn.User})
+	}
 	for _, t := range in.Turn.ToolCalls {
 		toModel = append(toModel, Message{Role: "assistant", Content: t.Call}, Message{Role: "tool", Content: t.Result})
 	}
@@ -125,6 +152,39 @@ func (r *Reference) provide(ctx context.Context, client *apiClient, in Instructi
 		return nil, err
 	}
 	return &content, nil
+}
+
+// compact asks the deployment for the subject's assembled history and renders it as the one
+// memory message: the watermark, the assembly's cost as the plan, and its arrays unchanged.
+func (r *Reference) compact(ctx context.Context, client *apiClient, in Instruction) (string, error) {
+	status, raw, err := client.post(ctx, "/v1/contexts", map[string]any{"data_subject_id": in.DataSubjectID})
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("context %d", status)
+	}
+	var assembled struct {
+		Watermark  Watermark       `json:"watermark"`
+		Segments   json.RawMessage `json:"segments"`
+		Turns      json.RawMessage `json:"turns"`
+		Characters int             `json:"characters"`
+		Truncated  bool            `json:"truncated"`
+	}
+	if err := json.Unmarshal(raw, &assembled); err != nil {
+		return "", err
+	}
+	plan, _ := json.Marshal(map[string]any{"characters": assembled.Characters, "truncated": assembled.Truncated})
+	return RenderMemoryMessage(MemoryMessage{Watermark: assembled.Watermark, Plan: plan, Segments: assembled.Segments, Turns: assembled.Turns})
+}
+
+// summarise is what a broken adapter does: prose of its own over the history.
+func summarise(history []Message) string {
+	var parts []string
+	for _, m := range history {
+		parts = append(parts, m.Role+" said "+m.Content)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (r *Reference) store(ctx context.Context, client *apiClient, in Instruction, memory *string) (bool, error) {

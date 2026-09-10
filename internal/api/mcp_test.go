@@ -40,9 +40,9 @@ func connectMCP(t *testing.T, h *harness, token string) *mcp.ClientSession {
 	return session
 }
 
-// The tool list is exactly the four, in the order declared, and none of them deletes: a host reads
+// The tool list is exactly the five, in the order declared, and none of them deletes: a host reads
 // the list as a menu, and erasure and export are deliberately absent from it.
-func TestMCPListsExactlyTheFourToolsAndNoneDeletes(t *testing.T) {
+func TestMCPListsExactlyTheFiveToolsAndNoneDeletes(t *testing.T) {
 	h := newHarness(t, "api_mcp_tools")
 	session := connectMCP(t, h, h.token)
 	listed, err := session.ListTools(context.Background(), nil)
@@ -60,7 +60,7 @@ func TestMCPListsExactlyTheFourToolsAndNoneDeletes(t *testing.T) {
 		}
 	}
 	// The host lists them sorted; the declaration is the set.
-	want := []string{"freshness", "observe", "recall", "resolve_citation"}
+	want := []string{"context", "freshness", "observe", "recall", "resolve_citation"}
 	declared := append([]string(nil), api.MCPToolNames()...)
 	sort.Strings(declared)
 	if strings.Join(names, ",") != strings.Join(want, ",") || strings.Join(declared, ",") != strings.Join(want, ",") {
@@ -125,6 +125,19 @@ func TestMCPObserveFreshnessRecallAndCitationAreTheSameOperations(t *testing.T) 
 	}
 	if !strings.Contains(string(mustJSON(t, resolved.StructuredContent)), `"evidence"`) {
 		t.Fatalf("a resolved citation carries its evidence, got %v", resolved.StructuredContent)
+	}
+	// A context is the same assembly a REST caller gets: the observed turn verbatim, under the
+	// caller's credential, with no model call.
+	assembled, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "context", Arguments: map[string]any{"data_subject_id": "subject-1"}})
+	if err != nil || assembled.IsError {
+		t.Fatalf("context: %v %+v", err, assembled)
+	}
+	var history struct {
+		Turns    []json.RawMessage `json:"turns"`
+		Segments []json.RawMessage `json:"segments"`
+	}
+	if err := json.Unmarshal(mustJSON(t, assembled.StructuredContent), &history); err != nil || len(history.Turns) != 1 || len(history.Segments) != 0 {
+		t.Fatalf("a context over one turn is that turn verbatim and no segment, got %v", assembled.StructuredContent)
 	}
 	// The text content is the same JSON, for a host that only shows text.
 	if text, ok := recalled.Content[0].(*mcp.TextContent); !ok || !strings.Contains(text.Text, `"facts"`) {

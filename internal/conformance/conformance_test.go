@@ -100,8 +100,8 @@ func TestTheReferenceAdapterPassesEveryCase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 6 {
-		t.Fatalf("expected six cases, got %d", len(results))
+	if len(results) != 8 {
+		t.Fatalf("expected eight cases, got %d", len(results))
 	}
 	for _, r := range results {
 		if !r.Passed {
@@ -131,6 +131,10 @@ func TestTheSuiteRefusesEachBrokenRule(t *testing.T) {
 		{"tool traffic stored", &conformance.Reference{StoreToolTraffic: true}, "filters_default_to_external_messages", "internal tool traffic"},
 		{"synthetic message stored", &conformance.Reference{StoreSynthetic: true}, "no_synthetic_message_reaches_observe", "never observed"},
 		{"memory message stored", &conformance.Reference{StoreMemoryMessage: true}, "no_synthetic_message_reaches_observe", "never observed"},
+		{"compaction written locally", &conformance.Reference{CompactLocally: true}, "compaction_hands_the_model_the_deployments_context", "expected 1 memory message(s)"},
+		{"history handed beside the context", &conformance.Reference{KeepHistory: true}, "compaction_hands_the_model_the_deployments_context", "which the compaction replaced"},
+		{"the person's message dropped", &conformance.Reference{DropInput: true}, "compaction_hands_the_model_the_deployments_context", "not handed"},
+		{"context failure raised", &conformance.Reference{ContextFatal: true}, "context_failure_is_not_fatal", "fatal=true"},
 	}
 	for _, m := range mutants {
 		results, err := conformance.Run(context.Background(), dep, m.driver, s)

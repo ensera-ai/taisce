@@ -47,8 +47,38 @@ type Case struct {
 	Rule   string `json:"rule"`
 	Seed   []Seed `json:"seed,omitempty"`
 	Faults Faults `json:"faults,omitempty"`
-	Turn   Turn   `json:"turn"`
-	Expect Expect `json:"expect"`
+	// Context, when set, is what the proxy answers for POST /v1/contexts in place of the
+	// deployment. A segment is written by the worker's pass from a model's summary, which a
+	// conformance run has no model for; the adapter's obligation is fidelity to the answer, and a
+	// stated answer is the one way to check fidelity. The deployment's own side of the operation
+	// is proved by the service's tests.
+	Context *ContextAnswer `json:"context,omitempty"`
+	Turn    Turn           `json:"turn"`
+	Expect  Expect         `json:"expect"`
+}
+
+// ContextAnswer is the shape of POST /v1/contexts as the proxy serves it for a case.
+type ContextAnswer struct {
+	Watermark  Watermark        `json:"watermark"`
+	Segments   []ContextSegment `json:"segments"`
+	Turns      []ContextTurn    `json:"turns"`
+	Characters int              `json:"characters"`
+	Truncated  bool             `json:"truncated"`
+}
+
+type ContextSegment struct {
+	SegmentID  string `json:"segment_id"`
+	Level      int    `json:"level"`
+	FromOffset int64  `json:"from_offset"`
+	ToOffset   int64  `json:"to_offset"`
+	Covered    int    `json:"covered"`
+	Summary    string `json:"summary"`
+}
+
+type ContextTurn struct {
+	LogOffset  int64     `json:"log_offset"`
+	OccurredAt string    `json:"occurred_at"`
+	Messages   []Message `json:"messages"`
 }
 
 // Seed is a fact the runner asserts into the deployment before the turn, through the authored
@@ -64,17 +94,25 @@ type Seed struct {
 type Faults struct {
 	Recall  string `json:"recall,omitempty"`
 	Observe string `json:"observe,omitempty"`
+	Context string `json:"context,omitempty"`
 }
 
 // Turn is what the driver is told to run. Everything an adapter sees comes through here: the
 // person's message, the tool traffic the framework would generate, a synthetic message the
 // framework wrote, and the reply the stubbed model gives or its failure.
 type Turn struct {
+	// History is what the framework's own session holds before this turn: earlier turns as the
+	// application kept them. The driver loads it through the framework's session, not by running
+	// it; the deployment has already been told about it, or not, and the case does not say.
+	History      []Message  `json:"history,omitempty"`
 	User         string     `json:"user"`
 	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
 	Synthetic    []Message  `json:"synthetic,omitempty"`
 	Assistant    string     `json:"assistant,omitempty"`
 	ModelFailure bool       `json:"model_failure,omitempty"`
+	// Compact arms the adapter's compaction seam with a trigger the history trips, in the
+	// framework's own vocabulary: the turn then runs with compaction due.
+	Compact bool `json:"compact,omitempty"`
 }
 
 type ToolCall struct {
@@ -84,10 +122,15 @@ type ToolCall struct {
 
 // Expect is what the runner checks. Every field is optional; an absent one is not checked.
 type Expect struct {
-	MemoryMessages   *int     `json:"memory_messages,omitempty"`
-	MemoryRole       string   `json:"memory_role,omitempty"`
-	MemoryUntrusted  *bool    `json:"memory_untrusted,omitempty"`
-	MemoryCarries    []string `json:"memory_carries,omitempty"`
+	MemoryMessages  *int     `json:"memory_messages,omitempty"`
+	MemoryRole      string   `json:"memory_role,omitempty"`
+	MemoryUntrusted *bool    `json:"memory_untrusted,omitempty"`
+	MemoryCarries   []string `json:"memory_carries,omitempty"`
+	// ModelCarries are texts that must reach the model as messages of their own; ModelLacks are
+	// texts that must not reach it outside a memory message. Together they say what a compaction
+	// replaced and what it kept.
+	ModelCarries     []string `json:"model_carries,omitempty"`
+	ModelLacks       []string `json:"model_lacks,omitempty"`
 	Fatal            *bool    `json:"fatal,omitempty"`
 	StoreError       *bool    `json:"store_error,omitempty"`
 	Observed         *bool    `json:"observed,omitempty"`
@@ -138,6 +181,10 @@ type MemoryMessage struct {
 	Facts     json.RawMessage `json:"facts"`
 	Reports   json.RawMessage `json:"reports,omitempty"`
 	Passages  json.RawMessage `json:"passages,omitempty"`
+	// Segments and Turns are a context's arrays, present when the message carries an assembled
+	// history rather than a recall; the plan is then the assembly's cost and cut.
+	Segments json.RawMessage `json:"segments,omitempty"`
+	Turns    json.RawMessage `json:"turns,omitempty"`
 }
 
 // Watermark is the freshness the adapter read beside the recall: how far the deployment has

@@ -7,7 +7,7 @@ description: Use when the user refers to a past decision, asks "what did we deci
 
 A session forgets everything when it ends. `CLAUDE.md` holds what somebody remembered to write down.
 This plugin holds what was actually said, with the words attached, and it is reached through four
-tools on the `taisce` MCP server: `recall`, `observe`, `freshness` and `resolve_citation`.
+tools on the `taisce` MCP server: `recall`, `observe`, `freshness`, `context` and `resolve_citation`.
 
 ## When to recall, without being asked
 

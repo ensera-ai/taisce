@@ -17,6 +17,8 @@ quietly while every adapter's own tests stay green (G8, D127).
 | `store_only_on_success` | A failed turn is not a memory: when the model call fails, nothing is observed. |
 | `filters_default_to_external_messages` | Internal tool traffic does not become memory by default: only the person's message and the final reply are observed. |
 | `no_synthetic_message_reaches_observe` | A message the framework wrote, a summary or the injected memory itself, is never observed as though a person said it. |
+| `compaction_hands_the_model_the_deployments_context` | When compaction is due the adapter asks the deployment for the subject's context and hands the model exactly that: one untrusted `user` message with the segments and the verbatim turns unchanged, in place of the history the framework held. The person's message stays; nothing synthetic is observed. |
+| `context_failure_is_not_fatal` | When the context cannot be fetched the history stays as the framework held it: no memory message, no error raised to the turn, and the turn is still stored. |
 
 Compaction is not in the suite yet: it is a server operation ([#22](https://github.com/althunibat/taisce/issues/22))
 and its adapter seams ([#25](https://github.com/althunibat/taisce/issues/25)) do not exist; the case
@@ -43,17 +45,22 @@ Instruction:
 ```json
 {"case": "memory_is_one_untrusted_user_message",
  "api": "http://127.0.0.1:53211", "token": "tsk_…", "data_subject_id": "…",
- "turn": {"user": "Where does Marta work?",
+ "turn": {"history": [{"role": "user", "content": "…"}, {"role": "assistant", "content": "…"}],
+          "user": "Where does Marta work?",
           "tool_calls": [{"call": "…", "result": "…"}],
           "synthetic": [{"role": "assistant", "content": "…"}],
           "assistant": "At Ensera.",
-          "model_failure": false}}
+          "model_failure": false,
+          "compact": false}}
 ```
 
-The driver configures the adapter with `api` and `token`, runs one agent turn for `data_subject_id`
-in which the person says `turn.user`, the framework generates the listed tool calls and results and
+The driver configures the adapter with `api` and `token`, loads `turn.history` into the framework's
+own session as earlier turns the application kept, runs one agent turn for `data_subject_id` in
+which the person says `turn.user`, the framework generates the listed tool calls and results and
 the listed synthetic messages, and the stubbed model replies `turn.assistant` or fails when
-`model_failure` is set. It then answers:
+`model_failure` is set. When `compact` is set the driver arms the adapter's compaction seam with a
+trigger the history trips, in the framework's own vocabulary, so the turn runs with compaction
+due. It then answers:
 
 ```json
 {"model_messages": [{"role": "user", "content": "taisce-memory/v1 untrusted\n{…}", "untrusted": true},
@@ -87,6 +94,25 @@ effective `controls`, the surfaces it named `degraded`, and its `reach`. `facts`
 `passages` are the recall's arrays unchanged. When the recall returns nothing, nothing is injected.
 The message is marked untrusted by whatever means the framework has for it, and it is never stored.
 
+A compaction hands the model the same kind of message with a context in it, from `POST
+/v1/contexts`:
+
+```json
+{"watermark": {"stored": 12, "formed": 12, "parked": 0},
+ "plan": {"characters": 140, "truncated": false},
+ "segments": [ … the context's segments, unchanged … ],
+ "turns": [ … the context's verbatim turns, unchanged … ]}
+```
+
+It replaces every message before the person's current one, except system messages, and nothing
+else is added: the adapter writes no summary of its own. A case that exercises this states the
+context the proxy answers (`context` in the case), because a segment is written by the worker's
+pass from a model's summary, which a conformance run has no model for; the deployment's own side of
+the operation is proved by the service's tests, and the adapter's obligation is fidelity to the
+answer. `expect.model_carries` and `expect.model_lacks` name what must and must not reach the model
+as messages of their own. A context the proxy refuses (`faults.context`) leaves the history as the
+framework held it.
+
 ## Running it
 
 ```sh
@@ -101,6 +127,6 @@ adapter this suite ships with, to prove the deployment and the suite before an a
 ## How the suite is proved
 
 `internal/conformance` runs the reference through the suite against a live deployment and expects
-every case to pass; runs nine deliberately broken variants and expects each to fail exactly the case
+every case to pass; runs thirteen deliberately broken variants and expects each to fail exactly the case
 that holds its rule; and runs the reference over the subprocess protocol. A suite that has never
 been seen to fail has asserted nothing.

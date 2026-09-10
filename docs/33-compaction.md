@@ -57,12 +57,25 @@ It makes no model call. A history the pass has not reached yet is handed over ve
 summarised on demand. A subject the deployment knows nothing about is an empty context, not an error.
 The budget is in characters (D82); a budget above the server's is refused.
 
+## The seams
+
+An adapter compacts by replacement, never by summarising (D131). When the framework's trigger
+fires, the adapter asks `POST /v1/contexts` for the subject's history and replaces every message
+before the person's current one, except system messages, with one untrusted user message carrying
+the context: the watermark, the assembly's cost as the plan, the segments and the verbatim turns
+unchanged. It writes no prose of its own. A context that cannot be fetched leaves the history as the
+framework held it and reports the failure; the turn goes on. The message carries the memory prefix,
+so it never reaches `observe`. The seam is the framework's own where it has one: the two Agent
+Framework SDKs' compaction providers, LangGraph's state rewrite before the model call, the Spring AI
+advisor and the LangChain4j decorator rewriting the request. The conformance suite holds every
+adapter to it with `compaction_hands_the_model_the_deployments_context` and
+`context_failure_is_not_fatal`.
+
 ## What is not built
 
 A "stateless" mode where an application uploads a message list to be compacted, which G9 once
 sketched: it is a model call on the read path for material the deployment cannot register, erase or
-re-derive. The on-ramp is `observe`. The adapter seams that hand a framework's compaction hook this
-operation are [#25](https://github.com/althunibat/taisce/issues/25).
+re-derive. The on-ramp is `observe`. The adapter seams are above.
 
 Tests to re-run: `internal/compaction` (the four planner and assembly tests),
 `TestASegmentIsRegisteredToEveryTurnItCoversAndErasureReachesIt` (`internal/infra/pg`),

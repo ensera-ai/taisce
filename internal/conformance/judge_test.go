@@ -25,6 +25,8 @@ func TestTheJudgeNamesEveryBrokenRule(t *testing.T) {
 	noWatermark, _ := RenderMemoryMessage(MemoryMessage{Plan: []byte(`{"hops":1}`), Facts: []byte(`[{"statement":"x"}]`)})
 	noPlan, _ := RenderMemoryMessage(MemoryMessage{Watermark: Watermark{Stored: &stored}, Plan: []byte(`null`), Facts: []byte(`[{"statement":"x"}]`)})
 	noFacts, _ := RenderMemoryMessage(MemoryMessage{Watermark: Watermark{Stored: &stored}, Plan: []byte(`{"hops":1}`), Facts: []byte(`[]`)})
+	noSegments, _ := RenderMemoryMessage(MemoryMessage{Watermark: Watermark{Stored: &stored}, Plan: []byte(`{"truncated":false}`), Segments: []byte(`[]`), Turns: []byte(`[{"log_offset":1}]`)})
+	noTurns, _ := RenderMemoryMessage(MemoryMessage{Watermark: Watermark{Stored: &stored}, Plan: []byte(`{"truncated":false}`), Segments: []byte(`[{"summary":"x"}]`), Turns: []byte(`[]`)})
 	observe := func(body string) []Recorded {
 		return []Recorded{{Method: http.MethodPost, Path: "/v1/observations", Body: []byte(body)}}
 	}
@@ -43,6 +45,10 @@ func TestTheJudgeNamesEveryBrokenRule(t *testing.T) {
 		{"no watermark", Expect{MemoryCarries: []string{"watermark"}}, Report{ModelMessages: []Message{{Role: "user", Content: noWatermark, Untrusted: true}}}, nil, 0, "no watermark"},
 		{"no plan", Expect{MemoryCarries: []string{"plan"}}, Report{ModelMessages: []Message{{Role: "user", Content: noPlan, Untrusted: true}}}, nil, 0, "no plan"},
 		{"no facts", Expect{MemoryCarries: []string{"facts"}}, Report{ModelMessages: []Message{{Role: "user", Content: noFacts, Untrusted: true}}}, nil, 0, "no facts"},
+		{"no segments", Expect{MemoryCarries: []string{"segments"}}, Report{ModelMessages: []Message{{Role: "user", Content: noSegments, Untrusted: true}}}, nil, 0, "no segments"},
+		{"no turns", Expect{MemoryCarries: []string{"turns"}}, Report{ModelMessages: []Message{{Role: "user", Content: noTurns, Untrusted: true}}}, nil, 0, "no turns"},
+		{"input dropped", Expect{ModelCarries: []string{"a"}}, Report{ModelMessages: []Message{{Role: "user", Content: good, Untrusted: true}}}, nil, 0, "not handed"},
+		{"history kept", Expect{ModelLacks: []string{"old"}}, Report{ModelMessages: []Message{{Role: "user", Content: "old"}, {Role: "user", Content: "a"}}}, nil, 0, "which the compaction replaced"},
 		{"fatal", Expect{Fatal: ptr(false)}, Report{Fatal: true}, nil, 0, "fatal=true"},
 		{"silent store failure", Expect{StoreError: ptr(true)}, Report{}, nil, 0, "surfaced nothing"},
 		{"unexpected store error", Expect{StoreError: ptr(false)}, Report{StoreError: "boom"}, nil, 0, "where none was expected"},
@@ -62,6 +68,7 @@ func TestTheJudgeNamesEveryBrokenRule(t *testing.T) {
 	}
 	// And the whole of a good turn passes with every expectation set.
 	all := Expect{MemoryMessages: ptr(1), MemoryRole: "user", MemoryUntrusted: ptr(true), MemoryCarries: []string{"watermark", "plan", "facts"},
+		ModelCarries: []string{"a"}, ModelLacks: []string{"old"},
 		Fatal: ptr(false), StoreError: ptr(false), Observed: ptr(true), ObservedRoles: []string{"user", "assistant"}, ObservedContents: []string{"a", "b"}, Stored: ptr(1)}
 	report := Report{ModelMessages: []Message{{Role: "user", Content: good, Untrusted: true}, {Role: "user", Content: "a"}}, Observed: true}
 	if f := judge(all, report, observe(`{"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"b"}]}`), 1); len(f) != 0 {

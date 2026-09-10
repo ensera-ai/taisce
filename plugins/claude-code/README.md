@@ -30,7 +30,7 @@ a bearer token that reaches exactly what the credential reaches.
 
 ## What you get
 
-**Four tools** on the `taisce` server: `recall`, `observe`, `freshness` and `resolve_citation`. Each
+**Five tools** on the `taisce` server: `recall`, `observe`, `freshness`, `context` and `resolve_citation`. Each
 is the v1 operation of the same name reached by another protocol: the same request, the same
 response, the same refusal codes. Erasure and export are deliberately not tools.
 

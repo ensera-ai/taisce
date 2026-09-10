@@ -91,7 +91,7 @@ func runCase(ctx context.Context, client *apiClient, p *proxy, driver Driver, c 
 	if err != nil {
 		return result, err
 	}
-	p.begin(c.Faults)
+	p.begin(c.Faults, c.Context)
 	report, err := driver.Run(ctx, Instruction{Case: c.Name, API: p.URL(), Token: client.token, DataSubjectID: subject, Turn: c.Turn})
 	if err != nil {
 		return result, fmt.Errorf("driver: %w", err)
@@ -151,7 +151,34 @@ func judge(expect Expect, report Report, recorded []Recorded, stored int64) []st
 				if json.Unmarshal(parsed[i].Facts, &facts) != nil || len(facts) == 0 {
 					fail("memory message %d carries no facts although memory holds some", i)
 				}
+			case "segments":
+				var segments []json.RawMessage
+				if json.Unmarshal(parsed[i].Segments, &segments) != nil || len(segments) == 0 {
+					fail("memory message %d carries no segments although the context holds some: a compaction is the deployment's answer handed over unchanged", i)
+				}
+			case "turns":
+				var turns []json.RawMessage
+				if json.Unmarshal(parsed[i].Turns, &turns) != nil || len(turns) == 0 {
+					fail("memory message %d carries no turns although the context holds some", i)
+				}
 			}
+		}
+	}
+	// What reached the model as its own message, and what must not have.
+	var plain []string
+	for _, m := range report.ModelMessages {
+		if !strings.HasPrefix(m.Content, MemoryMessagePrefix) {
+			plain = append(plain, m.Content)
+		}
+	}
+	for _, text := range expect.ModelCarries {
+		if !slices.Contains(plain, text) {
+			fail("the model was not handed %q as a message of its own: a compaction keeps what the deployment did not replace", text)
+		}
+	}
+	for _, text := range expect.ModelLacks {
+		if slices.Contains(plain, text) {
+			fail("the model was handed %q, which the compaction replaced: history the deployment already holds is not sent twice", text)
 		}
 	}
 	if expect.Fatal != nil && report.Fatal != *expect.Fatal {
