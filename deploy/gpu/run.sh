@@ -28,11 +28,12 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv > results/g
 # not always deliver eight, and a smaller VM of the same class is the same environment. Eight cards
 # reproduce the reference in compose.gpu.yaml; fewer narrow it. Coverage mode runs several workers per
 # replica because formation drains one project per worker while a replica batches many sequences.
-gpus="$(nvidia-smi --query-gpu=name --format=csv,noheader | grep -c A100)"
+gpus="$(nvidia-smi --query-gpu=name --format=csv,noheader | grep -c NVIDIA)"
 test "$gpus" -ge 2
+card_gb="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | sort -n | head -1 | awk '{printf "%d", $1/1024}')"
 if [[ "${TAISCE_GPU_MODE:-qualification}" == coverage ]]; then per_replica="${TAISCE_GPU_WORKERS_PER_REPLICA:-4}"; else per_replica="${TAISCE_GPU_WORKERS_PER_REPLICA:-1}"; fi
-eval "$(python3 deploy/gpu/topology.py "$gpus" "$per_replica")"
-printf 'gpus=%s replicas=%s workers=%s embedding_gpu=%s services=%s\n' "$TOPOLOGY_GPUS" "$TOPOLOGY_REPLICAS" "$TOPOLOGY_WORKERS" "$TOPOLOGY_EMBEDDING_GPU" "$TOPOLOGY_SERVICES" | tee results/topology.txt
+eval "$(python3 deploy/gpu/topology.py "$gpus" "$per_replica" "$card_gb")"
+printf 'gpus=%s card_gb=%s tp=%s replicas=%s workers=%s embedding_gpu=%s services=%s\n' "$TOPOLOGY_GPUS" "$card_gb" "$TOPOLOGY_TP" "$TOPOLOGY_REPLICAS" "$TOPOLOGY_WORKERS" "$TOPOLOGY_EMBEDDING_GPU" "$TOPOLOGY_SERVICES" | tee results/topology.txt
 read -r -a generation_services <<< "$TOPOLOGY_SERVICES"
 df -h . > results/disk.txt
 free -h > results/ram.txt

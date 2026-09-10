@@ -92,6 +92,9 @@ those claims.
 beside it: the load balancer depends on and routes to the first N−1 replicas, the embedding model
 moves to card N−1, and only those services are started. Eight cards reproduce the reference exactly;
 fewer narrow it; fewer than two is refused. Both generated files are ignored like the TLS material.
+Card memory is read as well: the generation model's BF16 weights are 51.1 GiB, so on cards under
+60 GB each replica spans two cards at tensor-parallel size two, the replica count halves, and the
+replica command is regenerated from the reference arguments with only the parallel size changed.
 Formation drains one project per worker while a replica batches several sequences, so coverage mode
 runs `TAISCE_GPU_WORKERS_PER_REPLICA` (default 4) workers per replica and deals the corpus over that
 many projects; qualification mode keeps one per replica, which is the arrangement D116 measured.
