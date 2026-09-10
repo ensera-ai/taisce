@@ -69,6 +69,8 @@ echo 'Starting vLLM model services and PostgreSQL'
 timeout 3600 "${dc[@]}" up -d --build --wait --wait-timeout 3000 \
     generation "${generation_services[@]}" embedding postgres test-postgres > results/model-start.log 2>&1
 echo 'Starting application components'
+# Document-sized turns under a shared model server exceed the five-minute default (D118).
+if [[ "${TAISCE_GPU_MODE:-qualification}" == coverage ]]; then export TAISCE_FORMATION_TURN_BUDGET="${TAISCE_FORMATION_TURN_BUDGET:-15m}"; fi
 timeout 1800 "${dc[@]}" up -d --build --scale worker="$TOPOLOGY_WORKERS" --wait --wait-timeout 300 \
     api worker > results/application-start.log 2>&1
 "${dc[@]}" ps --format json > results/services.json
@@ -101,7 +103,10 @@ python3 deploy/gpu/smoke.py > results/deployed-smoke.log 2>&1
 if [[ "${TAISCE_GPU_MODE:-qualification}" == coverage ]]; then
     echo 'Measuring vocabulary coverage over /root/corpus'
     set +e
-    CORPUS=/root/corpus CORPUS_SHARDS="$TOPOLOGY_WORKERS" RESULTS=results \
+    # Ten minutes without any watermark moving is the stall bound here rather than the harness's
+    # thirty: an article parked by a defect blocks its project's watermark, and every idle
+    # minute on this node is paid for.
+    CORPUS=/root/corpus CORPUS_SHARDS="$TOPOLOGY_WORKERS" RESULTS=results FORMATION_STALL_SECONDS=600 \
         python3 deploy/gpu/vocabulary-coverage.py > results/vocabulary-coverage.log 2>&1
     result=$?
     set -e
