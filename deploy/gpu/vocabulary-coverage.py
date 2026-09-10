@@ -46,7 +46,10 @@ API = os.environ.get('TAISCE_API', 'http://127.0.0.1:8080')
 CORPUS = Path(os.environ['CORPUS'])
 LIMIT = int(os.environ.get('CORPUS_LIMIT', '0'))
 SHARDS = int(os.environ.get('CORPUS_SHARDS', '7'))
-SUBJECT = os.environ.get('CORPUS_SUBJECT', 'vocabulary-coverage-corpus')
+# Empty means no data subject on the observations. A document is nobody's turn, and a claim from a
+# non-user message is refused by role whenever a subject is named, so a corpus observed under a
+# subject yields refusals only. Without one, tool-role facts are admitted and counted.
+SUBJECT = os.environ.get('CORPUS_SUBJECT', '')
 PREFIX = os.environ.get('CORPUS_PROJECT_PREFIX', 'coverage')
 SCHEMA = os.environ.get('TAISCE_SCHEMA', 'memory')
 RESULTS = Path(os.environ.get('RESULTS', 'results'))
@@ -59,7 +62,7 @@ KEY_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, 'https://taisce.dev/vocabulary-co
 
 if not re.fullmatch(r'[a-z][a-z0-9_]{0,30}', PREFIX):
     raise SystemExit('CORPUS_PROJECT_PREFIX must be a lowercase identifier')
-if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', SUBJECT):
+if SUBJECT and not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', SUBJECT):
     raise SystemExit('CORPUS_SUBJECT must be a plain identifier')
 
 RESULTS.mkdir(parents=True, exist_ok=True)
@@ -155,8 +158,9 @@ def observe(token, key, occurred, text):
     """Admission refusals (429, 503) are the backlog working; retry the same key, never a new one."""
     # A tool message must state its group (D64): roles alone cannot pair a result with its call, and a
     # whole document is one unit, so it is group zero on its own.
-    body = {'idempotency_key': key, 'data_subject_id': SUBJECT,
-            'messages': [{'group_ordinal': 0, 'role': 'tool', 'content': text}]}
+    body = {'idempotency_key': key, 'messages': [{'group_ordinal': 0, 'role': 'tool', 'content': text}]}
+    if SUBJECT:
+        body['data_subject_id'] = SUBJECT
     if occurred:
         body['occurred_at'] = occurred
     delay = 1.0
@@ -247,8 +251,9 @@ def sql(query):
 
 
 def report(stats, ledger, formation, errors, elapsed):
-    s, subj = SCHEMA, SUBJECT.replace("'", "''")
-    where = f"data_subject_id = '{subj}'"
+    s = SCHEMA
+    scopes = ', '.join("'%s'" % (f'{PREFIX}_{i}') for i in range(SHARDS))
+    where = f"scope IN ({scopes})"
     observations = sql(f"""SELECT json_agg(t) FROM (
         SELECT count(*) AS total, count(formed_at) AS formed, count(parked_at) AS parked,
                count(formation_failed_at) AS with_failed_attempt, coalesce(sum(formation_attempts),0) AS attempts

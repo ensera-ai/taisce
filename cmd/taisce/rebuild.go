@@ -43,7 +43,13 @@ func rebuildCommand(ctx context.Context, args []string, out io.Writer) error {
 			return pg.ErrInvalidGeneration
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, formation.DefaultPolicy().TurnBudget)
+	// The same bound as a formation attempt, and from the same setting: a rebuild is one attempt
+	// under the current identity, and a document that needed a longer budget to form needs it here.
+	budget, err := configuredTurnBudget(formation.DefaultPolicy().TurnBudget)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	pool, schema, err := adminPool(ctx)
 	if err != nil {
@@ -57,6 +63,7 @@ func rebuildCommand(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	config.Timeout = budget
 	vocabulary, err := pg.LoadVocabulary(ctx, pool, schema)
 	if err != nil {
 		return err

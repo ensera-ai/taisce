@@ -101,7 +101,9 @@ many projects; qualification mode keeps one per replica, which is the arrangemen
 `TAISCE_GPU_MODE=coverage bash deploy/gpu/run.sh` deploys the same stack, runs the smoke journey,
 then measures the relation vocabulary against a corpus the operator placed at `/root/corpus`
 (issue #43) and returns without the regression gates. `deploy/gpu/vocabulary-coverage.py` deals the
-documents across one project per worker, because formation holds one advisory lock per project; observes each document once under the `tool` role with a deterministic retry key;
+documents across one project per worker, because formation holds one advisory lock per project; observes each document once under the `tool` role with a deterministic retry key and, by
+default, no data subject, because a claim from a non-user message is refused by role whenever the
+observation names one and a corpus observed under a subject yields refusals only;
 waits for every project's watermark; and reads admitted facts against every refusal reason from the
 database, with unmapped refusals broken down by the relation the model tried to use. It writes
 `results/vocabulary-coverage.json` and `.md`. AP-format JSON (`headline`, `body_nitf`,
