@@ -2377,3 +2377,22 @@ func TestAToolMessageUnderASubjectAssertsAboutOthersButNotForThePrincipal(t *tes
 		t.Fatalf("a first-person claim from a tool message must be refused as not the principal's; got %v", err)
 	}
 }
+
+// The vocabulary says which relations are events, and the loader carries that to the extractor: the
+// five completed-occurrence relations are events, and a state such as lives_in is not.
+func TestTheVocabularyMarksEventsAndTheLoaderCarriesIt(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_events")
+	ontology, err := pg.LoadOntology(ctx, pool, schema)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for name, want := range map[string]bool{"created": true, "contributed_to": true, "participated_in": true,
+		"occurred_on": true, "born_in": true, "lives_in": false, "has_role": false} {
+		p, ok := ontology.Lookup(name)
+		if !ok || p.Event != want {
+			t.Fatalf("%s: event=%v ok=%v, want event=%v", name, p.Event, ok, want)
+		}
+	}
+}

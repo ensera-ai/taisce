@@ -4371,3 +4371,30 @@ storing them, which hides from an operator the largest refusal class a document 
 **How hard to undo.** The gate is one condition in the speaker binding; restoring the wide rule is
 one line. Rows written with the new reason would be deleted before a migration narrowed the set.
 Tracking: #153.
+
+## D123 — An event is reported in the past tense and stays true
+
+**Decision.** The vocabulary marks five relations as events: `created`, `contributed_to`,
+`participated_in`, `occurred_on` and `born_in`. The extractor admits a past-tense claim on an event
+relation and still refuses past tense on every state relation, and still refuses future tense on
+both. The flag is a column on the predicate table (migration 0054), read by the loader, carried on
+the ontology, and not rendered into the prompt, so the composed prompt and its golden are unchanged
+and the corpus rerun rule 14 requires is not triggered. An admitted event's validity starts when it
+was reported; when the message gives the event's own time, `occurred_on` carries it.
+
+**Why.** The tense rule's argument is right for a state: "I used to live in Amman" asserts a
+relation that ended, and a fact written from it answers "where do they live" with a place they left.
+An event is not a state. "Voters adopted an amendment" is complete and remains true, there is no
+interval to bound and nothing that stopped holding, and the past tense is the only tense an event is
+ever reported in. Measured on a news corpus, `not_current` refusals outnumbered every other reason
+six to one, and the samples were completed events (#154).
+
+**Rejected.** Changing the prompt's definition of `past`, which would make the model decide per
+sentence whether an occurrence is over or ended, the judgement the closed vocabulary exists to take
+away from it; and any prompt change costs a corpus rerun before it can be trusted. A separate
+`event` tense value, which asks the model to classify the relation rather than the sentence, and
+which an ordinary past-tense reply would then miss. Admitting past tense for everything, which is the
+false-current-fact the rule exists to refuse.
+
+**How hard to undo.** One column with a default; clearing the flag restores the refusal. Facts
+admitted as events would remain, correctly stamped with their tense-independent validity.

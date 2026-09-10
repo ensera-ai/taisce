@@ -472,6 +472,12 @@ type Predicate struct {
 	// against — a `time` object that came back as somebody's name is a bad extraction, not a fact.
 	ObjectKind  string
 	Description string
+	// Event marks a relation whose natural tense is the past and which stays true once it has
+	// happened: "voters adopted an amendment" is complete and remains a fact. For a state relation
+	// the past tense means the relation ended, and admitting it would write a current fact from an
+	// ended one; for an event it means the event occurred, which is the only way an event is ever
+	// reported. The extractor admits past tense on events and refuses it on states.
+	Event bool
 }
 
 // Ontology is the vocabulary, in the order the database holds it.

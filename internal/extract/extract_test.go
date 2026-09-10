@@ -34,6 +34,7 @@ func vocabulary(t *testing.T) domain.Ontology {
 		{Name: "lives_in", SemanticType: "identity", Cardinality: domain.CardinalityOne, ObjectKind: "place"},
 		{Name: "works_at", SemanticType: "identity", Cardinality: domain.CardinalityMany, ObjectKind: "organisation"},
 		{Name: "scheduled_for", SemanticType: "temporal", Cardinality: domain.CardinalityOne, ObjectKind: "time"},
+		{Name: "created", SemanticType: "authorship", Cardinality: domain.CardinalityMany, ObjectKind: "thing", Event: true},
 	})
 	if err != nil {
 		t.Fatalf("vocabulary: %v", err)
@@ -676,5 +677,36 @@ func TestARelationThatBeganInThePastAndStillHoldsIsAFact(t *testing.T) {
 	}
 	if len(result.Claims) != 1 {
 		t.Fatalf("a relation that holds now was refused: %+v", result.Rejected)
+	}
+}
+
+// A completed event is reported in the past tense and stays true, so an event relation's past tense
+// is a fact; its future tense is still not, and a state relation's past tense is still refused.
+func TestAPastTenseEventIsAFactWhileAPastTenseStateIsNot(t *testing.T) {
+	content := "Voters adopted an amendment. I used to live in Amman. The council will create a fund."
+	result, err := extract.New(&stubModel{proposals: []extract.Proposal{
+		{Subject: "Voters", Predicate: "created", Object: "an amendment",
+			Statement: "Voters adopted an amendment.", Quote: "Voters adopted an amendment",
+			Polarity: domain.PolarityAsserted, Tense: domain.TensePast},
+		{Subject: "I", Predicate: "lives_in", Object: "Amman",
+			Statement: "The user lives in Amman.", Quote: "I used to live in Amman",
+			Polarity: domain.PolarityAsserted, Tense: domain.TensePast},
+		{Subject: "The council", Predicate: "created", Object: "a fund",
+			Statement: "The council created a fund.", Quote: "The council will create a fund",
+			Polarity: domain.PolarityAsserted, Tense: domain.TenseFuture},
+	}}, vocabulary(t)).Extract(context.Background(), message(content))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if len(result.Claims) != 1 || result.Claims[0].Predicate != "created" || result.Claims[0].Object != "an amendment" {
+		t.Fatalf("expected the completed event as the one fact, got %+v", result.Claims)
+	}
+	if len(result.Rejected) != 2 {
+		t.Fatalf("expected the ended state and the future event refused, got %+v", result.Rejected)
+	}
+	for _, r := range result.Rejected {
+		if r.Reason != domain.ReasonNotCurrent {
+			t.Fatalf("refused for the wrong reason: %+v", r)
+		}
 	}
 }

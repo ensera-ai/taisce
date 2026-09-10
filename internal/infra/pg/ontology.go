@@ -40,7 +40,7 @@ func LoadOntology(ctx context.Context, pool *pgxpool.Pool, schema Schema) (domai
 	for rows.Next() {
 		var p domain.Predicate
 		var cardinality string
-		if err := rows.Scan(&p.Name, &p.SemanticType, &cardinality, &p.ObjectKind, &p.Description); err != nil {
+		if err := rows.Scan(&p.Name, &p.SemanticType, &cardinality, &p.ObjectKind, &p.Description, &p.Event); err != nil {
 			return domain.Ontology{}, err
 		}
 		switch domain.Cardinality(cardinality) {
@@ -64,7 +64,7 @@ func LoadOntology(ctx context.Context, pool *pgxpool.Pool, schema Schema) (domai
 // every deployment. A prompt whose vocabulary arrives in a different order is a different prompt,
 // and extraction quality cannot be compared across runs that were not asked the same question.
 const selectOntologySQL = `
-SELECT predicate, semantic_type, cardinality, object_kind, description
+SELECT predicate, semantic_type, cardinality, object_kind, description, event
   FROM {schema}.predicate
  ORDER BY predicate`
 

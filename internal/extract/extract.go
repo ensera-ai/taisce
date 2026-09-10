@@ -177,7 +177,12 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 		// different responses — a rising not_asserted is a model reading modality badly, a rising
 		// not_current is a corpus about the past — and a refusal filed under the wrong reason makes
 		// them agree when they should not.
-		if !p.Tense.IsCurrent() {
+		//
+		// Except for an event. A relation the vocabulary marks as an event is reported in the past
+		// tense because that is when events are reported, and it stays true once it has happened:
+		// "voters adopted an amendment" is complete and remains a fact. The validity start is when
+		// it was reported; when the message gives the event's own time, `occurred_on` carries it.
+		if !p.Tense.IsCurrent() && !(predicate.Event && p.Tense == domain.TensePast) {
 			out.Rejected = append(out.Rejected, reject(p, domain.ReasonNotCurrent, message.Ordinal))
 			continue
 		}
