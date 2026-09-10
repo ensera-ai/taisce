@@ -4305,3 +4305,28 @@ verbs the graph should not hold.
 **How hard to undo.** A migration adds a predicate; nothing on the read path changes. The number
 that would reopen this is a corpus where the unmapped head is a genuine entity relation asserted
 often, and the harness re-runs on any corpus the operator licenses.
+
+## D121 — A second current value in one message is a refusal, not a failed turn
+
+**Decision.** When a message gives a single-cardinality relation two current values, the exclusion
+constraint refuses the second insert and the store names that refusal (`ErrConflictingValue`), keeping
+the database error in the chain. Formation records the second claim as a `rejected_claim` with the
+closed reason `conflicting_value`; the first value in message order wins; the turn completes and its
+watermark moves. The rebuild path asserts each claim under a savepoint so one refused insert cannot
+abort a generation. Migration 0052 widens the reason set to seven. The authored-assertion route
+already maps the same violation to a 409 and keeps doing so, because a batch is atomic by D91.
+
+**Why.** Supersession requires a strictly later validity start (D86); two claims from one message
+share one, so neither can close the other. Before this, the raw constraint error was treated as a
+model failure: six retries of the same content, a parked turn, nothing stored, and an operator left
+with an error naming a constraint rather than a claim. Measured on the AP news corpus, about five
+articles in a hundred parked this way (#155). A claim the message genuinely made and cannot store
+beside its rival is the same class of outcome as a duplicate or a paraphrase.
+
+**Rejected.** Letting the second value supersede the first at the same instant, which would make
+message order a temporal fact and invent an interval of zero length. Storing both and letting recall
+choose, which is what the constraint exists to forbid (G4). Dropping the second silently, which loses
+the count that says how often a corpus does this.
+
+**How hard to undo.** A migration narrows the reason set again; rows already written with the reason
+would have to be deleted first. The store mapping is one clause.
