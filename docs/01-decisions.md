@@ -4652,3 +4652,49 @@ system message anywhere: both Java frameworks pin a system message first and nev
 memory as a person's words. Operations: an adapter's release runs the suite against a real deployment.
 
 **How hard to undo.** Each adapter is its own repository; replacing one changes nothing here.
+## D130 — Compaction is a roll-up of segments the worker writes; a context is assembled, never summarised on demand
+
+**Date:** 2026-09-10. **Tracking:** [#22](https://github.com/althunibat/taisce/issues/22).
+
+**Decision.** A subject's history rolls up on the time axis in segments: the newest eight turns stay
+verbatim; behind them every run of eight consecutive formed turns becomes one level-1 segment, a
+summary a model wrote from those turns; every run of eight level-1 segments becomes a level-2 segment
+written from their summaries, and so on to level six. A segment is a projection, not an observation:
+it lives in its own table, is registered to every observation it covers, and is deleted by an erasure
+of any of them through the projection registry, after which the pass writes a new one from what
+survived; a run bounded by an existing segment closes early, so a gap an erasure left is written
+again and not left loose. The compaction pass runs on the formation driver's tick per scope after
+draining, bounded by `SegmentsPerPass` model calls, and the subject pass that writes community reports
+is scheduled the same way, bounded by `ReportsPerPass`; before this neither ran outside a test (#177).
+`POST /v1/contexts` assembles one subject's history under a character budget with no model call: the
+newest turns verbatim and the highest-level segment covering everything older, oldest first, cut from
+the oldest end with the cut reported, plus the freshness watermark. A tool call and its results are
+one group inside one turn (D64), and a segment covers whole turns, so no segment splits a group.
+Material over 48,000 characters is cut from the oldest turn before summarisation and the cut is
+counted. The summariser is a prompt file compiled in, temperature zero, with the data boundary last,
+loaded by the report prompt's loader because the two files answer the same questions.
+
+**Why.** Summarising each turn once per level it climbs is amortised O(1) per turn, and a context
+reads O(log n) segments: ten thousand turns cost 1,426 summaries against a linear bound of 1,428 and
+a context over them reads ten segments and eight turns, measured by `TestTenThousandTurnsCostLinearlyManySummaries`.
+A projection rather than an observation keeps the log to what people said (G6) and gives erasure its
+registrations for free. Writing off the read path is the rule the read path already keeps for
+anchoring and reports: a model call on the read path is paid by every caller.
+
+**Rejected.** The stateless mode G9 sketched, where an application uploads a message list and gets it
+compacted: that is a model call on the read path for material the deployment does not hold, so it
+cannot register, cannot erase and cannot re-derive; the on-ramp it was for is `observe`, which makes
+the same list this deployment's history and gives it everything above. G9 is amended to say so. A
+summary stored as an observation: prose a model wrote entering the log beside what a person said, the
+artefact class G6 exists to keep out. Rewriting a segment in place when its range changes: a segment
+is written once, and what invalidates it is erasure through the registry, which is the mechanism every
+projection already has. Token-based budgets: the tokenizer is the model's, not the server's;
+characters are what the server counts everywhere else (D82).
+
+**Impact.** Cost: at most `SegmentsPerPass` plus `ReportsPerPass` model calls per scope per tick, each
+over bounded material. Security: a segment holds the subject's words and is registered as such;
+nothing on `/v1/contexts` writes. Operations: a deployment that never ran the subject pass starts
+writing reports on its next tick.
+
+**How hard to undo.** Dropping the table and the pass returns the deployment to verbatim history;
+the operation would then return turns only. The scheduling of the subject pass stays either way.

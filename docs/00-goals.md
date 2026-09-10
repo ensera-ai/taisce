@@ -216,9 +216,11 @@ The algorithm is hierarchical and it is G5's roll-up on the time axis: recent gr
 run becomes one level-1 segment, a run of those becomes level-2. Amortised O(1) summarisation per
 turn, O(log n) segments to assemble a context, newest-verbatim and oldest-most-compressed.
 
-Two modes: **stateful**, where Taisce holds the history and returns a context under a token budget;
-**stateless**, where the application sends its list — lossy by necessity, but it works before a
-customer has adopted anything else.
+One mode: Taisce holds the history and returns a context under a character budget, assembled from
+segments a worker wrote and never summarised on demand. A "stateless" mode, where an application
+uploads a list to be compacted, was considered and rejected (D130): it is a model call on the read
+path for material the deployment cannot register, erase or re-derive. The on-ramp is `observe`: the
+same list, sent as turns, becomes the history the context is assembled from.
 
 **Groups are atomic.** An assistant message with tool calls and its tool results is one unit;
 splitting it is an API error from the model. Because compaction is server-side, the log must carry

@@ -55,6 +55,7 @@ type Server struct {
 	records          *pg.RecordStore
 	artifacts        *pg.ArtifactStore
 	subjects         *pg.SubjectStore
+	contexts         *pg.SegmentStore
 	passages         *passage.Retriever
 	entityCandidates *entitycandidate.Retriever
 	reportCandidates *reportcandidate.Retriever
@@ -66,16 +67,18 @@ type Server struct {
 
 // Stores names the memory dependencies explicitly so adding a capability cannot shift positional wiring.
 type Stores struct {
-	Audit            *pg.AuditStore
-	Exporter         *pg.Exporter
-	Projects         *pg.ProjectStore
-	Observations     *pg.ObservationStore
-	Eraser           *pg.Eraser
-	Recaller         *recall.Recaller
-	Citations        *pg.CitationStore
-	Records          *pg.RecordStore
-	Artifacts        *pg.ArtifactStore
-	Subjects         *pg.SubjectStore
+	Audit        *pg.AuditStore
+	Exporter     *pg.Exporter
+	Projects     *pg.ProjectStore
+	Observations *pg.ObservationStore
+	Eraser       *pg.Eraser
+	Recaller     *recall.Recaller
+	Citations    *pg.CitationStore
+	Records      *pg.RecordStore
+	Artifacts    *pg.ArtifactStore
+	Subjects     *pg.SubjectStore
+	// Contexts serves a subject's history under a budget from the segments the compaction pass wrote (D130).
+	Contexts         *pg.SegmentStore
 	Passages         *passage.Retriever
 	EntityCandidates *entitycandidate.Retriever
 	ReportCandidates *reportcandidate.Retriever
@@ -99,7 +102,7 @@ func NewServer(credentials *credential.Store, stores Stores, schema pg.Schema, l
 	return &Server{
 		credentials: credentials, audit: stores.Audit, exporter: stores.Exporter, projects: stores.Projects,
 		observations: stores.Observations, eraser: stores.Eraser, recaller: stores.Recaller,
-		citations: stores.Citations, records: stores.Records, artifacts: stores.Artifacts, subjects: stores.Subjects,
+		citations: stores.Citations, records: stores.Records, artifacts: stores.Artifacts, subjects: stores.Subjects, contexts: stores.Contexts,
 		passages: stores.Passages, entityCandidates: stores.EntityCandidates, reportCandidates: stores.ReportCandidates,
 		schema: schema, log: log, admission: gate,
 	}
@@ -196,6 +199,8 @@ var operations = []route{
 		func(s *Server) grantedHandler { return s.freshness }, nil, freshnessResponse{}},
 	{Operation{domain.AuditRecall, http.MethodPost, "/recalls", http.StatusOK},
 		func(s *Server) grantedHandler { return s.recallHandler }, recallRequest{}, recallResponse{}},
+	{Operation{domain.AuditContextAssemble, http.MethodPost, "/contexts", http.StatusOK},
+		func(s *Server) grantedHandler { return s.assembleContext }, contextRequest{}, contextResponse{}},
 	{Operation{domain.AuditErase, http.MethodPost, "/erasures", http.StatusOK},
 		func(s *Server) grantedHandler { return s.erase }, eraseRequest{}, eraseResponse{}},
 	{Operation{domain.AuditExport, http.MethodPost, "/exports", http.StatusOK},
@@ -975,14 +980,16 @@ const (
 	codeEntityCandidatesUnavailable errorCode = "entity_candidates_unavailable"
 	codeReportCandidatesUnavailable errorCode = "report_candidates_unavailable"
 	codeInvalidRecallControls       errorCode = "invalid_recall_controls"
-	codeInvalidRecordMutation       errorCode = "invalid_record_mutation"
-	codeRecordConflict              errorCode = "record_conflict"
-	codeRecordMutationLimit         errorCode = "record_mutation_limit"
-	codeInvalidArtifact             errorCode = "invalid_artifact"
-	codeInvalidSubject              errorCode = "invalid_subject"
-	codeSubjectConflict             errorCode = "subject_conflict"
-	codeArtifactConflict            errorCode = "artifact_conflict"
-	codeStorageCapacity             errorCode = "storage_capacity"
+	// codeInvalidContext is a context request the server refuses: no subject, or a budget outside the server's.
+	codeInvalidContext        errorCode = "invalid_context"
+	codeInvalidRecordMutation errorCode = "invalid_record_mutation"
+	codeRecordConflict        errorCode = "record_conflict"
+	codeRecordMutationLimit   errorCode = "record_mutation_limit"
+	codeInvalidArtifact       errorCode = "invalid_artifact"
+	codeInvalidSubject        errorCode = "invalid_subject"
+	codeSubjectConflict       errorCode = "subject_conflict"
+	codeArtifactConflict      errorCode = "artifact_conflict"
+	codeStorageCapacity       errorCode = "storage_capacity"
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
@@ -1005,7 +1012,7 @@ var errorCodes = []errorCode{
 	codeInvalidEntityPage,
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
-	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity, codeInvalidSubject, codeSubjectConflict,
+	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidContext, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity, codeInvalidSubject, codeSubjectConflict,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

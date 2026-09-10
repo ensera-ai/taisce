@@ -34,6 +34,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/ensera-ai/taisce/internal/passage"
 	"github.com/ensera-ai/taisce/internal/recall"
+	"github.com/ensera-ai/taisce/internal/report"
 	"github.com/ensera-ai/taisce/internal/reportcandidate"
 )
 
@@ -212,6 +213,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 			Records:          pg.NewRecordStore(memory, schema),
 			Artifacts:        pg.NewArtifactStore(memory, schema),
 			Subjects:         pg.NewSubjectStore(memory, schema),
+			Contexts:         pg.NewSegmentStore(memory, schema),
 			Passages:         passages,
 			EntityCandidates: entityCandidates,
 			ReportCandidates: reportCandidates,
@@ -376,7 +378,10 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 	driver := formation.NewDriver(
 		formation.NewWorkerWithPolicy(memory, observations, former, policy),
 		observations, pg.NewRetentionStore(memory, schema),
-		pg.NewAuditStore(memory, schema), schema, policy, log, responsive...)
+		pg.NewAuditStore(memory, schema), schema, policy, log, responsive...).
+		WithPasses(
+			formation.NewSubjects(pg.NewCommunityStore(memory, schema), report.New(inference.NewReporter(inferenceConfig))),
+			formation.NewCompaction(pg.NewSegmentStore(memory, schema), inference.NewSummariser(inferenceConfig)))
 
 	go func() {
 		defer close(stopped)

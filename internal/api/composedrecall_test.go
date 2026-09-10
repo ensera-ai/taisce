@@ -38,7 +38,7 @@ func TestComposedRecallAnswersFromThemesAndPassagesAndNeverInventsFacts(t *testi
 		Eraser:    pg.NewEraser(h.pool),
 		Recaller:  recall.NewWithBudget(pg.NewRecallStore(h.pool, h.schema), recall.Budget{Characters: 100000, MaxRows: 50}).WithSemantic(semantic),
 		Citations: pg.NewCitationStore(h.pool, h.schema), Records: pg.NewRecordStore(h.pool, h.schema),
-		Artifacts: pg.NewArtifactStore(h.pool, h.schema), Subjects: pg.NewSubjectStore(h.pool, h.schema),
+		Artifacts: pg.NewArtifactStore(h.pool, h.schema), Subjects: pg.NewSubjectStore(h.pool, h.schema), Contexts: pg.NewSegmentStore(h.pool, h.schema),
 		Passages: passages.retriever, EntityCandidates: entities.retriever, ReportCandidates: reports.retriever,
 	}, h.schema, nil).Handler())
 	t.Cleanup(h.server.Close)

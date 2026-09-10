@@ -32,6 +32,8 @@ import (
 // several replicas a deployment decision rather than a code change, and it is asserted by a test
 // rather than assumed.
 type Driver struct {
+	subjects     *Subjects
+	compaction   *Compaction
 	worker       *Worker
 	observations *pg.ObservationStore
 	retention    *pg.RetentionStore
@@ -73,10 +75,21 @@ func NewDriver(worker *Worker, observations *pg.ObservationStore, retention *pg.
 // It returns what it did rather than only an error, because "the driver is running" and "the driver
 // is making progress" are different questions and only the second one matters.
 type Pass struct {
-	Scopes  int
-	Formed  int
-	Busy    int
-	Errored int
+	Scopes   int
+	Formed   int
+	Busy     int
+	Errored  int
+	Reports  int
+	Segments int
+}
+
+// WithPasses attaches the subject pass, which partitions a scope and writes its reports, and the
+// compaction pass, which rolls up each subject's history. Both run per scope after its backlog is
+// drained, bounded by the policy, so a deployment writes reports and segments without an operator
+// running anything (#177, D130). Either may be nil.
+func (d *Driver) WithPasses(subjects *Subjects, compaction *Compaction) *Driver {
+	d.subjects, d.compaction = subjects, compaction
+	return d
 }
 
 // Once drains every scope with a backlog, and returns having tried each of them.
@@ -102,6 +115,7 @@ func (d *Driver) Once(ctx context.Context) (Pass, error) {
 
 		switch {
 		case err == nil:
+			d.projections(ctx, scope, &pass)
 		case errors.Is(err, ErrScopeBusy):
 			// Another replica has it. Not a failure and not worth a log line at anything above
 			// debug: in a deployment with several replicas this is the normal case.
@@ -114,6 +128,27 @@ func (d *Driver) Once(ctx context.Context) (Pass, error) {
 		}
 	}
 	return pass, nil
+}
+
+// projections runs the passes that derive from formed turns: subjects and their reports, then
+// compaction. A failure in either is logged and counted; it is not the scope's formation failing.
+func (d *Driver) projections(ctx context.Context, scope string, pass *Pass) {
+	if d.subjects != nil && d.policy.ReportsPerPass > 0 {
+		sp, err := d.subjects.Run(ctx, scope, d.policy.ReportsPerPass)
+		pass.Reports += sp.Written
+		if err != nil && ctx.Err() == nil {
+			pass.Errored++
+			d.log.Error("subject pass failed", "scope", scope, "error", err)
+		}
+	}
+	if d.compaction != nil && d.policy.SegmentsPerPass > 0 {
+		cp, err := d.compaction.Run(ctx, scope, d.policy.SegmentsPerPass)
+		pass.Segments += cp.Written
+		if err != nil && ctx.Err() == nil {
+			pass.Errored++
+			d.log.Error("compaction pass failed", "scope", scope, "error", err)
+		}
+	}
 }
 
 // SweepRetention removes what has expired, across every project that has any.
@@ -177,10 +212,11 @@ func (d *Driver) Run(ctx context.Context) error {
 			// notice before memory starts forming again.
 			d.log.Error("formation pass failed", "error", err)
 		}
-		if pass.Formed > 0 || pass.Errored > 0 {
+		if pass.Formed > 0 || pass.Errored > 0 || pass.Reports > 0 || pass.Segments > 0 {
 			d.log.Info("formation pass",
 				"scopes", pass.Scopes, "formed", pass.Formed,
-				"busy", pass.Busy, "errored", pass.Errored)
+				"busy", pass.Busy, "errored", pass.Errored,
+				"reports", pass.Reports, "segments", pass.Segments)
 		}
 
 		// Retention runs on the same tick as formation but on its own schedule: only when the

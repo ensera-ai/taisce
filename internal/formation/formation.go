@@ -187,6 +187,11 @@ type Policy struct {
 	// RetentionInterval is how often expiry is swept. Separate from Interval because expiry is a
 	// daily-scale concern and running it every few seconds would scan an index for nothing.
 	RetentionInterval time.Duration
+	// ReportsPerPass bounds how many community reports one pass writes per scope, and
+	// SegmentsPerPass how many compaction segments: each is a model call, so the bound is what
+	// makes a pass's cost predictable (D130).
+	ReportsPerPass  int
+	SegmentsPerPass int
 	// SealInterval is how often the audit ledger is sealed. It is the exposure window: an entry
 	// written after the last seal is covered by nothing, so this number is the size of the gap
 	// somebody could write into unnoticed.
@@ -209,6 +214,8 @@ func DefaultPolicy() Policy {
 		Interval:          5 * time.Second,
 		RetentionInterval: time.Hour,
 		SealInterval:      5 * time.Minute,
+		ReportsPerPass:    4,
+		SegmentsPerPass:   4,
 	}
 }
 

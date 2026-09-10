@@ -465,7 +465,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 			Citations:    pg.NewCitationStore(pool, schema),
 			Records:      pg.NewRecordStore(pool, schema),
 			Artifacts:    pg.NewArtifactStore(pool, schema),
-			Subjects:     pg.NewSubjectStore(pool, schema),
+			Subjects:     pg.NewSubjectStore(pool, schema), Contexts: pg.NewSegmentStore(pool, schema),
 		}, schema,
 		nil,
 	).Handler())
@@ -832,6 +832,7 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 		domain.AuditRecordAssert:          {map[string]any{"records": []pg.RecordAssertion{{IdempotencyKey: "29ec5631-bae3-4cf8-a165-a8759a8f9931", DataSubjectID: "subject-1", Subject: "Atlas", Predicate: "works_at", Object: "Ensera", Statement: "Atlas works at Ensera"}}}, http.StatusOK},
 		domain.AuditFreshness:             {nil, http.StatusOK},
 		domain.AuditRecall:                {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
+		domain.AuditContextAssemble:       {map[string]any{"data_subject_id": "subject-1"}, http.StatusOK},
 		domain.AuditEmbeddingSearch:       {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
 		domain.AuditEntityEmbeddingSearch: {map[string]any{"question": "What about Ensera?"}, http.StatusOK},
 		domain.AuditReportEmbeddingSearch: {map[string]any{"question": "What is the growth theme?"}, http.StatusOK},
@@ -884,6 +885,7 @@ func TestEveryOperationLeavesAnAttributedLedgerRow(t *testing.T) {
 	run(domain.AuditFreshness)
 	h.form(t)
 	run(domain.AuditRecall)
+	run(domain.AuditContextAssemble)
 	exercise[domain.AuditMessageGet].body["chunk_id"] = sourceChunkForInspection(t, h)
 	run(domain.AuditMessageGet)
 	attachPassages(t, h, nil).activate(t, "p1", "v1")

@@ -51,6 +51,7 @@ Record correction accepts the same atomic `records` batch and support limits, ad
 | `observe` | POST | `/v1/observations` | 201 |
 | `freshness` | GET | `/v1/freshness` | 200 |
 | `recall` | POST | `/v1/recalls` | 200 |
+| `context.assemble` | POST | `/v1/contexts` | 200 |
 | `erase` | POST | `/v1/erasures` | 200 |
 | `export` | POST | `/v1/exports` | 200 |
 | `citation.resolve` | POST | `/v1/citations/resolve` | 200 |
@@ -477,6 +478,28 @@ POST `/v1/recalls` → 200
 | `reach` | {terms: integer, anchored: integer, named_nothing_known: boolean, facts_per_anchor: object of integer} |
 
 
+## `context.assemble`
+
+POST `/v1/contexts` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `data_subject_id` | string |
+| `max_characters` | integer, optional |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `segments` | array of {segment_id: string, level: integer, from_offset: integer, to_offset: integer, covered: integer, summary: string} |
+| `turns` | array of {log_offset: integer, occurred_at: timestamp (RFC 3339), messages: array of {role: string, content: string}} |
+| `watermark` | {scope: string, stored: integer, optional, formed: integer, optional, parked: integer} |
+| `characters` | integer |
+| `truncated` | boolean |
+
+
 ## `erase`
 
 POST `/v1/erasures` → 200
@@ -685,6 +708,7 @@ Any operation may answer with any of these.
 | `forbidden` |
 | `invalid_record_page` |
 | `invalid_recall_controls` |
+| `invalid_context` |
 | `invalid_record_mutation` |
 | `record_conflict` |
 | `record_mutation_limit` |

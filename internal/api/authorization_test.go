@@ -65,6 +65,7 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 		domain.AuditObserve:               {"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "private unauthorized mutation"}}},
 		domain.AuditErase:                 {"data_subject_id": "subject-1", "reason": "private unauthorized mutation"},
 		domain.AuditRecall:                {"question": "Where does the user live?", "data_subject_id": "subject-1"},
+		domain.AuditContextAssemble:       {"data_subject_id": "subject-1"},
 		domain.AuditExport:                {"data_subject_id": "subject-1"}, domain.AuditCitationResolve: {"id": id}, domain.AuditFreshness: nil,
 		domain.AuditRecordList: {}, domain.AuditRecordHistory: {"id": id},
 		domain.AuditRecordCorrect: {"records": []pg.RecordCorrection{{RecordMutation: pg.RecordMutation{ID: id, ExpectedVersion: id}, Object: "private unauthorized mutation", Statement: "private unauthorized mutation"}}},

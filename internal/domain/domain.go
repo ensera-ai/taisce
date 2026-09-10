@@ -986,6 +986,7 @@ const (
 	AuditRecordList            = "record.list"
 	AuditEntityList            = "entity.list"
 	AuditEntityGet             = "entity.get"
+	AuditContextAssemble       = "context.assemble"
 	AuditRecordHistory         = "record.history"
 	AuditRecordRetract         = "record.retract"
 	AuditRecordCorrect         = "record.correct"
@@ -1017,7 +1018,7 @@ func RecordableOperation(name string) bool {
 	switch name {
 	case AuditEmbeddingStart, AuditEmbeddingBuild, AuditEmbeddingActivate, AuditEmbeddingCancel, AuditEmbeddingPrune, AuditEmbeddingRepair, AuditEmbeddingSearch, AuditEntityEmbeddingSearch, AuditReportEmbeddingSearch:
 		return true
-	case AuditEntityList, AuditEntityGet, AuditMessageGet:
+	case AuditEntityList, AuditEntityGet, AuditMessageGet, AuditContextAssemble:
 		return true
 	case AuditRebuildStart, AuditRebuildCancel:
 		return true

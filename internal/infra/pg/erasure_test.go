@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ensera-ai/taisce/internal/compaction"
 	"github.com/ensera-ai/taisce/internal/domain"
 	"github.com/ensera-ai/taisce/internal/extract"
 	"github.com/ensera-ai/taisce/internal/formation"
@@ -130,6 +131,18 @@ func TestEverythingDerivedFromASubjectIsErasedWithAResidualOfZero(t *testing.T) 
 	}
 
 	if _, err := pg.NewArtifactStore(pool, schema).Put(ctx, "p1", uuid.NewString(), pg.ArtifactPut{ID: uuid.NewString(), DataSubjectID: "subject-1", Kind: "state", Content: []byte("opaque session state")}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A segment is the projection that holds the subject's words as prose; one over every turn they
+	// have said so far is registered to each of them.
+	segments := pg.NewSegmentStore(pool, schema)
+	subjectTurns, err := segments.Formed(ctx, "p1", "subject-1")
+	if err != nil || len(subjectTurns) == 0 {
+		t.Fatalf("the subject's formed turns are the material a segment covers, got %d %v", len(subjectTurns), err)
+	}
+	if _, err := segments.Write(ctx, "p1", "subject-1", compaction.Plan{Level: 1, From: subjectTurns[0].Offset, To: subjectTurns[len(subjectTurns)-1].Offset, Turns: len(subjectTurns)},
+		compaction.Summary{Text: "Marta works at Ensera, cycles to work and has lived in Dublin and Oslo."}); err != nil {
 		t.Fatal(err)
 	}
 

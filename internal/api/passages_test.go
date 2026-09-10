@@ -79,7 +79,7 @@ func attachPassages(t *testing.T, h *harness, after func()) *passageFixture {
 	fixture.retriever = retriever
 	h.server.Close()
 	h.server = httptest.NewServer(api.NewServer(credential.NewStore(h.pool, string(migrate.ControlSchema)), api.Stores{
-		Audit: pg.NewAuditStore(h.pool, h.schema), Exporter: pg.NewExporter(h.pool, h.schema), Projects: pg.NewProjectStore(h.pool, h.schema), Observations: pg.NewObservationStore(h.pool), Eraser: pg.NewEraser(h.pool), Recaller: recall.NewWithBudget(pg.NewRecallStore(h.pool, h.schema), recall.Budget{Characters: 100000, MaxRows: 50}), Citations: pg.NewCitationStore(h.pool, h.schema), Records: pg.NewRecordStore(h.pool, h.schema), Artifacts: pg.NewArtifactStore(h.pool, h.schema), Subjects: pg.NewSubjectStore(h.pool, h.schema), Passages: retriever,
+		Audit: pg.NewAuditStore(h.pool, h.schema), Exporter: pg.NewExporter(h.pool, h.schema), Projects: pg.NewProjectStore(h.pool, h.schema), Observations: pg.NewObservationStore(h.pool), Eraser: pg.NewEraser(h.pool), Recaller: recall.NewWithBudget(pg.NewRecallStore(h.pool, h.schema), recall.Budget{Characters: 100000, MaxRows: 50}), Citations: pg.NewCitationStore(h.pool, h.schema), Records: pg.NewRecordStore(h.pool, h.schema), Artifacts: pg.NewArtifactStore(h.pool, h.schema), Subjects: pg.NewSubjectStore(h.pool, h.schema), Contexts: pg.NewSegmentStore(h.pool, h.schema), Passages: retriever,
 	}, h.schema, nil).Handler())
 	t.Cleanup(h.server.Close)
 	return fixture

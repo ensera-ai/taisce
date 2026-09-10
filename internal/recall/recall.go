@@ -412,6 +412,9 @@ func (r *Recaller) composeRest(ctx context.Context, scopes []string, question st
 //
 // Punctuation is dropped at token boundaries and nowhere else, so `work?` reaches `work` while
 // `o'brien` and `co-op` survive as written.
+// Budget is what the recaller was built with, for the operations that share it.
+func (r *Recaller) Budget() Budget { return r.budget }
+
 func Terms(question string) []string {
 	words := strings.FieldsFunc(question, func(r rune) bool {
 		return unicode.IsSpace(r) || (unicode.IsPunct(r) && r != '\'' && r != '-')
