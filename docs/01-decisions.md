@@ -2323,7 +2323,7 @@ results. The previous OR expression scanned the entity table in that fixture. A 
 array-overlap lookup also selected a full scan for the large question; it was not selected. A
 normalized, project-keyed alias relation remains under evaluation in #102 because its write and
 erasure ownership contract needs measurement and design. Local plan diagnostics are documented in
-[05-anchor-query-plans.md](05-anchor-query-plans.md); no local latency result is a production claim.
+[28-anchor-query-plans.md](28-anchor-query-plans.md); no local latency result is a production claim.
 
 Rejecting overflow was chosen over silent anchor truncation, which could discard the selected
 speaker or a legitimate ambiguity and make the surviving facts appear complete. Adding a model
