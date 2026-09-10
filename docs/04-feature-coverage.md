@@ -23,7 +23,7 @@ in private `althunibat/taisce`; public Apache-2.0 `x.y.0` snapshots remain a sep
 
 ## Delivery progress — 2026-09-10
 
-Private implementation branch: `codex/backlog-hardening`. The assessment and capability table below
+The work below landed on the private `main` at `c681c04` (#106, 2026-09-10). The assessment and capability table below
 record the original review; this section records subsequent delivery. A server-side implementation
 does not complete an issue whose adapter, recovery or operational acceptance remains unproved.
 
