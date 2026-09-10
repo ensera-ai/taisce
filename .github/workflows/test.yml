@@ -9,9 +9,11 @@
 # which is a command somebody types on purpose (`make test-inference`).
 name: test
 
+# Push runs cover main; every other branch is covered by its pull request, so one commit is tested
+# once rather than twice.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 concurrency:
