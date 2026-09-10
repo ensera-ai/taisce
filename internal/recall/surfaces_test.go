@@ -159,3 +159,63 @@ func TestSurfaceControlsAreRefusedWhenNotInTheSet(t *testing.T) {
 		}
 	}
 }
+
+// A meaning match proposes at most a fixed number of places to start, however many scopes are
+// asked: the first scope that fills the cap ends the search, so a caller with many projects does
+// not pay one embedding query per project for anchors it will not walk.
+func TestSemanticAnchorsAreCappedAndStopAtTheCap(t *testing.T) {
+	var proposed []domain.Anchor
+	for i := 0; i < recall.MaxSemanticAnchors; i++ {
+		proposed = append(proposed, domain.Anchor{Entity: domain.Entity{ID: "e" + string(rune('1'+i)), CanonicalName: "an office"}, Matched: "semantic:0.80"})
+	}
+	sem := &scriptedSemantic{anchors: proposed}
+	r := recall.NewWithBudget(emptyAnchorStore{}, recall.Budget{Characters: 400, MaxRows: 50}).WithSemantic(sem)
+	bundle, _, err := r.RecallWithControls(context.Background(), []string{"p1", "p2"}, "where is the office", domain.AsOf{}, "", recall.Controls{Surfaces: []string{recall.SurfaceFacts}})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(bundle.Anchors) != recall.MaxSemanticAnchors {
+		t.Fatalf("expected the cap, got %d anchors", len(bundle.Anchors))
+	}
+	if n := slices.Index(sem.calls, "anchors"); n < 0 || slices.Contains(sem.calls[n+1:], "anchors") {
+		t.Fatalf("the second scope must not be asked once the cap is full, calls were %v", sem.calls)
+	}
+}
+
+// A report that does not fit what the budget has left is cut whole and the cut is reported: half a
+// report is not a smaller report, it is a different one.
+func TestAReportLargerThanTheRemainingBudgetIsCutWholeAndReported(t *testing.T) {
+	long := make([]byte, 500)
+	for i := range long {
+		long[i] = 'x'
+	}
+	sem := &scriptedSemantic{reports: []domain.ReportHit{{CommunityID: "c1", Title: "t", Summary: string(long)}}}
+	bundle, _ := composed(t, emptyAnchorStore{}, sem, recall.Controls{Surfaces: []string{recall.SurfaceReports}})
+	if len(bundle.Reports) != 0 || !bundle.Truncated {
+		t.Fatalf("expected no report and the cut reported, got %+v", bundle)
+	}
+}
+
+// The passage surface refusing is named as degraded like any other, and the reports still answer.
+func TestARefusingPassageSurfaceIsDegradedAndReportsStillAnswer(t *testing.T) {
+	sem := &scriptedSemantic{fail: map[string]bool{"passages": true},
+		reports: []domain.ReportHit{{CommunityID: "c1", Title: "t", Summary: "a theme"}}}
+	bundle, _ := composed(t, emptyAnchorStore{}, sem, recall.Controls{})
+	if !slices.Contains(bundle.Degraded, domain.DegradedPassages) || len(bundle.Reports) != 1 {
+		t.Fatalf("expected passages degraded and the report answering, got degraded=%v reports=%d", bundle.Degraded, len(bundle.Reports))
+	}
+}
+
+// Nothing to search is an empty answer, not an error, and a repeated word is one term: a term is
+// a thing to look up, and looking the same thing up twice is the same lookup.
+func TestNoScopesAnswerNothingAndARepeatedWordIsOneTerm(t *testing.T) {
+	r := recall.NewWithBudget(emptyAnchorStore{}, recall.Budget{Characters: 400, MaxRows: 50})
+	bundle, err := r.RecallForSubjectAsOf(context.Background(), nil, "where is the office", nil, domain.AsOf{}, 1, "")
+	if err != nil || len(bundle.Anchors) != 0 || len(bundle.Facts) != 0 {
+		t.Fatalf("no scopes must answer nothing without error, got %+v %v", bundle, err)
+	}
+	terms := recall.Terms("Dublin Dublin")
+	if len(terms) != 2 || terms[0] != "dublin" || terms[1] != "dublin dublin" {
+		t.Fatalf("expected the word once and the pair once, got %v", terms)
+	}
+}

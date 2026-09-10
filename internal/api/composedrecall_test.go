@@ -161,6 +161,7 @@ func TestSemanticSurfacesRefuseWhatIsNotConfiguredAndFilterRolesInMemory(t *test
 		t.Fatal("nothing configured must compose to nothing")
 	}
 	h := newHarness(t, "composed_partial")
+	entities := attachEntityCandidates(t, h)
 	passages := attachPassages(t, h, nil)
 	only := api.NewSemanticSurfaces(nil, nil, passages.retriever, nil)
 	if _, err := only.EntityAnchors(t.Context(), "p1", "anything", 4); err == nil {
@@ -168,6 +169,19 @@ func TestSemanticSurfacesRefuseWhatIsNotConfiguredAndFilterRolesInMemory(t *test
 	}
 	if _, err := only.Reports(t.Context(), "p1", "anything", 3, 5); err == nil {
 		t.Fatal("an unconfigured surface must refuse")
+	}
+	if _, err := api.NewSemanticSurfaces(entities.retriever, nil, nil, nil).Passages(t.Context(), "p1", "anything", 8, []string{"user"}); err == nil {
+		t.Fatal("an unconfigured surface must refuse")
+	}
+	// A question with no term in it is answered empty rather than refused: there is nothing to
+	// look up and nothing to say about it, and the bundle still renders every field a reader parses.
+	var empty struct {
+		Anchors []map[string]any `json:"anchors"`
+		Reach   map[string]any   `json:"reach"`
+	}
+	h.do(t, http.MethodPost, "/v1/recalls", map[string]any{"data_subject_id": "subject-1", "question": "?!"}, 200, &empty)
+	if len(empty.Anchors) != 0 || empty.Reach == nil {
+		t.Fatalf("a termless question answers empty with its reach, got %+v", empty)
 	}
 	h.do(t, http.MethodPost, "/v1/observations", map[string]any{"data_subject_id": "subject-1", "messages": []map[string]any{
 		{"role": "user", "content": "PostgreSQL is the substrate."},
