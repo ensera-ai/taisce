@@ -8,4 +8,6 @@ coverage.out
 docs/
 # Disposable GPU qualification secrets and generated evidence never enter an image layer.
 qualification-tls/
+qualification-topology.yaml
+qualification-generation-nginx.conf
 results/

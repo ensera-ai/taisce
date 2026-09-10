@@ -2,12 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Exercise deployed API + asynchronous worker with synthetic, erasable evidence."""
 import json
+import os
 import re
+import shlex
 import subprocess
 import time
 import urllib.request
 
-compose = ['docker', 'compose', '-p', 'taisce-qualification', '-f', 'compose.yaml', '-f', 'compose.gpu.yaml']
+# The runner names the compose files, because a generated topology file may be among them.
+compose = shlex.split(os.environ.get('TAISCE_COMPOSE',
+    'docker compose -p taisce-qualification -f compose.yaml -f compose.gpu.yaml'))
 logs = subprocess.check_output(compose + ['logs', '--no-color', 'bootstrap'], text=True)
 match = re.search(r'tsk_[A-Za-z0-9_-]+', logs)
 if match is None:

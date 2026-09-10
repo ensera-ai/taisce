@@ -24,8 +24,16 @@ finish() {
 trap finish EXIT
 echo 'Checking node hardware'
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv > results/gpus.csv
-test "$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)" -eq 8
-test "$(nvidia-smi --query-gpu=name --format=csv,noheader | grep -c A100)" -eq 8
+# The topology is sized by the cards the node exposes rather than asserted at eight: a provider does
+# not always deliver eight, and a smaller VM of the same class is the same environment. Eight cards
+# reproduce the reference in compose.gpu.yaml; fewer narrow it. Coverage mode runs several workers per
+# replica because formation drains one project per worker while a replica batches many sequences.
+gpus="$(nvidia-smi --query-gpu=name --format=csv,noheader | grep -c A100)"
+test "$gpus" -ge 2
+if [[ "${TAISCE_GPU_MODE:-qualification}" == coverage ]]; then per_replica="${TAISCE_GPU_WORKERS_PER_REPLICA:-4}"; else per_replica="${TAISCE_GPU_WORKERS_PER_REPLICA:-1}"; fi
+eval "$(python3 deploy/gpu/topology.py "$gpus" "$per_replica")"
+printf 'gpus=%s replicas=%s workers=%s embedding_gpu=%s services=%s\n' "$TOPOLOGY_GPUS" "$TOPOLOGY_REPLICAS" "$TOPOLOGY_WORKERS" "$TOPOLOGY_EMBEDDING_GPU" "$TOPOLOGY_SERVICES" | tee results/topology.txt
+read -r -a generation_services <<< "$TOPOLOGY_SERVICES"
 df -h . > results/disk.txt
 free -h > results/ram.txt
 docker info --format '{{.ServerVersion}} {{.Driver}}' > results/docker.txt
@@ -51,16 +59,17 @@ values = {
 p.write_text(''.join(k+'='+v+'\n' for k,v in values.items()))
 p.chmod(0o600)
 PY
-dc=(docker compose -p taisce-qualification -f compose.yaml -f compose.gpu.yaml)
+dc=(docker compose -p taisce-qualification -f compose.yaml -f compose.gpu.yaml -f qualification-topology.yaml)
+export TAISCE_COMPOSE="docker compose -p taisce-qualification -f compose.yaml -f compose.gpu.yaml -f qualification-topology.yaml"
 "${dc[@]}" config --quiet
 echo 'Pulling pinned vLLM and Go images'
 timeout 1800 "${dc[@]}" --profile qualification pull \
-    generation generation-{0..6} embedding test > results/pull.log 2>&1
+    generation "${generation_services[@]}" embedding test > results/pull.log 2>&1
 echo 'Starting vLLM model services and PostgreSQL'
 timeout 3600 "${dc[@]}" up -d --build --wait --wait-timeout 3000 \
-    generation generation-{0..6} embedding postgres test-postgres > results/model-start.log 2>&1
+    generation "${generation_services[@]}" embedding postgres test-postgres > results/model-start.log 2>&1
 echo 'Starting application components'
-timeout 1800 "${dc[@]}" up -d --build --scale worker=7 --wait --wait-timeout 300 \
+timeout 1800 "${dc[@]}" up -d --build --scale worker="$TOPOLOGY_WORKERS" --wait --wait-timeout 300 \
     api worker > results/application-start.log 2>&1
 "${dc[@]}" ps --format json > results/services.json
 docker image inspect vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8 \
@@ -92,8 +101,7 @@ python3 deploy/gpu/smoke.py > results/deployed-smoke.log 2>&1
 if [[ "${TAISCE_GPU_MODE:-qualification}" == coverage ]]; then
     echo 'Measuring vocabulary coverage over /root/corpus'
     set +e
-    TAISCE_COMPOSE="docker compose -p taisce-qualification -f compose.yaml -f compose.gpu.yaml" \
-        CORPUS=/root/corpus CORPUS_SHARDS=7 RESULTS=results \
+    CORPUS=/root/corpus CORPUS_SHARDS="$TOPOLOGY_WORKERS" RESULTS=results \
         python3 deploy/gpu/vocabulary-coverage.py > results/vocabulary-coverage.log 2>&1
     result=$?
     set -e
@@ -110,7 +118,7 @@ set +e
 timeout 7200 "${dc[@]}" --profile qualification run --rm -T test > results/test-runner.log 2>&1
 result=$?
 set -e
-for service in generation generation-{0..6}; do
+for service in generation "${generation_services[@]}"; do
     "${dc[@]}" logs --no-color "$service" > "results/$service.log" 2>&1 || true
 done
 "${dc[@]}" logs --no-color embedding > results/embedding.log 2>&1 || true

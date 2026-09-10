@@ -85,13 +85,23 @@ The default run is functional qualification. Throughput, latency, corpus size an
 require separately specified workloads and acceptance limits; a passing GPU run does not establish
 those claims.
 
+## Sizing by the cards present
+
+`compose.gpu.yaml` is the eight-card reference. The runner counts the A100s the node exposes and has
+`deploy/gpu/topology.py` write `qualification-topology.yaml` and `qualification-generation-nginx.conf`
+beside it: the load balancer depends on and routes to the first N−1 replicas, the embedding model
+moves to card N−1, and only those services are started. Eight cards reproduce the reference exactly;
+fewer narrow it; fewer than two is refused. Both generated files are ignored like the TLS material.
+Formation drains one project per worker while a replica batches several sequences, so coverage mode
+runs `TAISCE_GPU_WORKERS_PER_REPLICA` (default 4) workers per replica and deals the corpus over that
+many projects; qualification mode keeps one per replica, which is the arrangement D116 measured.
+
 ## Vocabulary coverage over a document corpus
 
 `TAISCE_GPU_MODE=coverage bash deploy/gpu/run.sh` deploys the same stack, runs the smoke journey,
 then measures the relation vocabulary against a corpus the operator placed at `/root/corpus`
 (issue #43) and returns without the regression gates. `deploy/gpu/vocabulary-coverage.py` deals the
-documents across seven projects, one per generation replica, because formation holds one advisory
-lock per project; observes each document once under the `tool` role with a deterministic retry key;
+documents across one project per worker, because formation holds one advisory lock per project; observes each document once under the `tool` role with a deterministic retry key;
 waits for every project's watermark; and reads admitted facts against every refusal reason from the
 database, with unmapped refusals broken down by the relation the model tried to use. It writes
 `results/vocabulary-coverage.json` and `.md`. AP-format JSON (`headline`, `body_nitf`,
