@@ -313,16 +313,36 @@ func (c *apiClient) get(ctx context.Context, path string) (int, []byte, error) {
 	return c.do(req)
 }
 
+// do sends one of the runner's own requests. A 429 here is the deployment's admission gate
+// refusing the runner's bookkeeping, not the adapter under test, and the contract tells every
+// client what to do with it: retry with backoff. Bounded, so a deployment that refuses everything
+// still ends the run with the refusal in hand rather than a hang.
 func (c *apiClient) do(req *http.Request) (int, []byte, error) {
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return 0, nil, err
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 && req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return 0, nil, err
+			}
+			req.Body = body
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		_ = resp.Body.Close()
+		if err != nil {
+			return 0, nil, err
+		}
+		if resp.StatusCode != http.StatusTooManyRequests || attempt >= 6 {
+			return resp.StatusCode, raw, nil
+		}
+		select {
+		case <-req.Context().Done():
+			return resp.StatusCode, raw, req.Context().Err()
+		case <-time.After(time.Duration(250<<attempt) * time.Millisecond):
+		}
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return 0, nil, err
-	}
-	return resp.StatusCode, raw, nil
 }

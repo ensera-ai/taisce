@@ -6,10 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -129,5 +132,47 @@ func TestARunAgainstNothingStopsBeforeAnyTurn(t *testing.T) {
 		Suite{MemoryMessagePrefix: MemoryMessagePrefix, Cases: []Case{{Name: "seedless", Turn: Turn{User: "hi"}}}})
 	if err == nil || !strings.Contains(err.Error(), "could not run") {
 		t.Fatalf("expected the run to stop by reason, got %v", err)
+	}
+}
+
+// The runner's own reads are retried when the deployment's admission gate refuses them: a 429 on
+// the freshness read or the seed is the deployment being busy, not the adapter breaking a rule.
+// Bounded, and a context that ends first ends the retrying with the refusal in hand.
+func TestTheRunnersOwnReadsRetryAnAdmissionRefusalAndStopWhenTheContextEnds(t *testing.T) {
+	var freshness, seeds int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/freshness":
+			freshness++
+			if freshness <= 2 {
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			_, _ = w.Write([]byte(`{"stored":4}`))
+		case "/v1/records/assert":
+			seeds++
+			body, _ := io.ReadAll(r.Body)
+			if seeds == 1 || !strings.Contains(string(body), "works_at") {
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(http.StatusTooManyRequests)
+		}
+	}))
+	defer server.Close()
+	client := &apiClient{base: server.URL, token: "tsk_x", http: server.Client()}
+	stored, err := client.stored(context.Background())
+	if err != nil || stored != 5 || freshness != 3 {
+		t.Fatalf("expected the third read to answer 5, got %d %v after %d reads", stored, err, freshness)
+	}
+	if err := client.seed(context.Background(), "s", []Seed{{Subject: "Marta", Predicate: "works_at", Object: "Ensera", Statement: "x"}}); err != nil || seeds != 2 {
+		t.Fatalf("the seed must be retried with its body, got %v after %d attempts", err, seeds)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	if _, _, err := client.get(ctx, "/v1/recalls"); err == nil {
+		t.Fatal("a refusal that outlasts the context ends with the context's error")
 	}
 }
