@@ -177,7 +177,28 @@ services:
       TAISCE_INFERENCE_ALLOWLIST: generation:8000,embedding:8000
       GOMAXPROCS: "16"
     command: [bash, deploy/gpu/tests.sh]
+  # The head-to-head (#24): the .NET adapter repository's demo, on the same network as the models
+  # and the API, under its own profile so the qualification gates do not start it.
+  headtohead:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    profiles: [headtohead]
+    working_dir: /src
+    volumes:
+      - /root/taisce-dotnet:/src
+      - gpu-dotnet-cache:/root/.nuget
+      - ./qualification-tls/ca.crt:/tls/ca.crt:ro
+    environment:
+      SSL_CERT_FILE: /tls/ca.crt
+      TAISCE_API: http://api:8080
+      TAISCE_TOKEN: ${TAISCE_HEADTOHEAD_TOKEN:-}
+      OPENAI_ENDPOINT: https://generation:8000/v1
+      OPENAI_EMBEDDING_ENDPOINT: https://embedding:8000/v1
+      OPENAI_CHAT_MODEL: Qwen/Qwen3.8-27B
+      OPENAI_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-4B
+      OPENAI_EMBEDDING_DIMENSIONS: "2560"
+    command: [dotnet, run, --project, Taisce.HeadToHead]
 volumes:
+  gpu-dotnet-cache:
   gpu-models:
   gpu-go-cache:
   gpu-test-postgres:
