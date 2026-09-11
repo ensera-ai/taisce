@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 430 100" role="img" aria-labelledby="title desc">
+  <title id="title">Ensera logo — concept 2a</title>
+  <desc id="desc">Gradient E mark with a human-gate dot, followed by the NSERA wordmark.</desc>
+  <defs>
+    <linearGradient id="ensera-gradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5fb8ff"/>
+      <stop offset="0.5" stop-color="#7fe0c8"/>
+      <stop offset="1" stop-color="#d6f26b"/>
+    </linearGradient>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&amp;display=swap");
+    </style>
+  </defs>
+  <path fill="url(#ensera-gradient)" d="M21 22h54a7 7 0 0 1 0 14h-47v7h26a7 7 0 0 1 0 14h-26v7h47a7 7 0 0 1 0 14h-54a7 7 0 0 1-7-7v-42a7 7 0 0 1 7-7z"/>
+  <path fill="#ffffff" d="M68 50a7 7 0 1 0 14 0a7 7 0 1 0-14 0z"/>
+  <text x="89" y="72" fill="#ffffff" font-family="Space Grotesk, Arial, sans-serif" font-size="62" font-weight="700" letter-spacing="-2.8">NSERA</text>
+</svg>
