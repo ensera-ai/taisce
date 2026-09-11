@@ -45,6 +45,9 @@ func TestTheManageRoleServesTheManagementSurfaceAndNothingElse(t *testing.T) {
 	ctx := context.Background()
 	env := runtimeConfiguration(t)
 	env[envRole] = roleManage
+	// The manage role holds the administrative connection; the serving identities cannot read
+	// the registry, which is the point.
+	env[envAdminDSN] = os.Getenv("TAISCE_TEST_DSN")
 	env[envManageAddr] = fmt.Sprintf("127.0.0.1:%d", freePort(t))
 	withEnv(t, env)
 	runCtx, cancel := context.WithCancel(ctx)
@@ -65,7 +68,7 @@ func TestTheManageRoleServesTheManagementSurfaceAndNothingElse(t *testing.T) {
 	if !reachable(base+"/health", 5*time.Second) {
 		t.Fatal("the management surface did not start")
 	}
-	pool, err := pgxpool.New(ctx, env[envMemoryDSN])
+	pool, err := pgxpool.New(ctx, os.Getenv("TAISCE_TEST_DSN"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,10 +186,20 @@ func TestTheOperatorCommandsSpeakTheManagementSurfaceWhenConfigured(t *testing.T
 	if _, err := captureStdout(t, func() error { return dispatch(ctx, quiet(), []string{"project", "create", "not a name!"}) }); err == nil || !strings.Contains(err.Error(), "invalid_project") {
 		t.Fatalf("a refusal must carry the surface's code, got %v", err)
 	}
-	for _, bad := range [][]string{{"project"}, {"project", "explode"}, {"credential"}, {"credential", "issue"}, {"credential", "revoke"}, {"audit"}, {"audit", "burn"}} {
+	for _, bad := range [][]string{{"project"}, {"project", "create"}, {"project", "explode"}, {"credential"}, {"credential", "issue"}, {"credential", "issue", "app", "stray"},
+		{"credential", "issue", "app", "--nope"}, {"credential", "list", "--nope"}, {"credential", "explode"}, {"credential", "revoke"}, {"audit"}, {"audit", "burn"}} {
 		if _, err := captureStdout(t, func() error { return dispatch(ctx, quiet(), bad) }); err == nil {
 			t.Fatalf("%v must be refused", bad)
 		}
+	}
+}
+
+// A management surface that cannot be reached is an error a person can read, not a hang.
+func TestAnUnreachableManagementSurfaceIsAnError(t *testing.T) {
+	t.Setenv(envManageAPI, "http://127.0.0.1:1")
+	t.Setenv(envOperatorToken, "tsk_x")
+	if err := dispatch(context.Background(), quiet(), []string{"project", "list"}); err == nil || !strings.Contains(err.Error(), "unreachable") {
+		t.Fatalf("expected an unreachable error, got %v", err)
 	}
 }
 

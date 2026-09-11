@@ -22,6 +22,7 @@ import (
 
 	"github.com/ensera-ai/taisce/internal/credential"
 	"github.com/ensera-ai/taisce/internal/migrate"
+	"github.com/google/uuid"
 )
 
 // The two plane roles are database-global, and every package's tests share one database. Establishing
@@ -228,7 +229,8 @@ func TestACredentialOpensOneDoorByItsKindAndTheRegistryHoldsTheKind(t *testing.T
 	if err != nil || operator.Project != "" || operator.CredentialID == "" {
 		t.Fatalf("an operator credential names no project, got %+v %v", operator, err)
 	}
-	projectToken, _, err := s.Issue(ctx, "app", "p-kinds")
+	project := "kinds_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	projectToken, _, err := s.Issue(ctx, "app", project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,13 +248,13 @@ func TestACredentialOpensOneDoorByItsKindAndTheRegistryHoldsTheKind(t *testing.T
 	}
 	// The kind is the registry's: a row that claims to be both, or neither, is refused by the
 	// database, so no code path can mint one.
-	for _, row := range []struct{ kind, project string }{{"operator", "p-kinds"}, {"project", ""}, {"admin", "p-kinds"}} {
+	for _, row := range []struct{ kind, project string }{{"operator", project}, {"project", ""}, {"admin", project}} {
 		if _, err := pool.Exec(ctx, `INSERT INTO `+string(migrate.ControlSchema)+`.credential (credential_id, token_digest, token_prefix, name, project, access, kind)
 			VALUES (gen_random_uuid(), gen_random_bytes(32), 'tsk_xxxxxxxx', 'bad', $1, 'read_write', $2)`, row.project, row.kind); err == nil {
 			t.Fatalf("the registry accepted kind %q with project %q", row.kind, row.project)
 		}
 	}
-	listed, err := s.List(ctx, "p-kinds", 10)
+	listed, err := s.List(ctx, project, 10)
 	if err != nil || len(listed) != 1 || listed[0].Kind != credential.KindProject || listed[0].TokenPrefix == "" {
 		t.Fatalf("listing a project's credentials describes them without the token, got %+v %v", listed, err)
 	}

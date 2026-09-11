@@ -108,10 +108,17 @@ func ManagementOperations() []Operation {
 }
 
 // Handler mounts every management operation under the prefix, each behind the operator door, and
-// the health endpoints, which say nothing.
-func (m *ManagementServer) Handler() http.Handler {
+// the health endpoints, which say nothing; readiness, when given, is the database answering.
+func (m *ManagementServer) Handler(readiness ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	registerHealth(mux, nil)
+	var ready http.Handler
+	if len(readiness) > 1 {
+		panic("one readiness handler is permitted")
+	}
+	if len(readiness) == 1 {
+		ready = readiness[0]
+	}
+	registerHealth(mux, ready)
 	for _, o := range managementOperations {
 		mux.Handle(o.Method+" "+ManagementPrefix+o.Path, m.operated(o.handler(m)))
 	}

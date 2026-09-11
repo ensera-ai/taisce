@@ -82,12 +82,14 @@ func TestDefaultInstanceBootstrapRestartAndProjectCreationUseOneMemoryNamespace(
 	if err := dispatch(ctx, quiet(), []string{"project", "create", "second"}); err != nil {
 		t.Fatal(err)
 	}
-	var after, projects, credentials int
-	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM pg_namespace),(SELECT count(*) FROM memory.project),(SELECT count(*) FROM control.credential)`).Scan(&after, &projects, &credentials); err != nil {
+	var after, projects, credentials, operators int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM pg_namespace),(SELECT count(*) FROM memory.project),
+		(SELECT count(*) FROM control.credential WHERE kind='project'),(SELECT count(*) FROM control.credential WHERE kind='operator')`).Scan(&after, &projects, &credentials, &operators); err != nil {
 		t.Fatal(err)
 	}
-	if before != after || projects != 2 || credentials != 1 {
-		t.Fatalf("restart or project creation changed namespaces/credentials: %d -> %d, projects=%d credentials=%d", before, after, projects, credentials)
+	// Two bootstraps mint one project credential and one operator credential (D133), not two of either.
+	if before != after || projects != 2 || credentials != 1 || operators != 1 {
+		t.Fatalf("restart or project creation changed namespaces/credentials: %d -> %d, projects=%d credentials=%d operators=%d", before, after, projects, credentials, operators)
 	}
 	var registry bool
 	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema='control' AND table_name LIKE '%tenant%')`).Scan(&registry); err != nil || registry {

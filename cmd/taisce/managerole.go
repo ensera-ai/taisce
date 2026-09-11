@@ -45,7 +45,8 @@ func runManage(ctx context.Context, log *slog.Logger) error {
 	if addr == "" {
 		addr = "127.0.0.1:8081"
 	}
-	httpServer := &http.Server{Addr: addr, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second,
+	ready := api.NewReadiness(func(checkCtx context.Context) error { return admin.Ping(checkCtx) })
+	httpServer := &http.Server{Addr: addr, Handler: server.Handler(ready), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 2 * time.Minute, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {

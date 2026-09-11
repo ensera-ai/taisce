@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/domain"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
+	"github.com/google/uuid"
 )
 
 // managed is a memory harness with the management surface served beside it, the way the manage
@@ -37,8 +39,10 @@ func newManaged(t *testing.T, tenant string) *managed {
 		t.Fatal(err)
 	}
 	server := api.NewManagementServer(credentials, api.ManagementStores{
-		Projects:     pg.NewProjectStore(h.pool, h.schema),
-		Provision:    func(ctx context.Context, scope string) error { return migrate.ProvisionScope(ctx, h.pool, h.schema.String(), scope) },
+		Projects: pg.NewProjectStore(h.pool, h.schema),
+		Provision: func(ctx context.Context, scope string) error {
+			return migrate.ProvisionScope(ctx, h.pool, h.schema.String(), scope)
+		},
 		Observations: pg.NewObservationStore(h.pool),
 		Audit:        pg.NewAuditStore(h.pool, h.schema),
 		Refusals:     pg.NewRefusalStore(h.pool, h.schema),
@@ -105,9 +109,12 @@ func TestTheManagementDoorOpensForAnOperatorCredentialAndNothingElse(t *testing.
 // is refused before anything is touched.
 func TestAnOperatorRunsTheProjectAndCredentialLifecycleOverTheAPI(t *testing.T) {
 	m := newManaged(t, "api_manage_lifecycle")
+	// The registry outlives a test schema, so the project is named afresh each run and its
+	// credentials are only this run's.
+	project := "lc_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	m.manageDo(t, "/projects/create", map[string]any{"name": "not a name!"}, m.operator, http.StatusBadRequest, nil)
 	m.manageDo(t, "/projects/create", map[string]any{"name": ""}, m.operator, http.StatusBadRequest, nil)
-	m.manageDo(t, "/projects/create", map[string]any{"name": "manage_lc"}, m.operator, http.StatusCreated, nil)
+	m.manageDo(t, "/projects/create", map[string]any{"name": project}, m.operator, http.StatusCreated, nil)
 	var projects struct {
 		Projects []struct {
 			Project   string `json:"project"`
@@ -119,42 +126,42 @@ func TestAnOperatorRunsTheProjectAndCredentialLifecycleOverTheAPI(t *testing.T) 
 	for _, p := range projects.Projects {
 		names = append(names, p.Project)
 	}
-	if strings.Join(names, ",") != "manage_lc,p1" {
-		t.Fatalf("expected manage_lc and p1, got %v", names)
+	if !slices.Contains(names, project) || !slices.Contains(names, "p1") {
+		t.Fatalf("expected %s and p1, got %v", project, names)
 	}
 	var issued struct {
 		ID, Token, Project, Access string
 	}
 	m.manageDo(t, "/credentials/issue", map[string]any{"name": "app", "project": "nope"}, m.operator, http.StatusNotFound, nil)
-	m.manageDo(t, "/credentials/issue", map[string]any{"name": "app", "project": "manage_lc", "access": "admin"}, m.operator, http.StatusBadRequest, nil)
-	m.manageDo(t, "/credentials/issue", map[string]any{"name": "app", "project": "manage_lc", "access": "read_only"}, m.operator, http.StatusCreated, &issued)
-	if issued.Token == "" || issued.Project != "manage_lc" || issued.Access != "read_only" {
+	m.manageDo(t, "/credentials/issue", map[string]any{"name": "app", "project": project, "access": "admin"}, m.operator, http.StatusBadRequest, nil)
+	m.manageDo(t, "/credentials/issue", map[string]any{"name": "app", "project": project, "access": "read_only"}, m.operator, http.StatusCreated, &issued)
+	if issued.Token == "" || issued.Project != project || issued.Access != "read_only" {
 		t.Fatalf("expected a read-only token for p2, got %+v", issued)
 	}
 	if status, _ := m.raw(t, http.MethodGet, "/v1/freshness", nil, issued.Token); status != http.StatusOK {
 		t.Fatalf("the minted credential must open the project's memory routes, got %d", status)
 	}
-	m.manageDo(t, "/projects/suspend", map[string]any{"name": "manage_lc"}, m.operator, http.StatusOK, nil)
-	m.manageDo(t, "/projects/suspend", map[string]any{"name": "manage_lc"}, m.operator, http.StatusNotFound, nil)
+	m.manageDo(t, "/projects/suspend", map[string]any{"name": project}, m.operator, http.StatusOK, nil)
+	m.manageDo(t, "/projects/suspend", map[string]any{"name": project}, m.operator, http.StatusNotFound, nil)
 	if status, _ := m.raw(t, http.MethodGet, "/v1/freshness", nil, issued.Token); status == http.StatusOK {
 		t.Fatal("a suspended project's credential must not open its memory routes")
 	}
-	m.manageDo(t, "/credentials/issue", map[string]any{"name": "app2", "project": "manage_lc"}, m.operator, http.StatusNotFound, nil)
-	m.manageDo(t, "/projects/resume", map[string]any{"name": "manage_lc"}, m.operator, http.StatusOK, nil)
+	m.manageDo(t, "/credentials/issue", map[string]any{"name": "app2", "project": project}, m.operator, http.StatusNotFound, nil)
+	m.manageDo(t, "/projects/resume", map[string]any{"name": project}, m.operator, http.StatusOK, nil)
 	if status, _ := m.raw(t, http.MethodGet, "/v1/freshness", nil, issued.Token); status != http.StatusOK {
 		t.Fatalf("a resumed project's credential must open its memory routes again, got %d", status)
 	}
 	var listed struct {
 		Credentials []credential.Listed `json:"credentials"`
 	}
-	m.manageDo(t, "/credentials/list", map[string]any{"project": "manage_lc"}, m.operator, http.StatusOK, &listed)
+	m.manageDo(t, "/credentials/list", map[string]any{"project": project}, m.operator, http.StatusOK, &listed)
 	if len(listed.Credentials) != 1 || listed.Credentials[0].CredentialID != issued.ID || listed.Credentials[0].RevokedAt != nil {
 		t.Fatalf("expected the one live credential of manage_lc, got %+v", listed.Credentials)
 	}
-	m.manageDo(t, "/credentials/list", map[string]any{"project": "manage_lc", "limit": 501}, m.operator, http.StatusBadRequest, nil)
+	m.manageDo(t, "/credentials/list", map[string]any{"project": project, "limit": 501}, m.operator, http.StatusBadRequest, nil)
 	m.manageDo(t, "/credentials/revoke", map[string]any{"id": issued.ID}, m.operator, http.StatusOK, nil)
 	m.manageDo(t, "/credentials/revoke", map[string]any{"id": issued.ID}, m.operator, http.StatusNotFound, nil)
-	m.manageDo(t, "/credentials/list", map[string]any{"project": "manage_lc"}, m.operator, http.StatusOK, &listed)
+	m.manageDo(t, "/credentials/list", map[string]any{"project": project}, m.operator, http.StatusOK, &listed)
 	if len(listed.Credentials) != 1 || listed.Credentials[0].RevokedAt == nil {
 		t.Fatalf("a revoked credential is listed as revoked, got %+v", listed.Credentials)
 	}
@@ -181,7 +188,19 @@ func TestAnOperatorReadsWhatTheInstanceRefusedErasedAndFormedAndEveryReadIsOnThe
 			Count     int64  `json:"count"`
 		} `json:"counts"`
 	}
+	// One refusal written the way extraction writes it, so the counts have something to count.
+	if _, err := m.pool.Exec(ctx, m.schema.SQL(`WITH refused AS (
+		INSERT INTO {schema}.rejected_claim (rejected_claim_id, scope, source_observation_id, source_ordinal, predicate, statement, quote, reason, extractor_version, data_subject_id)
+		SELECT gen_random_uuid(), 'p1', observation_id, 0, 'commutes_by', 'The user cycles.', 'I cycle', 'unmapped_relation', 'test', 'subject-1' FROM {schema}.observation WHERE scope='p1' LIMIT 1
+		RETURNING rejected_claim_id, source_observation_id)
+		INSERT INTO {schema}.projection_dependency (source_observation_id, scope, projection_kind, projection_id, data_subject_id)
+		SELECT source_observation_id, 'p1', 'rejected_claim', rejected_claim_id::text, 'subject-1' FROM refused`)); err != nil {
+		t.Fatal(err)
+	}
 	m.manageDo(t, "/refusals/summary", map[string]any{"project": "p1"}, m.operator, http.StatusOK, &summary)
+	if len(summary.Counts) == 0 || summary.Counts[0].Reason != "unmapped_relation" || summary.Counts[0].Predicate != "commutes_by" {
+		t.Fatalf("the summary must count the refusal by reason and predicate, got %+v", summary)
+	}
 	var refused int64
 	if err := m.pool.QueryRow(ctx, m.schema.SQL(`SELECT count(*) FROM {schema}.rejected_claim WHERE scope='p1'`)).Scan(&refused); err != nil {
 		t.Fatal(err)
@@ -240,6 +259,8 @@ func TestAnOperatorReadsWhatTheInstanceRefusedErasedAndFormedAndEveryReadIsOnThe
 		t.Fatalf("expected the parked turn listed, got %+v", parked)
 	}
 	m.manageDo(t, "/formation/parked", map[string]any{"project": "p1", "limit": 999}, m.operator, http.StatusBadRequest, nil)
+	m.manageDo(t, "/formation/parked", map[string]any{"project": "p1", "after": -1, "limit": 10}, m.operator, http.StatusOK, &parked)
+	m.manageDo(t, "/formation/unpark", map[string]any{"project": "not valid!", "observation_id": parkedID}, m.operator, http.StatusBadRequest, nil)
 	m.manageDo(t, "/formation/unpark", map[string]any{"project": "p1"}, m.operator, http.StatusBadRequest, nil)
 	m.manageDo(t, "/formation/unpark", map[string]any{"project": "p1", "observation_id": parkedID}, m.operator, http.StatusOK, nil)
 	m.manageDo(t, "/formation/unpark", map[string]any{"project": "p1", "observation_id": parkedID}, m.operator, http.StatusNotFound, nil)
