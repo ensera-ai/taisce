@@ -226,3 +226,19 @@ func TestOperatorIssueMintsAnOperatorCredentialOverTheAdministrativeConnection(t
 		t.Fatal("operator without issue must be refused")
 	}
 }
+
+// A surface that answers with something other than its own refusal shape is reported by status,
+// so a proxy's error page does not read as the surface's word.
+func TestAManagementAnswerThatIsNotARefusalIsReportedByStatus(t *testing.T) {
+	odd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>bad gateway</html>"))
+	}))
+	defer odd.Close()
+	t.Setenv(envManageAPI, odd.URL)
+	t.Setenv(envOperatorToken, "tsk_x")
+	err := dispatch(context.Background(), quiet(), []string{"project", "list"})
+	if err == nil || !strings.Contains(err.Error(), "answered 502") {
+		t.Fatalf("expected the status to be reported, got %v", err)
+	}
+}

@@ -333,3 +333,60 @@ func decodeJSON(t *testing.T, raw []byte, into any) {
 		t.Fatalf("decode %s: %v", raw, err)
 	}
 }
+
+// A database that cannot answer is an internal error from every management operation, never an
+// empty answer that reads as "nothing to report": the tables are moved away one at a time under
+// the running server, and each operation that reads them says so.
+func TestTheManagementSurfaceAnswersInternalWhenTheDatabaseCannot(t *testing.T) {
+	m := newManaged(t, "api_manage_broken")
+	ctx := context.Background()
+	moved := func(table string, calls func()) {
+		t.Helper()
+		if _, err := m.pool.Exec(ctx, m.schema.SQL(`ALTER TABLE {schema}.`+table+` RENAME TO `+table+`_moved`)); err != nil {
+			t.Fatal(err)
+		}
+		calls()
+		if _, err := m.pool.Exec(ctx, m.schema.SQL(`ALTER TABLE {schema}.`+table+`_moved RENAME TO `+table)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	moved("project", func() {
+		m.manageDo(t, "/projects/list", nil, m.operator, http.StatusInternalServerError, nil)
+		m.manageDo(t, "/projects/suspend", map[string]any{"name": "p1"}, m.operator, http.StatusInternalServerError, nil)
+		m.manageDo(t, "/credentials/issue", map[string]any{"name": "app", "project": "p1"}, m.operator, http.StatusInternalServerError, nil)
+		m.manageDo(t, "/formation/status", nil, m.operator, http.StatusInternalServerError, nil)
+	})
+	moved("rejected_claim", func() {
+		m.manageDo(t, "/refusals/summary", map[string]any{"project": "p1"}, m.operator, http.StatusInternalServerError, nil)
+	})
+	moved("erasure_request", func() {
+		m.manageDo(t, "/erasures/list", map[string]any{"project": "p1"}, m.operator, http.StatusInternalServerError, nil)
+	})
+	moved("observation", func() {
+		m.manageDo(t, "/formation/parked", map[string]any{"project": "p1"}, m.operator, http.StatusInternalServerError, nil)
+		m.manageDo(t, "/formation/unpark", map[string]any{"project": "p1", "observation_id": "0d2ab8b4-4c1b-4b4e-9d1c-2a1d5b3e6f70"}, m.operator, http.StatusInternalServerError, nil)
+		m.manageDo(t, "/formation/status", nil, m.operator, http.StatusInternalServerError, nil)
+	})
+	moved("audit_entry", func() {
+		// The ledger gone: the operation still answers (a ledger failure never refuses the person),
+		// and the seal and the verification, which are the ledger, cannot.
+		m.manageDo(t, "/projects/list", nil, m.operator, http.StatusOK, nil)
+		m.manageDo(t, "/audit/seal", nil, m.operator, http.StatusInternalServerError, nil)
+		m.manageDo(t, "/audit/verify", nil, m.operator, http.StatusInternalServerError, nil)
+		m.manageDo(t, "/projects/list", nil, "tsk_stranger", http.StatusUnauthorized, nil)
+	})
+	// A project whose storage cannot be created is an internal error, not a project.
+	if _, err := m.pool.Exec(ctx, m.schema.SQL(`ALTER TABLE {schema}.chunk RENAME TO chunk_moved`)); err != nil {
+		t.Fatal(err)
+	}
+	m.manageDo(t, "/projects/create", map[string]any{"name": "p_broken"}, m.operator, http.StatusInternalServerError, nil)
+	if _, err := m.pool.Exec(ctx, m.schema.SQL(`ALTER TABLE {schema}.chunk_moved RENAME TO chunk`)); err != nil {
+		t.Fatal(err)
+	}
+	// Bodies that are not the operation's are refused before anything is read.
+	for _, path := range []string{"/projects/create", "/projects/suspend", "/credentials/issue", "/credentials/list", "/credentials/revoke", "/refusals/summary", "/erasures/list", "/formation/parked", "/formation/unpark"} {
+		if status, _ := rawAgainst(t, m.manage.URL, http.MethodPost, api.ManagementPrefix+path, map[string]any{"nonsense": true}, m.operator); status != http.StatusBadRequest {
+			t.Fatalf("%s must refuse an unknown field, got %d", path, status)
+		}
+	}
+}
