@@ -202,6 +202,8 @@ services:
       TAISCE_ADMIN_DSN: postgres://postgres:${POSTGRES_PASSWORD:-taisce}@postgres:5432/taisce?sslmode=disable
       TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
       TAISCE_MANAGE_ADDR: ":8081"
+      # The portal (D135) is off unless an operator switches it on; it then shares this loopback port.
+      TAISCE_PORTAL: ${TAISCE_PORTAL:-off}
     healthcheck:
       test: ["CMD", "/taisce", "probe", "--manage"]
       interval: 10s

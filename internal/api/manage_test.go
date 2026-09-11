@@ -25,8 +25,9 @@ import (
 // role serves it: on its own listener, with the administrative connection for provisioning.
 type managed struct {
 	*harness
-	manage   *httptest.Server
-	operator string
+	manage       *httptest.Server
+	manageServer *api.ManagementServer
+	operator     string
 }
 
 func newManaged(t *testing.T, tenant string) *managed {
@@ -48,7 +49,7 @@ func newManaged(t *testing.T, tenant string) *managed {
 		Refusals:     pg.NewRefusalStore(h.pool, h.schema),
 		Eraser:       pg.NewEraser(h.pool),
 	}, h.schema, nil)
-	m := &managed{harness: h, manage: httptest.NewServer(server.Handler()), operator: operator}
+	m := &managed{harness: h, manage: httptest.NewServer(server.Handler()), manageServer: server, operator: operator}
 	t.Cleanup(m.manage.Close)
 	return m
 }

@@ -4839,3 +4839,39 @@ Cost: none on the read path.
 **How hard to undo.** Moderate: the `kind` column and its constraint are one control migration; the
 surface and the CLI's HTTP path are additive, and removing them returns the CLI to the direct path
 it still has.
+
+## D135 — The portal is server-rendered pages over the management surface, off by default
+
+**Date:** 2026-09-11. **Tracking:** [#77](https://github.com/althunibat/taisce/issues/77).
+
+**Decision.** The portal is a set of HTML pages rendered by the `manage` role from the management
+surface's own stores (D133), served on the same loopback listener only when `TAISCE_PORTAL` is
+`on`. It signs an operator in by their operator credential, keeps a random session id in the
+process mapped to that token, resolves the token again on every request so a revocation signs the
+browser out at the registry, and writes nothing about a session anywhere. Off, its routes do not
+exist. Its panels are the surface's operations: projects with the watermark and the gap between
+stored and formed, refusal counts by reason and by the relation the model proposed, erasure receipts
+with their residuals, parked turns, credentials by name and prefix, and the ledger's verification.
+Each panel is on the ledger with the operator as principal. It shows no message content and no
+refused claim's words: those are somebody's, and they are read under a credential for the project
+they came from, through the memory routes. What the model costs is not recorded anywhere, and the
+panel says so rather than reading a number out of a gateway the deployment may not run.
+
+**Why.** G14 wants the operator to see what the instance is doing without reading the database, and
+rule 8 wants that surface authenticated and unexposed by default. Rendering on the server from the
+same stores keeps one reader of the tables, one ledger of who read them, and no second source of
+truth. Being off by default, and existing only inside the manage role, is what makes "not exposed"
+a property of the process rather than a firewall rule somebody remembers.
+
+**Rejected.** A single-page application with its own API calls (a second client of the surface to
+keep in step, and a browser holding the operator token in script-reachable storage). A metrics
+exporter or a dashboard fed by one (every panel would have a number that can disagree with the
+table). Showing refusal quotes to an operator session (the operator is not the data subject, and the
+boundary recall already enforces is the boundary here). A login that stores the token in the cookie
+(a stolen cookie would then be a credential rather than a session).
+
+**Impact.** Security: the portal opens nothing a bearer of the same credential could not read over
+the surface, and it reads nothing a project credential can. Operations: one environment variable
+turns it on; sessions live in one process and end with it. Cost: none on the memory path.
+
+**How hard to undo.** Easy: templates and one handler file behind a switch; nothing else reads them.

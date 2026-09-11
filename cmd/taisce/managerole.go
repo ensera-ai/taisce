@@ -19,6 +19,18 @@ import (
 	"github.com/ensera-ai/taisce/internal/migrate"
 )
 
+// managementHandler is the manage role's handler: the surface, and the portal (D135) only when
+// TAISCE_PORTAL is "on". Off, the portal's routes do not exist, which is the only way a browser
+// surface is not exposed by default.
+func managementHandler(server *api.ManagementServer, ready http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/", server.Handler(ready))
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(envPortal)), "on") {
+		api.NewPortal(server).Mount(mux)
+	}
+	return mux
+}
+
 // runManage serves the management surface (D133) and nothing else: no memory route, no formation.
 // It holds the administrative connection, because creating a project is DDL, and that is the
 // reason it is a process of its own rather than a route on the memory server.
@@ -46,7 +58,8 @@ func runManage(ctx context.Context, log *slog.Logger) error {
 		addr = "127.0.0.1:8081"
 	}
 	ready := api.NewReadiness(func(checkCtx context.Context) error { return admin.Ping(checkCtx) })
-	httpServer := &http.Server{Addr: addr, Handler: server.Handler(ready), ReadHeaderTimeout: 10 * time.Second,
+	handler := managementHandler(server, ready)
+	httpServer := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 2 * time.Minute, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {

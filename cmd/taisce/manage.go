@@ -32,6 +32,7 @@ const (
 	envManageAPI     = "TAISCE_MANAGE_API"
 	envOperatorToken = "TAISCE_OPERATOR_TOKEN"
 	envManageAddr    = "TAISCE_MANAGE_ADDR"
+	envPortal        = "TAISCE_PORTAL"
 	roleManage       = "manage"
 )
 

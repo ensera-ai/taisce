@@ -73,6 +73,7 @@ func TestTheManageRoleServesTheManagementSurfaceAndNothingElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	schema, _ := pg.NewSchema(env[envSchema])
 	credentials := credential.NewStore(pool, string(migrate.ControlSchema))
 	operator, _, err := credentials.IssueOperator(ctx, "cmd-manage-role")
 	if err != nil {
@@ -109,6 +110,22 @@ func TestTheManageRoleServesTheManagementSurfaceAndNothingElse(t *testing.T) {
 	}
 	if err := probeCommand(ctx, []string{"--manage"}); err != nil {
 		t.Fatalf("the management listener must answer its probe: %v", err)
+	}
+	// The portal's routes do not exist unless it is switched on (D135).
+	if resp, err := http.Get(base + api.PortalPrefix + "/login"); err != nil || resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("the portal must be absent by default, got %v %v", resp, err)
+	}
+	t.Setenv(envPortal, "on")
+	if resp, err := http.Get(base + api.PortalPrefix + "/login"); err != nil {
+		t.Fatal(err)
+	} else if handler := managementHandler(api.NewManagementServer(credentials, api.ManagementStores{Audit: pg.NewAuditStore(pool, schema)}, schema, nil), nil); handler == nil || resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("a running listener does not grow the portal after the fact, got %d", resp.StatusCode)
+	}
+	on := httptest.NewServer(managementHandler(api.NewManagementServer(credentials, api.ManagementStores{Audit: pg.NewAuditStore(pool, schema), Projects: pg.NewProjectStore(pool, schema), Observations: pg.NewObservationStore(pool)}, schema, nil), nil))
+	defer on.Close()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if resp, err := client.Get(on.URL + api.PortalPrefix + "/"); err != nil || resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("switched on, the portal sends a browser to sign in, got %v %v", resp, err)
 	}
 	if err := probeCommand(ctx, []string{"--manage", "--worker", "extra"}); err == nil {
 		t.Fatal("probe accepts no positional arguments")

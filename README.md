@@ -267,6 +267,12 @@ words; the erasure receipts with their counted residuals; formation's watermark 
 parked turns; and it unparks a turn. `docs/02-contract.md` lists every operation under
 "Management operations".
 
+The portal (D135) is the same reads as pages: `TAISCE_PORTAL=on` on the manage role serves it at
+`/portal/` on that listener, signed in with the operator token; off, the routes do not exist. It
+shows projects and the watermark, refusal counts with no words, erasure receipts, parked turns,
+credentials by prefix and the ledger's verification, and says that what the model costs is not
+recorded.
+
 ### Developing on it
 
 ```
