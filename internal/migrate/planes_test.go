@@ -2,12 +2,15 @@ package migrate
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ensera-ai/taisce/internal/domain"
@@ -620,5 +623,119 @@ func TestTwoSealersCannotOverlap(t *testing.T) {
 	}
 	if v.Unsealed != 0 {
 		t.Fatalf("%d entries were left unsealed", v.Unsealed)
+	}
+}
+
+// ── #192's claim ──────────────────────────────────────────────────────────────────────────────
+//
+// Bootstrap repeats under an administrative identity that is not a superuser.
+//
+// A cluster deployment hands bootstrap a CREATEROLE login and keeps the superuser closed, and it
+// runs bootstrap again on every upgrade. PostgreSQL lets such a login create a role while naming
+// every privilege it lacks, and refuses it an ALTER that names any of them — so the first run
+// passing says nothing about the second, and the second is the one an operator meets on the day
+// they upgrade. Asserted as that identity, because asserted as the superuser it asserts nothing.
+
+// asCreateRoleAdmin makes a login with CREATEROLE and nothing more, and connects as it.
+func asCreateRoleAdmin(t *testing.T, owner *pgxpool.Pool) *pgxpool.Pool {
+	t.Helper()
+	ctx := context.Background()
+	name := "pl_admin_" + uniqueSuffix()
+	if _, err := owner.Exec(ctx, "CREATE ROLE "+pgx.Identifier{name}.Sanitize()+" LOGIN CREATEROLE PASSWORD 'pl-admin'"); err != nil {
+		t.Fatalf("create the admin: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = owner.Exec(context.Background(), "DROP ROLE IF EXISTS "+pgx.Identifier{name}.Sanitize())
+	})
+	parsed, err := url.Parse(os.Getenv("TAISCE_TEST_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.User = url.UserPassword(name, "pl-admin")
+	pool, err := pgxpool.New(ctx, parsed.String())
+	if err != nil {
+		t.Fatalf("connect as the admin: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+func uniqueSuffix() string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+func TestBootstrapRepeatsUnderAnAdministratorWhoIsNotASuperuser(t *testing.T) {
+	ctx := context.Background()
+	owner := testPool(t)
+	admin := asCreateRoleAdmin(t, owner)
+	role := "pl_ctl_" + uniqueSuffix()
+	t.Cleanup(func() {
+		_, _ = owner.Exec(context.Background(), "DROP ROLE IF EXISTS "+pgx.Identifier{role}.Sanitize())
+	})
+
+	if err := ensureRole(ctx, admin, role, "first"); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if err := ensureRole(ctx, admin, role, "second"); err != nil {
+		t.Fatalf("second run, the one every upgrade performs: %v", err)
+	}
+
+	var login, super, createdb, createrole, replication, bypassrls bool
+	if err := owner.QueryRow(ctx,
+		`SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname = $1`,
+		role).Scan(&login, &super, &createdb, &createrole, &replication, &bypassrls); err != nil {
+		t.Fatal(err)
+	}
+	if !login || super || createdb || createrole || replication || bypassrls {
+		t.Fatalf("the role must be a plain login and nothing more: login=%t super=%t createdb=%t createrole=%t replication=%t bypassrls=%t",
+			login, super, createdb, createrole, replication, bypassrls)
+	}
+	// The second password is the one that opens the door: the ALTER did run, rather than being
+	// skipped as the way to avoid the refusal.
+	parsed, err := url.Parse(os.Getenv("TAISCE_TEST_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.User = url.UserPassword(role, "second")
+	as, err := pgxpool.New(ctx, parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer as.Close()
+	if err := as.Ping(ctx); err != nil {
+		t.Fatalf("the second password must open the role: %v", err)
+	}
+}
+
+// A role that gained a privilege this system never grants was not made here, and bootstrap must
+// not hand it the registry password — under any identity, since the superuser could.
+func TestBootstrapDoesNotAdoptARoleThatCarriesAPrivilegeItNeverGrants(t *testing.T) {
+	ctx := context.Background()
+	owner := testPool(t)
+	role := "pl_priv_" + uniqueSuffix()
+	if _, err := owner.Exec(ctx, "CREATE ROLE "+pgx.Identifier{role}.Sanitize()+" LOGIN CREATEDB PASSWORD 'before'"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = owner.Exec(context.Background(), "DROP ROLE IF EXISTS "+pgx.Identifier{role}.Sanitize())
+	})
+	err := ensureRole(ctx, owner, role, "after")
+	if err == nil || !strings.Contains(err.Error(), "createdb=true") {
+		t.Fatalf("a role with CREATEDB must be refused, naming the privilege: %v", err)
+	}
+	parsed, perr := url.Parse(os.Getenv("TAISCE_TEST_DSN"))
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	parsed.User = url.UserPassword(role, "after")
+	as, perr := pgxpool.New(ctx, parsed.String())
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	defer as.Close()
+	if err := as.Ping(ctx); err == nil {
+		t.Fatal("the refused role must not have received the new password")
 	}
 }

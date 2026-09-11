@@ -5,6 +5,7 @@ package migrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -116,21 +117,40 @@ func EstablishPlanes(ctx context.Context, pool *pgxpool.Pool, controlPassword, d
 }
 
 func ensureRole(ctx context.Context, on statements, name, password string) error {
-	var exists bool
-	if err := on.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, name).
-		Scan(&exists); err != nil {
+	var super, createdb, createrole, replication, bypassrls bool
+	err := on.QueryRow(ctx,
+		`SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname = $1`,
+		name).Scan(&super, &createdb, &createrole, &replication, &bypassrls)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		// The password is interpolated as a quoted literal rather than bound, because role statements
+		// do not take parameters. It comes from a deployment's configuration and never from a request.
+		statement := fmt.Sprintf(`CREATE ROLE %s LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %s`,
+			pgx.Identifier{name}.Sanitize(), quoteLiteral(password))
+		if _, err := on.Exec(ctx, statement); err != nil {
+			return fmt.Errorf("CREATE role %q: %w", name, err)
+		}
+		return nil
+	case err != nil:
 		return fmt.Errorf("look for role %q: %w", name, err)
 	}
-	verb := "CREATE"
-	if exists {
-		verb = "ALTER"
+
+	// An existing role is asserted, not re-declared. The administrative identity that runs this is
+	// allowed to be a plain CREATEROLE login rather than a superuser — that is the identity a
+	// cluster deployment hands it — and PostgreSQL refuses such a login any ALTER ROLE that so much
+	// as names SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS, whatever the value. So the
+	// second bootstrap of the same instance sets only what it may (the login and its password) and
+	// reads the rest back: a role that carries one of those attributes was not made here, and
+	// handing it the registry password would be a privilege escalation this code performed. Refusing
+	// is the only answer that does not depend on who runs it.
+	if super || createdb || createrole || replication || bypassrls {
+		return fmt.Errorf("role %q carries a privilege this system never grants "+
+			"(superuser=%t createdb=%t createrole=%t replication=%t bypassrls=%t): it was not made here, "+
+			"and bootstrap does not adopt it", name, super, createdb, createrole, replication, bypassrls)
 	}
-	// The password is interpolated as a quoted literal rather than bound, because role statements do
-	// not take parameters. It comes from a deployment's configuration and never from a request.
-	statement := fmt.Sprintf(`%s ROLE %s LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %s`,
-		verb, pgx.Identifier{name}.Sanitize(), quoteLiteral(password))
+	statement := fmt.Sprintf(`ALTER ROLE %s LOGIN PASSWORD %s`, pgx.Identifier{name}.Sanitize(), quoteLiteral(password))
 	if _, err := on.Exec(ctx, statement); err != nil {
-		return fmt.Errorf("%s role %q: %w", verb, name, err)
+		return fmt.Errorf("ALTER role %q: %w", name, err)
 	}
 	return nil
 }
