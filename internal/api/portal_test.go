@@ -146,7 +146,8 @@ func TestThePortalShowsNothingBeforeAnOperatorSignsInAndEveryPanelIsATableOnTheL
 	credentials := credential.NewStore(m.pool, string(migrate.ControlSchema))
 	listed, _ := credentials.List(ctx, "", 500)
 	for _, c := range listed {
-		if c.Name == "ops-api_portal" {
+		// The registry outlives a test schema: only this run's live operator is revoked here.
+		if c.Name == "ops-api_portal" && c.RevokedAt == nil {
 			if err := credentials.Revoke(ctx, c.CredentialID); err != nil {
 				t.Fatal(err)
 			}
