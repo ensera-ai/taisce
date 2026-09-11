@@ -52,7 +52,14 @@ func TestAnExistingMemoryNamespaceUpgradesWithoutMovingItsObservations(t *testin
 	}
 }
 
-func TestReconcilingAnExistingLoginRemovesElevatedRoleAttributes(t *testing.T) {
+// A plane login that gained a privilege this system never grants is refused, and left as it was.
+//
+// Repairing it silently would close a door somebody opened without anyone learning it had been
+// opened; and the repair is a superuser act that a cluster deployment's administrative identity
+// cannot perform, so a bootstrap that repaired under one identity and failed under another would
+// be two behaviours under one name. Refusing, naming every attribute, is the one answer that does
+// not depend on who runs it.
+func TestAnExistingLoginThatGainedElevatedAttributesIsRefusedNotRepaired(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
 	name := "taisce_role_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -61,11 +68,17 @@ func TestReconcilingAnExistingLoginRemovesElevatedRoleAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { pool.Exec(ctx, "DROP ROLE "+quoted) })
-	if err := ensureRole(ctx, pool, name, "isolated-test-password"); err != nil {
-		t.Fatal(err)
+	err := ensureRole(ctx, pool, name, "isolated-test-password")
+	if err == nil {
+		t.Fatal("an elevated login was adopted")
+	}
+	for _, attribute := range []string{"superuser=true", "createdb=true", "createrole=true", "replication=true", "bypassrls=true"} {
+		if !strings.Contains(err.Error(), attribute) {
+			t.Fatalf("the refusal must name %s: %v", attribute, err)
+		}
 	}
 	var elevated bool
-	if err := pool.QueryRow(ctx, `SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname=$1`, name).Scan(&elevated); err != nil || elevated {
-		t.Fatalf("existing login retained elevated attributes: %v %v", elevated, err)
+	if err := pool.QueryRow(ctx, `SELECT rolsuper AND rolcreatedb AND rolcreaterole AND rolreplication AND rolbypassrls FROM pg_roles WHERE rolname=$1`, name).Scan(&elevated); err != nil || !elevated {
+		t.Fatalf("a refused login must be left as it was for an operator to see: %v %v", elevated, err)
 	}
 }
