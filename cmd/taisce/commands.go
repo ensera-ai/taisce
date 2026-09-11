@@ -77,10 +77,21 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 	case "bootstrap":
 		return bootstrap(ctx, log, args[1:])
 	case "project":
+		if c, ok := managementFromEnv(); ok {
+			return c.project(ctx, args[1:])
+		}
 		return project(ctx, args[1:])
 	case "credential":
+		if c, ok := managementFromEnv(); ok {
+			return c.credential(ctx, args[1:])
+		}
 		return credentialCommand(ctx, args[1:])
+	case "operator":
+		return operatorCommand(ctx, args[1:])
 	case "audit":
+		if c, ok := managementFromEnv(); ok {
+			return c.audit(ctx, args[1:])
+		}
 		return auditCommand(ctx, args[1:])
 	case "formation":
 		return formationCommand(ctx, args[1:], os.Stdout)
@@ -189,6 +200,20 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string) error {
 	existing, err := credentialsForProject(ctx, admin, *project)
 	if err != nil {
 		return err
+	}
+	// The management surface (D133) needs an operator credential before anyone can speak to it,
+	// and bootstrap is the one path that exists before then; one is minted when none is live.
+	operators, err := operatorCredentials(ctx, admin)
+	if err != nil {
+		return err
+	}
+	if operators == 0 {
+		token, grant, err := store.IssueOperator(ctx, "operator")
+		if err != nil {
+			return fmt.Errorf("mint the first operator credential: %w", err)
+		}
+		fmt.Printf("\noperator credential %s (%s) reaches the management surface and no project\n", grant.Name, grant.CredentialID)
+		fmt.Printf("operator token: %s\n", token)
 	}
 	if existing > 0 {
 		log.Info("this project can already be reached; no credential minted",

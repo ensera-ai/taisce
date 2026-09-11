@@ -4790,3 +4790,52 @@ which is the documented pattern rather than an omission.
 
 **How hard to undo.** Easy: a repository and a conformance driver, under the ordering D40 already
 allows.
+
+## D133 — Two credential kinds, and a management surface served by a role of its own
+
+**Date:** 2026-09-10. **Tracking:** [#181](https://github.com/althunibat/taisce/issues/181).
+
+**Decision.** A credential is one of two kinds, held as a column in the registry and never as a
+claim the token makes. A *project* credential opens one project's memory routes and nothing an
+operator does. An *operator* credential opens the management surface, `/manage/v1`, and no
+project's memory; it names no project, and the registry's constraint makes "names no project" and
+"is an operator credential" the same statement, so a row cannot be both or neither. Each door
+resolves only its own kind and refuses the other with the one answer a stranger gets. The
+management surface is served by the `manage` role of the same binary, on its own listener, with the
+administrative connection, and is not served at all unless that role is chosen. It performs what
+the CLI did over a database connection: projects (create, list, suspend, resume), credentials
+(issue, list, revoke), refusal counts by reason and predicate, erasure receipts, formation status
+and parked turns with unparking, and the ledger's seal and verification. Every operation is on the
+ledger with the operator credential as its principal. The CLI speaks the surface when
+`TAISCE_MANAGE_API` and `TAISCE_OPERATOR_TOKEN` are set and takes the direct path otherwise; the
+direct path is what bootstrap uses before any credential exists, and bootstrap mints the first
+operator credential when none is live. The management contract is frozen beside the memory
+contract under D126's rule.
+
+**Why.** An operator, and the portal (G14), must not need a database connection: the connection
+that can issue a credential can read every one, and a browser holding it is the memory dump a port
+away that rule 8 exists to prevent. Creating a project is DDL, which the serving identities
+deliberately cannot perform, so the surface that creates projects holds the administrative
+connection and is therefore a process of its own rather than a route on the memory server: the
+memory server keeps the privileges it has today. Two kinds rather than one credential with two
+powers, because a token that opens both doors is one theft away from opening both.
+
+**What is not shown.** Refusal content. A refused claim is somebody's words; the management surface
+returns counts, and the words are read under a project credential through the memory routes, where
+the read is on that project's ledger. This is the boundary recall already enforces, applied to the
+operator.
+
+**Rejected.** A management route on the memory server (it would hand that process the
+administrative connection, or leave project creation on the CLI, which is the split this removes).
+A single credential kind with an `admin` access level (one token opening both doors). Role
+hierarchies beyond operator and project (nothing reads them yet). A separate management binary (one
+binary, one version, D42). A metrics exporter beside the database (#77 reads tables).
+
+**Impact.** Security: the memory server's privileges are unchanged; the manage role holds the
+administrative connection and serves nothing else, and is off unless chosen. Operations: a
+deployment that wants the surface runs one more process; the compose file and the chart arrange it.
+Cost: none on the read path.
+
+**How hard to undo.** Moderate: the `kind` column and its constraint are one control migration; the
+surface and the CLI's HTTP path are additive, and removing them returns the CLI to the direct path
+it still has.

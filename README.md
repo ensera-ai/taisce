@@ -248,6 +248,25 @@ The same four operations are tools on `POST /mcp`, under the same credential and
 A coding agent reaches memory that way; the Claude Code plugin in
 [`plugins/claude-code`](plugins/claude-code/README.md) is the ready-made one.
 
+### Operating it
+
+Everything an operator does is a management operation (D133), served by the `manage` role on its
+own listener with the administrative connection, and reached with an operator credential that opens
+no memory route. Bootstrap prints the first operator token beside the project token; with the
+surface running, the CLI needs no database connection:
+
+```
+TAISCE_ROLE=manage TAISCE_ADMIN_DSN=… TAISCE_MANAGE_ADDR=127.0.0.1:8081 taisce serve
+TAISCE_MANAGE_API=http://127.0.0.1:8081 TAISCE_OPERATOR_TOKEN=… taisce project list
+TAISCE_MANAGE_API=http://127.0.0.1:8081 TAISCE_OPERATOR_TOKEN=… taisce credential issue app --project default
+TAISCE_MANAGE_API=http://127.0.0.1:8081 TAISCE_OPERATOR_TOKEN=… taisce audit verify
+```
+
+The surface also answers what extraction refused, as counts by reason and predicate and never as
+words; the erasure receipts with their counted residuals; formation's watermark per project and its
+parked turns; and it unparks a turn. `docs/02-contract.md` lists every operation under
+"Management operations".
+
 ### Developing on it
 
 ```

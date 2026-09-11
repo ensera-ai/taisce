@@ -996,6 +996,9 @@ const (
 	// codeInternal is anything that went wrong here. It says nothing about what, because what went
 	// wrong is a description of how this system is built.
 	codeInternal errorCode = "internal"
+	// The management surface's refusals (D133).
+	codeInvalidProject    errorCode = "invalid_project"
+	codeInvalidCredential errorCode = "invalid_credential"
 )
 
 // errorCodes is the declared set, in the order the contract publishes them.
@@ -1013,6 +1016,7 @@ var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
 	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidContext, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity, codeInvalidSubject, codeSubjectConflict,
+	codeInvalidProject, codeInvalidCredential,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

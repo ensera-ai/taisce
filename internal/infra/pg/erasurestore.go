@@ -22,6 +22,41 @@ type Eraser struct{ pool *pgxpool.Pool }
 // NewEraser builds an eraser.
 func NewEraser(pool *pgxpool.Pool) *Eraser { return &Eraser{pool: pool} }
 
+// ErasureReceipt is one erasure as the ledger of erasures holds it: what was asked, when, and the
+// counted residual once it completed. The selector names a subject or a source, never content.
+type ErasureReceipt struct {
+	RequestID   string          `json:"id"`
+	Scope       string          `json:"project"`
+	Selector    json.RawMessage `json:"selector"`
+	Reason      string          `json:"reason"`
+	RequestedAt time.Time       `json:"requested_at"`
+	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	Residual    json.RawMessage `json:"residual,omitempty"`
+}
+
+// Receipts lists one project's erasures, newest first.
+func (e *Eraser) Receipts(ctx context.Context, schema Schema, scope string, limit int) ([]ErasureReceipt, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, err := e.pool.Query(ctx, schema.SQL(`
+		SELECT request_id::text, scope, selector, reason, requested_at, completed_at, residual
+		  FROM {schema}.erasure_request WHERE scope=$1 ORDER BY requested_at DESC, request_id LIMIT $2`), scope, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list erasures: %w", err)
+	}
+	defer rows.Close()
+	out := []ErasureReceipt{}
+	for rows.Next() {
+		var r ErasureReceipt
+		if err := rows.Scan(&r.RequestID, &r.Scope, &r.Selector, &r.Reason, &r.RequestedAt, &r.CompletedAt, &r.Residual); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // projectionKind is a declared kind and the table it lives in, read from `projection_kind`.
 type projectionKind struct {
 	kind  string

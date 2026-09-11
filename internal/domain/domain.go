@@ -996,10 +996,20 @@ const (
 	AuditArtifactList          = "artifact.list"
 	AuditArtifactDelete        = "artifact.delete"
 	AuditArtifactConfigure     = "artifact.configure"
-	AuditSubjectRegister       = "subject.register"
-	AuditSubjectGet            = "subject.get"
-	AuditSubjectList           = "subject.list"
-	AuditSubjectUpdate         = "subject.update"
+	// The management surface (D133): what an operator does to the instance, on the ledger with the
+	// operator credential as its principal.
+	AuditProjectList     = "project.list"
+	AuditCredentialList  = "credential.list"
+	AuditRefusalSummary  = "refusal.summary"
+	AuditErasureList     = "erasure.list"
+	AuditFormationStatus = "formation.status"
+	AuditFormationParked = "formation.parked"
+	AuditAuditSeal       = "audit.seal"
+	AuditAuditVerify     = "audit.verify"
+	AuditSubjectRegister = "subject.register"
+	AuditSubjectGet      = "subject.get"
+	AuditSubjectList     = "subject.list"
+	AuditSubjectUpdate   = "subject.update"
 	// AuditAuthenticate records a credential being refused. A successful authentication is recorded
 	// as the operation it went on to perform, because a row for every accepted request twice over
 	// would double the ledger and say nothing the operation's own row does not.
@@ -1021,6 +1031,8 @@ func RecordableOperation(name string) bool {
 	case AuditEntityList, AuditEntityGet, AuditMessageGet, AuditContextAssemble:
 		return true
 	case AuditRebuildStart, AuditRebuildCancel:
+		return true
+	case AuditProjectList, AuditCredentialList, AuditRefusalSummary, AuditErasureList, AuditFormationStatus, AuditFormationParked, AuditAuditSeal, AuditAuditVerify:
 		return true
 	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
 		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,

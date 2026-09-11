@@ -92,11 +92,12 @@ func probeCommand(ctx context.Context, args []string) error {
 	flags.SetOutput(io.Discard)
 	live := flags.Bool("live", false, "check liveness")
 	worker := flags.Bool("worker", false, "check the worker loopback listener")
+	manage := flags.Bool("manage", false, "check the management listener")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("probe accepts only --live and --worker")
+		return fmt.Errorf("probe accepts only --live, --worker and --manage")
 	}
 	addr := strings.TrimSpace(os.Getenv(envAddr))
 	if addr == "" {
@@ -107,6 +108,14 @@ func probeCommand(ctx context.Context, args []string) error {
 		addr, err = workerHealthAddress()
 		if err != nil {
 			return err
+		}
+	}
+	if *manage {
+		// The management surface (D133) has its own listener; its probe reads the same health
+		// endpoints there.
+		addr = strings.TrimSpace(os.Getenv(envManageAddr))
+		if addr == "" {
+			addr = "127.0.0.1:8081"
 		}
 	}
 	host, port, err := net.SplitHostPort(addr)

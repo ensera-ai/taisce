@@ -45,6 +45,16 @@ const (
 )
 
 // Grant carries the authenticated project and memory access mode, never caller-supplied authority.
+// Kind is which door a credential opens (D133). A project credential opens one project's memory
+// routes; an operator credential opens the management surface and no project's memory. Read from
+// the registry at every request, never from the token.
+type Kind string
+
+const (
+	KindProject  Kind = "project"
+	KindOperator Kind = "operator"
+)
+
 type Grant struct {
 	Access       Access
 	CredentialID string
@@ -85,31 +95,59 @@ func Digest(token string) []byte {
 
 // Resolve turns a presented token into a grant.
 func (s *Store) Resolve(ctx context.Context, token string) (Grant, error) {
+	g, kind, err := s.resolve(ctx, token)
+	if err != nil {
+		return Grant{}, err
+	}
+	// The memory door opens for a project credential and nothing else. An operator credential is
+	// refused here with the same answer a stranger gets: which door a token opens is not a fact the
+	// holder of the wrong token is told.
+	if kind != KindProject || g.Project == "" {
+		return Grant{}, ErrUnknown
+	}
+	return g, nil
+}
+
+// ResolveOperator is the management door: it opens for an operator credential and refuses every
+// other token, a project credential included, with the one answer a stranger gets. The grant
+// carries no project, because an operator acts on the instance and names a project in the request.
+func (s *Store) ResolveOperator(ctx context.Context, token string) (Grant, error) {
+	g, kind, err := s.resolve(ctx, token)
+	if err != nil {
+		return Grant{}, err
+	}
+	if kind != KindOperator || g.Project != "" {
+		return Grant{}, ErrUnknown
+	}
+	return g, nil
+}
+
+func (s *Store) resolve(ctx context.Context, token string) (Grant, Kind, error) {
 	token = strings.TrimSpace(token)
 	if token == "" || !strings.HasPrefix(token, Prefix) {
 		// Refused without a query. A malformed token is not a database question, and answering it
 		// with one is a free way for a stranger to make us work.
-		return Grant{}, ErrUnknown
+		return Grant{}, "", ErrUnknown
 	}
-
 	var g Grant
+	var kind Kind
 	err := s.registry.QueryRow(ctx, fmt.Sprintf(`
-		SELECT credential_id::text, name, project, access
+		SELECT credential_id::text, name, project, access, kind
 		  FROM %s.credential
 		 WHERE token_digest = $1
 		   AND revoked_at IS NULL`, s.schema), Digest(token)).
-		Scan(&g.CredentialID, &g.Name, &g.Project, &g.Access)
+		Scan(&g.CredentialID, &g.Name, &g.Project, &g.Access, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Grant{}, ErrUnknown
+		return Grant{}, "", ErrUnknown
 	}
 	if err != nil {
-		return Grant{}, fmt.Errorf("resolve credential: %w", err)
+		return Grant{}, "", fmt.Errorf("resolve credential: %w", err)
 	}
 	// Authority comes from the protected registry, never from the token format or request body.
 	if g.Access != ReadOnly && g.Access != ReadWrite {
-		return Grant{}, ErrUnknown
+		return Grant{}, "", ErrUnknown
 	}
-	return g, nil
+	return g, kind, nil
 }
 
 // Issue mints a credential for one project and returns the token ONCE.
@@ -146,12 +184,73 @@ func (s *Store) IssueWithAccess(ctx context.Context, name, project string, acces
 
 	g := Grant{CredentialID: uuid.New().String(), Name: name, Project: project, Access: access}
 	if _, err := s.registry.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access)
-		VALUES ($1, $2, $3, $4, $5, $6)`, s.schema),
-		g.CredentialID, Digest(token), token[:12], name, project, string(access)); err != nil {
+		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access, kind)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`, s.schema),
+		g.CredentialID, Digest(token), token[:12], name, project, string(access), string(KindProject)); err != nil {
 		return "", Grant{}, fmt.Errorf("issue credential: %w", err)
 	}
 	return token, g, nil
+}
+
+// IssueOperator mints an operator credential and returns the token ONCE. It names no project: the
+// management surface acts on the instance, and a request names the project it acts on.
+func (s *Store) IssueOperator(ctx context.Context, name string) (string, Grant, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", Grant{}, fmt.Errorf("a credential needs a name, so a person can tell it from another")
+	}
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", Grant{}, fmt.Errorf("no randomness available to mint a credential: %w", err)
+	}
+	token := Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
+	g := Grant{CredentialID: uuid.New().String(), Name: name, Access: ReadWrite}
+	if _, err := s.registry.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access, kind)
+		VALUES ($1, $2, $3, $4, '', $5, $6)`, s.schema),
+		g.CredentialID, Digest(token), token[:12], name, string(ReadWrite), string(KindOperator)); err != nil {
+		return "", Grant{}, fmt.Errorf("issue operator credential: %w", err)
+	}
+	return token, g, nil
+}
+
+// Listed is one credential as the registry describes it to an operator: never the token, never
+// its digest.
+type Listed struct {
+	CredentialID string     `json:"id"`
+	Name         string     `json:"name"`
+	Kind         Kind       `json:"kind"`
+	Project      string     `json:"project,omitempty"`
+	Access       Access     `json:"access"`
+	TokenPrefix  string     `json:"token_prefix"`
+	CreatedAt    time.Time  `json:"created_at"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+}
+
+// List describes the credentials of one project, or every operator credential when project is
+// empty, newest first, revoked ones included so a revocation is visible as one.
+func (s *Store) List(ctx context.Context, project string, limit int) ([]Listed, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.registry.Query(ctx, fmt.Sprintf(`
+		SELECT credential_id::text, name, kind, project, access, token_prefix, created_at, revoked_at
+		  FROM %s.credential
+		 WHERE project = $1
+		 ORDER BY created_at DESC, credential_id
+		 LIMIT $2`, s.schema), project, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list credentials: %w", err)
+	}
+	defer rows.Close()
+	out := []Listed{}
+	for rows.Next() {
+		var c Listed
+		if err := rows.Scan(&c.CredentialID, &c.Name, &c.Kind, &c.Project, &c.Access, &c.TokenPrefix, &c.CreatedAt, &c.RevokedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // Revoke stops a credential resolving, keeping the row so whatever recorded its use can still name

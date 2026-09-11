@@ -677,6 +677,277 @@ POST `/v1/records/retract` → 200
 | `records` | array of {id: string, version: string, operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339), replacement_source_observation_id: string, optional, replacement_record_id: string, optional} |
 
 
+## Management operations
+
+The management surface (D133) is served by the `manage` role on its own listener and reached with an operator credential, which opens no memory route; a project credential is refused at this door with the same answer a stranger gets. A request names the project it acts on. Every operation is on the ledger with the operator credential as its principal. Refusal counts carry no words; the words are read under a project credential through the memory routes.
+
+| Operation | Method | Path | On success |
+|---|---|---|---|
+| `project.create` | POST | `/manage/v1/projects/create` | 201 |
+| `project.list` | POST | `/manage/v1/projects/list` | 200 |
+| `project.suspend` | POST | `/manage/v1/projects/suspend` | 200 |
+| `project.resume` | POST | `/manage/v1/projects/resume` | 200 |
+| `credential.issue` | POST | `/manage/v1/credentials/issue` | 201 |
+| `credential.list` | POST | `/manage/v1/credentials/list` | 200 |
+| `credential.revoke` | POST | `/manage/v1/credentials/revoke` | 200 |
+| `refusal.summary` | POST | `/manage/v1/refusals/summary` | 200 |
+| `erasure.list` | POST | `/manage/v1/erasures/list` | 200 |
+| `formation.status` | POST | `/manage/v1/formation/status` | 200 |
+| `formation.parked` | POST | `/manage/v1/formation/parked` | 200 |
+| `formation.unpark` | POST | `/manage/v1/formation/unpark` | 200 |
+| `audit.seal` | POST | `/manage/v1/audit/seal` | 200 |
+| `audit.verify` | POST | `/manage/v1/audit/verify` | 200 |
+
+## `project.create`
+
+POST `/manage/v1/projects/create` → 201
+
+### Request
+
+| Field | Type |
+|---|---|
+| `name` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `suspended` | boolean |
+
+
+## `project.list`
+
+POST `/manage/v1/projects/list` → 200
+
+Takes no body.
+
+### Response
+
+| Field | Type |
+|---|---|
+| `projects` | array of {project: string, label: string, surfaces: array of string, retention: string, suspended: boolean} |
+
+
+## `project.suspend`
+
+POST `/manage/v1/projects/suspend` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `name` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `suspended` | boolean |
+
+
+## `project.resume`
+
+POST `/manage/v1/projects/resume` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `name` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `suspended` | boolean |
+
+
+## `credential.issue`
+
+POST `/manage/v1/credentials/issue` → 201
+
+### Request
+
+| Field | Type |
+|---|---|
+| `name` | string |
+| `project` | string |
+| `access` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `name` | string |
+| `project` | string |
+| `access` | string |
+| `token` | string |
+
+
+## `credential.list`
+
+POST `/manage/v1/credentials/list` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `limit` | integer |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `credentials` | array of {id: string, name: string, kind: string, project: string, access: string, token_prefix: string, created_at: timestamp (RFC 3339), revoked_at: timestamp (RFC 3339), optional} |
+
+
+## `credential.revoke`
+
+POST `/manage/v1/credentials/revoke` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `id` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `id` | string |
+| `revoked` | boolean |
+
+
+## `refusal.summary`
+
+POST `/manage/v1/refusals/summary` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `limit` | integer |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `total` | integer |
+| `counts` | array of {reason: string, predicate: string, count: integer} |
+
+
+## `erasure.list`
+
+POST `/manage/v1/erasures/list` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `limit` | integer |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `erasures` | array of {id: string, project: string, selector: opaque JSON, reason: string, requested_at: timestamp (RFC 3339), completed_at: timestamp (RFC 3339), optional, residual: opaque JSON} |
+
+
+## `formation.status`
+
+POST `/manage/v1/formation/status` → 200
+
+Takes no body.
+
+### Response
+
+| Field | Type |
+|---|---|
+| `scopes` | array of {project: string, suspended: boolean, stored: integer, optional, formed: integer, optional, parked: integer} |
+
+
+## `formation.parked`
+
+POST `/manage/v1/formation/parked` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `after` | integer, optional |
+| `limit` | integer |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `items` | array of {observation_id: string, log_offset: integer, attempts: integer, parked_at: timestamp (RFC 3339)} |
+| `next_after` | integer, optional |
+
+
+## `formation.unpark`
+
+POST `/manage/v1/formation/unpark` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `observation_id` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `observation_id` | string |
+| `unparked` | boolean |
+
+
+## `audit.seal`
+
+POST `/manage/v1/audit/seal` → 200
+
+Takes no body.
+
+### Response
+
+| Field | Type |
+|---|---|
+| `From` | integer |
+| `To` | integer |
+| `Entries` | integer |
+| `Digest` | string |
+
+
+## `audit.verify`
+
+POST `/manage/v1/audit/verify` → 200
+
+Takes no body.
+
+### Response
+
+| Field | Type |
+|---|---|
+| `Valid` | boolean |
+| `Seals` | integer |
+| `Entries` | integer |
+| `Unsealed` | integer |
+| `Head` | string |
+| `Failure` | string |
+
+
 ## Refusals
 
 A refusal is a JSON body of the shape `{"error": {"code": "…", "message": "…"}}`. Branch on the code; the message is for a person reading a log and may change.
@@ -717,6 +988,8 @@ Any operation may answer with any of these.
 | `storage_capacity` |
 | `invalid_subject` |
 | `subject_conflict` |
+| `invalid_project` |
+| `invalid_credential` |
 
 ## Liveness
 

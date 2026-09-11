@@ -116,6 +116,9 @@ func main() {
 func run(ctx context.Context, log *slog.Logger) error {
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
+	if strings.TrimSpace(os.Getenv(envRole)) == roleManage {
+		return runManage(ctx, log)
+	}
 	memoryDSN := strings.TrimSpace(os.Getenv(envMemoryDSN))
 	if memoryDSN == "" {
 		return fmt.Errorf("%s is not set", envMemoryDSN)
@@ -158,7 +161,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 		role = roleAll
 	}
 	if role != roleAll && role != roleAPI && role != roleWorker {
-		return fmt.Errorf("%s is %q; it is one of %q, %q or %q", envRole, role, roleAll, roleAPI, roleWorker)
+		return fmt.Errorf("%s is %q; it is one of %q, %q, %q or %q", envRole, role, roleAll, roleAPI, roleWorker, roleManage)
 	}
 	requireFormation, err := formationRequired()
 	if err != nil {

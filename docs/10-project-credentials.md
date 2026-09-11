@@ -35,3 +35,20 @@ the data-plane connection cannot access it.
 Taisce is greenfield; there is no mixed-version server compatibility contract. Fresh bootstrap
 installs the access column and its constraints. [D79](01-decisions.md) records the design and
 remaining authorization scope.
+
+## Operator credentials
+
+An operator credential (D133) is the second kind. It reaches the management surface, `/manage/v1`,
+served by the `manage` role, and no project's memory; a project credential is refused at that door
+the way a stranger is. `taisce bootstrap` mints the first one when none is live, and
+`taisce operator issue <name>` mints another over the administrative connection. With
+`TAISCE_MANAGE_API` and `TAISCE_OPERATOR_TOKEN` set, `taisce project`, `taisce credential` and
+`taisce audit` speak the surface and need no database connection:
+
+```sh
+TAISCE_MANAGE_API=http://127.0.0.1:8081 TAISCE_OPERATOR_TOKEN=… taisce credential issue app --project research --read-only
+TAISCE_MANAGE_API=http://127.0.0.1:8081 TAISCE_OPERATOR_TOKEN=… taisce credential list --project research
+```
+
+The listing names each credential by id, name, token prefix and project; the token itself is shown
+once at issue and never again.

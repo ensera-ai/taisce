@@ -80,6 +80,39 @@ func (s *ProjectStore) Active(ctx context.Context, scope string) (Project, error
 // Not deletion, and the difference is the whole point: a suspended project's memory is intact and can
 // be resumed, while deleting it would remove memory without a counted residual — which is the one
 // thing this product promises never to do quietly.
+// Listed is a project as an operator sees it: its settings and whether it is suspended.
+type Listed struct {
+	Scope     string   `json:"project"`
+	Label     string   `json:"label,omitempty"`
+	Surfaces  []string `json:"surfaces"`
+	Retention string   `json:"retention,omitempty"`
+	Suspended bool     `json:"suspended"`
+}
+
+// List reads every project from the project table, suspended ones included. A project is a row,
+// so one created and never used is listed: existence does not depend on anybody having used it.
+func (s *ProjectStore) List(ctx context.Context) ([]Listed, error) {
+	rows, err := s.pool.Query(ctx, s.schema.SQL(
+		`SELECT scope, label, surfaces, coalesce(retention::text, ''), suspended_at IS NOT NULL
+		   FROM {schema}.project ORDER BY scope`))
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	defer rows.Close()
+	out := []Listed{}
+	for rows.Next() {
+		var p Listed
+		if err := rows.Scan(&p.Scope, &p.Label, &p.Surfaces, &p.Retention, &p.Suspended); err != nil {
+			return nil, err
+		}
+		if p.Surfaces == nil {
+			p.Surfaces = []string{}
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (s *ProjectStore) Suspend(ctx context.Context, scope string) error {
 	tag, err := s.pool.Exec(ctx, s.schema.SQL(
 		`UPDATE {schema}.project SET suspended_at = now()

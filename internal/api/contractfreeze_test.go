@@ -91,6 +91,23 @@ func freezeViolations(frozen, served Frozen) []string {
 		out = append(out, heldFields(want.Name+" request", want.Request, got.Request)...)
 		out = append(out, heldFields(want.Name+" response", want.Response, got.Response)...)
 	}
+	managed := map[string]OperationShape{}
+	for _, o := range served.Management {
+		managed[o.Name] = o
+	}
+	for _, want := range frozen.Management {
+		got, ok := managed[want.Name]
+		if !ok {
+			out = append(out, fmt.Sprintf("management operation %s was frozen and is no longer served: that is a new version, not a change", want.Name))
+			continue
+		}
+		if got.Method != want.Method || got.Path != want.Path || got.Success != want.Success || got.NoBody != want.NoBody {
+			out = append(out, fmt.Sprintf("management operation %s changed its route or status: frozen %s %s → %d, served %s %s → %d", want.Name,
+				want.Method, want.Path, want.Success, got.Method, got.Path, got.Success))
+		}
+		out = append(out, heldFields(want.Name+" request", want.Request, got.Request)...)
+		out = append(out, heldFields(want.Name+" response", want.Response, got.Response)...)
+	}
 	codes := map[string]bool{}
 	for _, c := range served.Codes {
 		codes[c] = true

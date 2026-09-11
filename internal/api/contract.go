@@ -147,6 +147,28 @@ func Contract() string {
 		writeShape(&b, o.response)
 	}
 
+	b.WriteString("\n## Management operations\n\n")
+	b.WriteString("The management surface (D133) is served by the `manage` role on its own listener and reached " +
+		"with an operator credential, which opens no memory route; a project credential is refused at this door " +
+		"with the same answer a stranger gets. A request names the project it acts on. Every operation is on " +
+		"the ledger with the operator credential as its principal. Refusal counts carry no words; the words " +
+		"are read under a project credential through the memory routes.\n\n")
+	b.WriteString("| Operation | Method | Path | On success |\n|---|---|---|---|\n")
+	for _, o := range managementOperations {
+		fmt.Fprintf(&b, "| `%s` | %s | `%s%s` | %d |\n", o.Name, o.Method, ManagementPrefix, o.Path, o.Success)
+	}
+	for _, o := range managementOperations {
+		fmt.Fprintf(&b, "\n## `%s`\n\n%s `%s%s` → %d\n\n", o.Name, o.Method, ManagementPrefix, o.Path, o.Success)
+		if o.request == nil {
+			b.WriteString("Takes no body.\n\n")
+		} else {
+			b.WriteString("### Request\n\n")
+			writeShape(&b, o.request)
+		}
+		b.WriteString("### Response\n\n")
+		writeShape(&b, o.response)
+	}
+
 	b.WriteString("\n## Refusals\n\n")
 	b.WriteString(
 		"A refusal is a JSON body of the shape `{\"error\": {\"code\": \"…\", \"message\": \"…\"}}`. " +
@@ -211,6 +233,9 @@ type OperationShape struct {
 type Frozen struct {
 	Version    string           `json:"version"`
 	Operations []OperationShape `json:"operations"`
+	// Management is the operator surface (D133), frozen under the same rule: reached with an
+	// operator credential under its own prefix, and never by a project credential.
+	Management []OperationShape `json:"management,omitempty"`
 	Codes      []string         `json:"codes"`
 }
 
@@ -227,6 +252,16 @@ func Surface() Frozen {
 		}
 		shape.Response = exported(shapeOf(reflect.TypeOf(o.response)))
 		out.Operations = append(out.Operations, shape)
+	}
+	for _, o := range managementOperations {
+		shape := OperationShape{Name: o.Name, Method: o.Method, Path: ManagementPrefix + o.Path, Success: o.Success}
+		if o.request == nil {
+			shape.NoBody = true
+		} else {
+			shape.Request = exported(shapeOf(reflect.TypeOf(o.request)))
+		}
+		shape.Response = exported(shapeOf(reflect.TypeOf(o.response)))
+		out.Management = append(out.Management, shape)
 	}
 	out.Codes = ErrorCodes()
 	return out

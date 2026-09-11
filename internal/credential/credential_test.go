@@ -12,6 +12,7 @@ package credential_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -212,5 +213,56 @@ func TestACredentialWithoutANameIsRefused(t *testing.T) {
 	s := store(t)
 	if _, _, err := s.Issue(ctx, "   ", "alpha"); err == nil {
 		t.Fatal("issued a credential with no name")
+	}
+}
+
+// A credential is one of two kinds, and each kind opens one door (D133): the memory resolver
+// refuses an operator credential and the operator resolver refuses a project credential, both
+// with the answer a stranger gets; an operator credential names no project; and the registry
+// refuses a row that is both or neither.
+func TestACredentialOpensOneDoorByItsKindAndTheRegistryHoldsTheKind(t *testing.T) {
+	ctx := context.Background()
+	pool := registry(t)
+	s := credential.NewStore(pool, string(migrate.ControlSchema))
+	operatorToken, operator, err := s.IssueOperator(ctx, "ops")
+	if err != nil || operator.Project != "" || operator.CredentialID == "" {
+		t.Fatalf("an operator credential names no project, got %+v %v", operator, err)
+	}
+	projectToken, _, err := s.Issue(ctx, "app", "p-kinds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resolve(ctx, operatorToken); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("the memory door must refuse an operator credential as a stranger, got %v", err)
+	}
+	if _, err := s.ResolveOperator(ctx, projectToken); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("the operator door must refuse a project credential as a stranger, got %v", err)
+	}
+	if g, err := s.ResolveOperator(ctx, operatorToken); err != nil || g.CredentialID != operator.CredentialID {
+		t.Fatalf("the operator door opens for the operator, got %+v %v", g, err)
+	}
+	if _, err := s.ResolveOperator(ctx, ""); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatal("an empty token is a stranger at the operator door too")
+	}
+	// The kind is the registry's: a row that claims to be both, or neither, is refused by the
+	// database, so no code path can mint one.
+	for _, row := range []struct{ kind, project string }{{"operator", "p-kinds"}, {"project", ""}, {"admin", "p-kinds"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO `+string(migrate.ControlSchema)+`.credential (credential_id, token_digest, token_prefix, name, project, access, kind)
+			VALUES (gen_random_uuid(), gen_random_bytes(32), 'tsk_xxxxxxxx', 'bad', $1, 'read_write', $2)`, row.project, row.kind); err == nil {
+			t.Fatalf("the registry accepted kind %q with project %q", row.kind, row.project)
+		}
+	}
+	listed, err := s.List(ctx, "p-kinds", 10)
+	if err != nil || len(listed) != 1 || listed[0].Kind != credential.KindProject || listed[0].TokenPrefix == "" {
+		t.Fatalf("listing a project's credentials describes them without the token, got %+v %v", listed, err)
+	}
+	if strings.Contains(fmt.Sprint(listed), projectToken) {
+		t.Fatal("a listing must never carry the token")
+	}
+	if err := s.Revoke(ctx, operator.CredentialID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResolveOperator(ctx, operatorToken); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatal("a revoked operator credential is a stranger")
 	}
 }
