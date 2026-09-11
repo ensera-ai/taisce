@@ -4904,3 +4904,38 @@ service; an agent that must not read what another wrote is a project).
 session.
 
 **How hard to undo.** Easy: an axis can be added as a field; nothing depends on its absence.
+
+## D138 — An erasure names a person or a set of source observations, and both walk the same path
+
+**Date:** 2026-09-11. **Tracking:** [#170](https://github.com/althunibat/taisce/issues/170).
+
+**Decision.** `POST /v1/erasures` takes `data_subject_id` or `source_observation_ids`, never both
+and never neither. The walk is one: every statement picks observations through a selector that is
+rendered once — by attribution, or by identity — deletes projections through their registrations,
+keeps a projection another observation also registered, counts the residual against the same
+predicate in the same transaction, and records the selector on the receipt. A source erasure never
+touches the data-subject row, because the person's other turns survive and so does the person. An
+id from another project matches nothing: the predicate is scoped before it is keyed. A request is
+bounded at ten thousand ids — a document of two and a half megabytes cut at the smallest segment
+ceiling; a larger one is erased in more than one request, each with its own receipt.
+
+**Why.** A third-party document has no principal, so it was reachable by no erasure and left only
+with retention or with its project — and a takedown, a licence withdrawn or a file ingested in
+error are not retention. The identity needed already existed on the operator's side, in the manifest
+ingestion writes; what was missing was the operation that takes it. Two walks would have been two
+receipts with different meanings under one name; one walk keyed two ways is one meaning.
+
+**Rejected.** Requiring every document to be observed under a synthetic subject standing for its
+owner (a document's owner is not a data subject, and a subject erasure's meaning — "this person is
+gone" — would be lent to something it is not). A separate source walk (a second copy of the
+governance path, diverging silently). Erasing "everything without a subject" (a project-wide delete
+under another name; a project is dropped by its operator). Refusing a source that no longer exists
+(a retry of an erasure must be answered, and it is: zero deleted, nothing residual).
+
+**Impact.** Security: the operation reaches only the caller's project, held by the scope in every
+predicate rather than by a check before them. Operations: a document is removable by the receipts
+ingestion already wrote. Contract: two fields and one error code added to a frozen surface, regenerated
+and read.
+
+**How hard to undo.** Easy: the selector is one type in the eraser and two request fields; the
+receipt's selector column already held JSON.

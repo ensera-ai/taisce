@@ -962,3 +962,149 @@ func extendProjectionFixture(t *testing.T, pool *pgxpool.Pool, schema pg.Schema,
 		t.Fatal(err)
 	}
 }
+
+// ── #170's claim ──────────────────────────────────────────────────────────────────────────────
+//
+// A document observed without a data subject is erased by its source observations, with the same
+// receipt as a subject: everything registered only to those sources goes, a projection another
+// source also registered stays, the residual is counted against the same predicate, and the person
+// who also spoke is untouched — their turns, and so their row, survive.
+
+// projectTurn is a turn attributed to nobody: a third-party document has no principal.
+func projectTurn(content string) domain.Turn {
+	return domain.Turn{
+		Scope:      "p1",
+		OccurredAt: time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC),
+		Messages:   []domain.Message{{Ordinal: 0, Role: domain.RoleUser, Content: content}},
+	}
+}
+
+func TestADocumentObservedWithoutASubjectIsErasedByItsSourcesWithAResidualOfZero(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_source")
+	formed(t, pool, schema,
+		projectTurn("Ensera is a company in Dublin."),
+		projectTurn("Ensera builds memory for agents."),
+		subjectTurn("subject-1", "Marta works at Ensera."))
+
+	var sources []string
+	rows, err := pool.Query(ctx, schema.SQL(`SELECT observation_id::text FROM {schema}.observation WHERE scope='p1' AND data_subject_id IS NULL ORDER BY log_offset`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		sources = append(sources, id)
+	}
+	rows.Close()
+	if len(sources) != 2 {
+		t.Fatalf("the document is two observations attributed to nobody, found %d", len(sources))
+	}
+
+	eraser := pg.NewEraser(pool)
+	receipt, err := eraser.EraseSources(ctx, schema, "p1", sources, "takedown")
+	if err != nil {
+		t.Fatalf("erase by source: %v", err)
+	}
+	if !receipt.Clean() {
+		t.Fatalf("the erasure by source left a residual: %+v", receipt.Residual)
+	}
+	if receipt.Deleted["observation"] != 2 {
+		t.Fatalf("both source observations must go, deleted %+v", receipt.Deleted)
+	}
+	if _, counted := receipt.Deleted["data_subject"]; counted {
+		t.Fatal("an erasure by source has no person to remove, and must not claim one")
+	}
+	if len(receipt.SourceObservationIDs) != 2 || receipt.DataSubjectID != "" {
+		t.Fatalf("the receipt names the sources and no subject: %+v", receipt)
+	}
+
+	// Ensera survives, because Marta's turn still names it; Dublin does not, because only the
+	// document did. And Marta is still here, turn and words.
+	var ensera, dublin, marta, messages int
+	if err := pool.QueryRow(ctx, schema.SQL(`
+		SELECT (SELECT count(*) FROM {schema}.entity WHERE normalized_name = 'ensera'),
+		       (SELECT count(*) FROM {schema}.entity WHERE normalized_name = 'dublin'),
+		       (SELECT count(*) FROM {schema}.observation WHERE scope='p1' AND data_subject_id='subject-1'),
+		       (SELECT count(*) FROM {schema}.turn_message m JOIN {schema}.observation o ON o.observation_id=m.observation_id WHERE o.data_subject_id='subject-1')`)).
+		Scan(&ensera, &dublin, &marta, &messages); err != nil {
+		t.Fatal(err)
+	}
+	if ensera != 1 {
+		t.Fatal("a projection the person's turn also registered was removed with the document")
+	}
+	if dublin != 0 {
+		t.Fatal("an entity only the document named survived its erasure")
+	}
+	if marta != 1 || messages == 0 {
+		t.Fatalf("erasing a document touched the person: their observations %d, messages %d", marta, messages)
+	}
+
+	// The receipt is a row carrying what was asked, and it was the sources.
+	erasures, err := eraser.Erasures(ctx, schema, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(erasures) != 1 || len(erasures[0].SourceObservationIDs) != 2 || erasures[0].DataSubjectID != "" {
+		t.Fatalf("the ledger of erasures holds the selector as it was asked: %+v", erasures)
+	}
+
+	// A second erasure of the same sources is a retry, and reports that there was nothing to do.
+	again, err := eraser.EraseSources(ctx, schema, "p1", sources, "takedown, again")
+	if err != nil {
+		t.Fatalf("a repeated erasure by source must be answered, not refused: %v", err)
+	}
+	if again.Deleted["observation"] != 0 || !again.Clean() {
+		t.Fatalf("a repeat found something the first left: %+v", again)
+	}
+}
+
+// An observation id from another project matches nothing: the predicate is scoped before it is
+// keyed, so the caller's credential reaches its own project and no other, and the receipt says so
+// by deleting nothing rather than by reaching across.
+func TestAnErasureBySourceCannotReachAnotherProjectAndRefusesWhatIsNotAnId(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+	schema := tenant(t, pool, "er_source_scope")
+	observations := pg.NewObservationStore(pool)
+	elsewhere := projectTurn("Ensera is a company in Dublin.")
+	elsewhere.Scope = "p2"
+	other, err := observations.Append(ctx, schema, elsewhere)
+	if err != nil {
+		t.Fatal(err)
+	}
+	formed(t, pool, schema, projectTurn("Ensera builds memory for agents."))
+
+	eraser := pg.NewEraser(pool)
+	receipt, err := eraser.EraseSources(ctx, schema, "p1", []string{other.ID}, "reaching")
+	if err != nil {
+		t.Fatalf("erase: %v", err)
+	}
+	if receipt.Deleted["observation"] != 0 {
+		t.Fatalf("an erasure under one project deleted another's observation: %+v", receipt.Deleted)
+	}
+	var kept int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.observation WHERE scope='p2'`)).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != 1 {
+		t.Fatal("the other project's observation is gone")
+	}
+
+	for name, sources := range map[string][]string{"nothing": nil, "not an id": {"the-manifest"}} {
+		if _, err := eraser.EraseSources(ctx, schema, "p1", sources, name); err == nil {
+			t.Fatalf("an erasure by source naming %s was accepted", name)
+		}
+	}
+	var mine int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.observation WHERE scope='p1'`)).Scan(&mine); err != nil {
+		t.Fatal(err)
+	}
+	if mine != 1 {
+		t.Fatal("a refused erasure deleted something")
+	}
+}

@@ -21,4 +21,5 @@ what was just recorded.
 **Do not record secrets.** Keys, tokens, passwords and personal data of third parties are not
 memories, and the deployment keeps what it is given. If the user asks to remember something about a
 person, record it under that person's data subject only if the plugin is configured for them;
-otherwise say that it would be recorded project-wide and reachable by no erasure.
+otherwise say that it would be recorded project-wide, reachable by no subject erasure and only by
+the observation id the record returns.

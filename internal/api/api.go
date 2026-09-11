@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -819,17 +820,28 @@ func renderBundle(b domain.Bundle) recallResponse {
 
 // ── Erase ─────────────────────────────────────────────────────────────────────────────────────
 
+// eraseRequest names one thing: the person to erase, or the source observations to erase — a
+// document observed project-wide has no person, and its manifest holds its observation ids.
 type eraseRequest struct {
-	DataSubjectID string `json:"data_subject_id"`
-	Reason        string `json:"reason"`
+	DataSubjectID        string   `json:"data_subject_id"`
+	SourceObservationIDs []string `json:"source_observation_ids"`
+	Reason               string   `json:"reason"`
 }
 
+// maxErasureSources bounds an erasure by source. Each id is one element of one array predicate in
+// every statement of the walk, so the cost is linear and small; the bound exists so that a request
+// cannot be a project-wide delete spelled out one id at a time. Ten thousand segments is a document
+// of two and a half megabytes cut at the smallest ceiling; a larger one is erased in more than one
+// request, each with its own receipt.
+const maxErasureSources = 10000
+
 type eraseResponse struct {
-	RequestID     string         `json:"request_id"`
-	Scope         string         `json:"scope"`
-	DataSubjectID string         `json:"data_subject_id"`
-	CompletedAt   time.Time      `json:"completed_at"`
-	Deleted       map[string]int `json:"deleted"`
+	RequestID            string         `json:"request_id"`
+	Scope                string         `json:"scope"`
+	DataSubjectID        string         `json:"data_subject_id"`
+	SourceObservationIDs []string       `json:"source_observation_ids,omitempty"`
+	CompletedAt          time.Time      `json:"completed_at"`
+	Deleted              map[string]int `json:"deleted"`
 	// Residual is the product. "Done" is a claim; a count of what still matches, taken after the
 	// delete in the same transaction, is a measurement — and it is the one a data protection officer
 	// is actually asking for.
@@ -842,13 +854,37 @@ func (s *Server) erase(w http.ResponseWriter, r *http.Request, grant credential.
 	if !decode(w, r, &req) {
 		return
 	}
-	if strings.TrimSpace(req.DataSubjectID) == "" {
+	subject := strings.TrimSpace(req.DataSubjectID)
+	if subject == "" && len(req.SourceObservationIDs) == 0 {
 		writeError(w, http.StatusBadRequest, codeNoSubject,
-			"an erasure names the person it is for; one without a subject would be a scope-wide delete")
+			"an erasure names the person it is for, or the source observations it is for; one naming neither would be a scope-wide delete")
 		return
 	}
+	if subject != "" && len(req.SourceObservationIDs) > 0 {
+		writeError(w, http.StatusBadRequest, codeInvalidErasure,
+			"an erasure names a person or a set of sources, not both: the receipt says what was asked, and it was one thing")
+		return
+	}
+	if len(req.SourceObservationIDs) > maxErasureSources {
+		writeError(w, http.StatusBadRequest, codeInvalidErasure,
+			fmt.Sprintf("an erasure names at most %d source observations", maxErasureSources))
+		return
+	}
+	for _, id := range req.SourceObservationIDs {
+		if _, err := uuid.Parse(id); err != nil {
+			writeError(w, http.StatusBadRequest, codeInvalidErasure,
+				"an erasure by source names observations by the id each was observed under")
+			return
+		}
+	}
 
-	receipt, err := s.eraser.Erase(r.Context(), s.schema, grant.Project, req.DataSubjectID, req.Reason)
+	var receipt domain.Erasure
+	var err error
+	if subject != "" {
+		receipt, err = s.eraser.Erase(r.Context(), s.schema, grant.Project, subject, req.Reason)
+	} else {
+		receipt, err = s.eraser.EraseSources(r.Context(), s.schema, grant.Project, req.SourceObservationIDs, req.Reason)
+	}
 	if err != nil {
 		s.log.Error("erase", "error", err, "project", grant.Project)
 		writeError(w, http.StatusInternalServerError, codeInternal, "the erasure did not complete")
@@ -861,7 +897,8 @@ func (s *Server) erase(w http.ResponseWriter, r *http.Request, grant credential.
 	s.record(r, domain.AuditErase, grant, domain.OutcomeAllowed, deleted)
 	writeJSON(w, http.StatusOK, eraseResponse{
 		RequestID: receipt.RequestID, Scope: receipt.Scope, DataSubjectID: receipt.DataSubjectID,
-		CompletedAt: receipt.CompletedAt, Deleted: receipt.Deleted, Residual: receipt.Residual,
+		SourceObservationIDs: receipt.SourceObservationIDs,
+		CompletedAt:          receipt.CompletedAt, Deleted: receipt.Deleted, Residual: receipt.Residual,
 		Clean: receipt.Clean(),
 	})
 }
@@ -993,6 +1030,9 @@ const (
 	// codeNoSubject is an erasure or an export that names nobody. Refused rather than treated as
 	// scope-wide, which is the difference between a governance operation and an accident.
 	codeNoSubject errorCode = "no_subject"
+	// codeInvalidErasure is an erasure that names both a person and sources, too many sources, or a
+	// source that is not an observation id.
+	codeInvalidErasure errorCode = "invalid_erasure"
 	// codeInternal is anything that went wrong here. It says nothing about what, because what went
 	// wrong is a description of how this system is built.
 	codeInternal errorCode = "internal"
@@ -1014,7 +1054,7 @@ var errorCodes = []errorCode{
 	codeInvalidReportCandidateQuery, codeReportCandidatesUnavailable,
 	codeInvalidEntityPage,
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
-	codeInvalidQuestion, codeNoSubject, codeInternal, codeIdempotencyConflict, codeRateLimited,
+	codeInvalidQuestion, codeNoSubject, codeInvalidErasure, codeInternal, codeIdempotencyConflict, codeRateLimited,
 	codeInvalidCitation, codeCitationLimit, codeNotFound, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidContext, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity, codeInvalidSubject, codeSubjectConflict,
 	codeInvalidProject, codeInvalidCredential,
 }

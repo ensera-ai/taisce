@@ -213,7 +213,12 @@ const retainFactReceiptSQL = `INSERT INTO {schema}.fact_receipt(scope,fact_id,so
 
 // These names are a fixed internal set. Both governance readers use exactly the same predicate.
 func receiptOwnershipSQL(table string) string {
-	owned := `SELECT observation_id FROM {schema}.observation WHERE scope=$1 AND data_subject_id=$2`
+	return receiptOwnershipSQLFor(table, `SELECT observation_id FROM {schema}.observation WHERE scope=$1 AND data_subject_id=$2`)
+}
+
+// receiptOwnershipSQLFor is the same predicate over any subquery of owned observation ids, so an
+// erasure by source counts receipts exactly as an erasure by subject does.
+func receiptOwnershipSQLFor(table, owned string) string {
 	if table == "fact_receipt_history" {
 		return `r.scope=$1 AND (r.source_observation_id IN (` + owned + `) OR EXISTS(SELECT 1 FROM {schema}.fact_receipt p WHERE p.scope=r.scope AND p.fact_id=r.fact_id AND (p.source_observation_id IN (` + owned + `) OR p.supersession_source IN (` + owned + `))))`
 	}

@@ -509,6 +509,7 @@ POST `/v1/erasures` → 200
 | Field | Type |
 |---|---|
 | `data_subject_id` | string |
+| `source_observation_ids` | array of string |
 | `reason` | string |
 
 ### Response
@@ -518,6 +519,7 @@ POST `/v1/erasures` → 200
 | `request_id` | string |
 | `scope` | string |
 | `data_subject_id` | string |
+| `source_observation_ids` | array of string |
 | `completed_at` | timestamp (RFC 3339) |
 | `deleted` | object of integer |
 | `residual` | object of integer |
@@ -970,6 +972,7 @@ Any operation may answer with any of these.
 | `invalid_turn` |
 | `invalid_question` |
 | `no_subject` |
+| `invalid_erasure` |
 | `internal` |
 | `idempotency_conflict` |
 | `rate_limited` |

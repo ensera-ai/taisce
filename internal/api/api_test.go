@@ -388,6 +388,54 @@ func TestAnErasureWithoutASubjectIsRefusedOverTheWire(t *testing.T) {
 	}
 }
 
+// ── #170's claim, over the wire ───────────────────────────────────────────────────────────────
+//
+// A document observed project-wide is erased by the observation ids its manifest holds, with the
+// same receipt as a subject erasure; naming both a person and sources, or something that is not an
+// id, is refused before anything is read.
+func TestADocumentIsErasedByItsSourceObservationsOverTheWire(t *testing.T) {
+	h := newHarness(t, "api_erase_source")
+
+	var observed struct {
+		ID string `json:"id"`
+	}
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"messages": []map[string]any{
+			{"role": "user", "content": "Ensera is a company in Dublin."},
+		},
+	}, http.StatusCreated, &observed)
+	h.form(t)
+
+	var receipt struct {
+		DataSubjectID        string         `json:"data_subject_id"`
+		SourceObservationIDs []string       `json:"source_observation_ids"`
+		Deleted              map[string]int `json:"deleted"`
+		Residual             map[string]int `json:"residual"`
+		Clean                bool           `json:"clean"`
+	}
+	h.do(t, http.MethodPost, "/v1/erasures", map[string]any{
+		"source_observation_ids": []string{observed.ID}, "reason": "takedown",
+	}, http.StatusOK, &receipt)
+	if !receipt.Clean || receipt.Deleted["observation"] != 1 || len(receipt.SourceObservationIDs) != 1 || receipt.DataSubjectID != "" {
+		t.Fatalf("the receipt must name the source, count the observation and be clean: %+v", receipt)
+	}
+	for kind, n := range receipt.Residual {
+		if n != 0 {
+			t.Fatalf("residual %s=%d after erasing the document's only source", kind, n)
+		}
+	}
+
+	for name, body := range map[string]map[string]any{
+		"both a person and sources": {"data_subject_id": "subject-1", "source_observation_ids": []string{observed.ID}},
+		"a source that is not an id": {"source_observation_ids": []string{"manifest.json"}},
+	} {
+		status, raw := h.raw(t, http.MethodPost, "/v1/erasures", body, h.token)
+		if status != http.StatusBadRequest || !bytes.Contains(raw, []byte("invalid_erasure")) {
+			t.Fatalf("an erasure naming %s returned %d %s", name, status, raw)
+		}
+	}
+}
+
 // Health is the one unauthenticated route, and it says nothing. A liveness probe reporting a version,
 // a database state or a configuration is reconnaissance that happens to answer probes.
 func TestHealthIsOpenAndSaysNothing(t *testing.T) {

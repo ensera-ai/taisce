@@ -90,22 +90,20 @@ and, against the live API, `TestIngestStoresADocumentAsSegmentsExactlyOnceAndRef
 `TestIngestReportsRefusalsByNameAndEndsTheWaitWhenFormed` and
 `TestIngestRefusesAMisconfiguredRunBeforeReadingAnything` in `cmd/taisce`.
 
+## Erasing a document
+
+A document observed without a data subject is erased by its sources. The manifest holds each
+segment's observation id, and `POST /v1/erasures` takes them as `source_observation_ids` under the
+credential's project, with the same receipt as a subject erasure: every projection registered only
+to those observations goes, a projection another observation also registered stays, and the
+residual is counted against the same predicate in the same transaction. An id from another project
+matches nothing. A document observed under a subject is erased with that subject, or by its sources;
+either reaches every projection it fed. `TestADocumentObservedWithoutASubjectIsErasedByItsSourcesWithAResidualOfZero`
+and `TestADocumentIsErasedByItsSourceObservationsOverTheWire` hold it (D138).
+
 ## Limits
 
-A document observed without a data subject is reachable by no erasure: erasure is by subject, so a
-project-wide document leaves only with retention or with its project. A document that must be erasable
-is observed under a subject that stands for its owner, with `--data-subject`; then erasing that subject
-reaches every projection the document fed. Whether erasure by source should exist is
-[#170](https://github.com/althunibat/taisce/issues/170).
-
-Under a subject, a `tool`-role document asserts about others and never for the principal (D122):
-first-person claims in it are refused by role, which is the policy working. A document that is the
-person's own words is sent with `--role user`.
-
-Segmentation is by bytes and boundaries, not by tokens: a segment's token count depends on the
-model's tokenizer and the script, and 8 KiB of a dense script is more tokens than 8 KiB of English.
-The ceiling is the operator's to set from their own measurement.
-
-Only the formats above are read. Office documents, PDFs and HTML are converted to text by the operator
-before ingestion, with whatever tool they trust for it; a converter here would be a dependency whose
-failures become this system's failures.
+Erasure by source names observations; it does not search for them. A document whose manifest was
+lost is found through recall's citations, which name the observation each passage came from, and
+erased by those. There is no "erase everything without a subject": that would be a project-wide
+delete under another name, and a project is dropped by its operator.

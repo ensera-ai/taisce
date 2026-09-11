@@ -45,9 +45,9 @@ func generationLinksTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, id 
 
 // Delete and count before fact receipts cascade associations. The source pointer's deferred FK
 // remains satisfied when erasure removes the source's extraction pin later in the transaction.
-func eraseGenerationMetadataTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, owner string, out *domain.Erasure) error {
+func eraseGenerationMetadataTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, owned string, owner any, out *domain.Erasure) error {
 	for _, table := range []string{"fact_generation_record", "fact_generation"} {
-		predicate := `r.scope=$1 AND r.source_observation_id IN (SELECT observation_id FROM {schema}.observation WHERE scope=$1 AND data_subject_id=$2)`
+		predicate := `r.scope=$1 AND r.source_observation_id IN (` + owned + `)`
 		tag, err := tx.Exec(ctx, schema.SQL("DELETE FROM {schema}."+table+" r WHERE "+predicate), scope, owner)
 		if err != nil {
 			return err

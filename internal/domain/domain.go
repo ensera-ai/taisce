@@ -930,11 +930,14 @@ func (r Reach) NamedNothingKnown() bool { return r.Terms > 0 && r.Anchored == 0 
 // transaction, is a measurement — and it is the measurement a data protection officer is actually
 // asking for.
 type Erasure struct {
-	RequestID     string
-	Scope         string
-	DataSubjectID string
-	Reason        string
-	CompletedAt   time.Time
+	RequestID string
+	Scope     string
+	// DataSubjectID names the person an erasure was for; SourceObservationIDs names the observations
+	// one was for instead. Exactly one is set: a receipt says what was asked, and it was one thing.
+	DataSubjectID        string
+	SourceObservationIDs []string
+	Reason               string
+	CompletedAt          time.Time
 	// Deleted and Residual are per projection kind, and both are needed. Deleted alone cannot
 	// distinguish a thorough erasure from one that found nothing. Residual alone cannot distinguish
 	// a clean sweep from a subject who was never here.

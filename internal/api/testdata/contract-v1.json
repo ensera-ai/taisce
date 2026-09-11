@@ -871,6 +871,10 @@
           "kind": "string"
         },
         {
+          "name": "source_observation_ids",
+          "kind": "array of string"
+        },
+        {
           "name": "reason",
           "kind": "string"
         }
@@ -887,6 +891,10 @@
         {
           "name": "data_subject_id",
           "kind": "string"
+        },
+        {
+          "name": "source_observation_ids",
+          "kind": "array of string"
         },
         {
           "name": "completed_at",
@@ -1529,6 +1537,7 @@
     "invalid_credential",
     "invalid_entity_candidate_query",
     "invalid_entity_page",
+    "invalid_erasure",
     "invalid_message_window",
     "invalid_passage_query",
     "invalid_project",
