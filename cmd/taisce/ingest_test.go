@@ -314,11 +314,14 @@ func TestIngestReportsRefusalsByNameAndEndsTheWaitWhenFormed(t *testing.T) {
 	if err := ingestCommand(ctx, []string{"--api", h.server.URL, "--manifest-dir", path, path}, &out); err == nil || !strings.Contains(err.Error(), "manifest directory") {
 		t.Fatalf("a manifest directory that is a file must be refused, got %v", err)
 	}
+	// Unwritable for every user, root included: a directory stands where the manifest file must
+	// be written, so the write fails after the API has already accepted the turn. A permission
+	// bit would not do, because a suite that runs as root (the qualification node's test
+	// container does) is not refused by one.
 	sealed := filepath.Join(dir, "sealed")
-	if err := os.MkdirAll(sealed, 0o500); err != nil {
+	if err := os.MkdirAll(filepath.Join(sealed, strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))+".manifest.json"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(sealed, 0o700) })
 	if _, err := h.run(t, "--manifest-dir", sealed, path); err == nil || !strings.Contains(err.Error(), "manifest") {
 		t.Fatalf("an unwritable manifest must fail the run, got %v", err)
 	}
