@@ -174,3 +174,66 @@ func readAll(t *testing.T, resp *http.Response) string {
 	}
 	return b.String()
 }
+
+// A page whose table cannot answer is an error page, never an empty panel that reads as "nothing to
+// report"; a sign-in whose form cannot be read is refused; a session the process no longer holds
+// is sent to sign in.
+func TestThePortalSaysWhenATableCannotAnswerAndRefusesWhatItCannotRead(t *testing.T) {
+	m := newManaged(t, "api_portal_broken")
+	ctx := context.Background()
+	mux := http.NewServeMux()
+	mux.Handle("/", m.manageServer.Handler())
+	api.NewPortal(m.manageServer).Mount(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	jar, _ := cookiejar.New(nil)
+	browser := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if resp, err := browser.PostForm(server.URL+"/portal/login", url.Values{"token": {m.operator}}); err != nil || resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("sign in: %v %v", err, resp)
+	}
+	status := func(path string) int {
+		t.Helper()
+		resp, err := browser.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		_ = readAll(t, resp)
+		return resp.StatusCode
+	}
+	moved := func(table string, path string) {
+		t.Helper()
+		if _, err := m.pool.Exec(ctx, m.schema.SQL(`ALTER TABLE {schema}.`+table+` RENAME TO `+table+`_moved`)); err != nil {
+			t.Fatal(err)
+		}
+		if got := status(path); got != http.StatusInternalServerError {
+			t.Errorf("%s without %s answered %d, not an error page", path, table, got)
+		}
+		if _, err := m.pool.Exec(ctx, m.schema.SQL(`ALTER TABLE {schema}.`+table+`_moved RENAME TO `+table)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	moved("project", "/portal/")
+	moved("rejected_claim", "/portal/projects/p1")
+	moved("erasure_request", "/portal/projects/p1")
+	moved("observation", "/portal/projects/p1")
+	moved("observation", "/portal/")
+	moved("audit_entry", "/portal/ledger")
+	// A form that cannot be read is refused without a query.
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/portal/login", strings.NewReader("token=%zz"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("an unreadable form must be refused, got %v %v", resp, err)
+	}
+	// A cookie naming a session the process does not hold is a stranger's.
+	stranger := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/portal/", nil)
+	req.AddCookie(&http.Cookie{Name: "taisce_portal", Value: "0000"})
+	if resp, err := stranger.Do(req); err != nil || resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("an unknown session must be sent to sign in, got %v %v", resp, err)
+	}
+	// Signing out without a session is harmless.
+	if resp, err := stranger.Post(server.URL+"/portal/logout", "application/x-www-form-urlencoded", nil); err != nil || resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("signing out without a session sends to the form, got %v %v", resp, err)
+	}
+}
