@@ -36,9 +36,10 @@ and TLS private material is excluded from image builds and Git. No account-level
 unrelated local files belong in the source archive. `run.sh` creates fresh local test credentials.
 The GPU.ai control-plane key and an ephemeral SSH private key remain on the operator machine.
 
-The lifecycle controller must request an exact offering with `max_price_per_hour` and
-`auto_terminate_hours`, retain its operation/instance IDs, and reconcile ambiguous responses using
-the unique run name. The provider runtime limit is a fallback if the operator machine disappears;
+The lifecycle controller is `deploy/gpu/controller` (`guard.py`, `deploy.py`, `attempts.py`,
+`phases.sh`; its README has the one command). It requests an exact offering with
+`max_price_per_hour` and `auto_terminate_hours`, retains its operation/instance IDs, and reconciles
+ambiguous responses using the unique run name. The provider runtime limit is a fallback if the operator machine disappears;
 normal termination happens immediately after collecting results. A remote wipe watchdog is also
 scheduled ahead of the provider deadline, so losing the local controller does not intentionally leave
 test data until termination. Never delete unrelated instances
