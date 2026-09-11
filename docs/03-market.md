@@ -204,3 +204,75 @@ No number here came from running their system or ours on the same corpus. Their 
 against their comparison conditions, with their writer and their judge, on their datasets. Whether
 this design is close in outcome is #15's business, on hardware that can be held still, and only after
 #149 has made recall the thing being measured.
+
+---
+
+## Microsoft Agent Framework `ChatHistoryMemoryProvider`
+
+Run **2026-09-11**, on the eight-A100 qualification node, against the framework's own chat-history
+memory provider (Microsoft.Agents.AI 1.20.0) and this project's context provider, from the same
+program (`Taisce.HeadToHead` in the .NET adapter repository, [#24](https://github.com/althunibat/taisce/issues/24)).
+The chat model for both was the pinned Qwen3.8-27B; the incumbent's vector store was embedded by the
+pinned Qwen3-Embedding-4B. Nothing is scored.
+
+### What it does, as a capability list
+
+The provider stores every chat message in a vector store on the way past, embedded on write, and
+before each invocation searches it by similarity to the request and injects the nearest messages as
+a `user` message headed "Memories", with a storage scope and a search scope so an application can
+store per session and search across a user's sessions. Its documentation says the store's content
+is accepted as-is without validation, and that messages may contain personal data.
+
+### What obliges us, re-derived
+
+Store per session, search across a person's sessions: that is the observation and the data subject
+(D134); nothing new is added. Inject as a `user` message, never as instructions: D129 already holds
+every adapter to that, with the message marked untrusted. Hold every retrieved word to evidence:
+the recall bundle carries the quote and its position for every fact.
+
+### The run, as it came out
+
+Subject `alice-d3bb0ab2`. Sessions: 2026-06-02 "I've just moved to Dublin for the new job, so my address is in Dublin now."; 2026-08-15 "Quick update: we relocated the family to Cork last week, so I live in Cork now and work from the Cork office.". Question: "Where do I live now?".
+
+#### Taisce
+
+What the provider handed the model, before the question:
+
+```
+[user] taisce-memory/v1 untrusted
+{"watermark":{"stored":2,"formed":2,"parked":0},"plan":{"controls":{"max_characters":16000,"max_rows":200,"source_roles":["user"],"hops":1,"surfaces":["facts","reports","passages"],"themes":false},"degraded":["passages"],"reach":{"terms":14,"anchored":1,"named_nothing_known":false,"facts_per_anchor":{"4f595061-5536-4e49-a682-2578ade9fb06":2}}},"facts":[{"fact_id":"e01c39ee-3553-80a2-b779-ca7e15ccad62","subject":"speaker","predicate":"lives_in","object":"Cork","statement":"The speaker lives in Cork.","source_role":"user","valid_from":"2026-08-15T10:00:00+00:00","valid_until":null,"evidence":{"observation_id":"e73d53b5-a637-43ec-853c-fca358536426","source_ordinal":0,"quote":"I live in Cork now","byte_start":60,"byte_end":78,"context":"Quick update: we relocated the family to Cork last week, so I live in Cork now and work from the Cork office."}},{"fact_id":"49b60e57-7c48-8153-9567-ba150739f618","subject":"speaker","predicate":"located_in","object":"Cork office","statement":"The speaker works from the Cork office.","source_role":"user","valid_from":"2026-08-15T10:00:00+00:00","valid_until":null,"evidence":{"observation_id":"e73d53b5-a637-43ec-853c-fca358536426","source_ordinal":0,"quote":"work from the Cork office","byte_start":83,"byte_end":108,"context":"Quick update: we relocated the family to Cork last week, so I live in Cork now and work from the Cork office."}}],"reports":[],"passages":[]}
+```
+
+The model's answer: "Based on the information provided, you live in **Cork**."
+
+#### ChatHistoryMemoryProvider
+
+What the provider handed the model, before the question:
+
+```
+[user] ## Memories
+Consider the following memories when answering user questions:
+I've just moved to Dublin for the new job, so my address is in Dublin now.
+Quick update: we relocated the family to Cork last week, so I live in Cork now and work from the Cork office.
+Noted: you live in Cork now and work from the Cork office.
+```
+
+The model's answer: "Based on the most recent update, you live in **Cork**.
+
+The memory notes indicate that you relocated your family to Cork last week and now work from the Cork office, which supersedes the previous information about Dublin."
+
+### What separates them
+
+Both models answered "Cork". The difference is what each provider handed over to get there. The
+incumbent handed the stale sentence and the current one side by side, and left the arbitration to
+the model, which did it well here; it will do it as well as the model on the day, and nothing in the
+message says which sentence is current. Taisce handed two current facts, each with the date it
+became true, the words behind it and where they were said, and did not hand over the stale one at
+all: it is superseded on the record, reachable through `resolve_citation` and an `as_of` recall,
+and absent from an answer about now. The model was given less and needed to decide nothing.
+
+### What this does not tell us
+
+One session set, one model, one run. Not a retrieval benchmark, not a latency figure, not a claim
+about either provider on a weak model: BenchmarkQED ([#15](https://github.com/althunibat/taisce/issues/15)) is where a
+comparison with numbers belongs, on hardware that can be held still.

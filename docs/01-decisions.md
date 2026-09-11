@@ -4875,3 +4875,32 @@ the surface, and it reads nothing a project credential can. Operations: one envi
 turns it on; sessions live in one process and end with it. Cost: none on the memory path.
 
 **How hard to undo.** Easy: templates and one handler file behind a switch; nothing else reads them.
+
+## D134 — Storage scope and search scope map onto the observation and the data subject; there is no third axis
+
+**Date:** 2026-09-10. **Tracking:** [#24](https://github.com/althunibat/taisce/issues/24).
+
+**Decision.** An application writes into one session and recalls across a person's history, and it
+does so with what the contract already has. The storage scope is the observation: a turn is stored
+under a `data_subject_id` with the run folded into its idempotency key by the adapter, so a session
+is a run and a turn belongs to exactly one. The search scope is the data subject: a recall names
+`data_subject_id` to read one person's memory across every session they had, or omits it to read
+the project. A context (`POST /v1/contexts`) is likewise one subject's history across sessions.
+Nothing is added for "this session only": the session's own messages are the framework's history,
+which the framework already holds and the compaction seam replaces with the deployment's context
+(D131). An application, an agent or a session identifier is not a memory axis here.
+
+**Why.** The two scopes an application needs are "what was said now" and "what this person said
+ever", and those are the observation and the subject. A third axis would be a filter on rows at
+query time, which is a convention every query has to remember; the subject is a partition of
+attribution that erasure, export and recall already enforce in the substrate.
+
+**Rejected.** A per-session recall filter (a stale answer from an earlier session is exactly what
+supersession exists to mark, and hiding it by session hides the correction too). An application or
+agent axis (two agents of one application reading one person's memory is the point of a memory
+service; an agent that must not read what another wrote is a project).
+
+**Impact.** None on the wire: nothing changes. Documentation: the adapters' `RunId` is named as the
+session.
+
+**How hard to undo.** Easy: an axis can be added as a field; nothing depends on its absence.
