@@ -69,14 +69,9 @@ func TestTheSiteCoversEveryPackageEveryMigrationAndEveryTableFromThisRepository(
 		t.Fatalf("build: %v", err)
 	}
 	nav := read(t, bars)
-	private, err := privatePaths(root)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	// Every public directory holding a non-test Go file under cmd/ and internal/ has a page and a
-	// place in the navigation, found here by a walk of its own rather than by asking the code under
-	// test.
+	// Every directory holding a non-test Go file under cmd/ and internal/ has a page and a place in
+	// the navigation, found here by a walk of its own rather than by asking the code under test.
 	packages := 0
 	for _, top := range []string{"cmd", "internal"} {
 		_ = filepath.WalkDir(filepath.Join(root, top), func(p string, d os.DirEntry, err error) error {
@@ -85,7 +80,7 @@ func TestTheSiteCoversEveryPackageEveryMigrationAndEveryTableFromThisRepository(
 			}
 			rel, _ := filepath.Rel(root, p)
 			rel = filepath.ToSlash(rel)
-			if d.Name() == "testdata" || isPrivate(private, rel) {
+			if d.Name() == "testdata" {
 				return filepath.SkipDir
 			}
 			matches, _ := filepath.Glob(filepath.Join(p, "*.go"))
@@ -124,15 +119,6 @@ func TestTheSiteCoversEveryPackageEveryMigrationAndEveryTableFromThisRepository(
 	intro := read(t, filepath.Join(out, "introduction.md"))
 	if strings.HasPrefix(intro, "<!--") {
 		t.Error("the licence comment was left on a rendered page")
-	}
-	// Nothing on the private list reached the site, whatever it is.
-	for p := range private {
-		if !strings.HasPrefix(p, "docs/") {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(strings.TrimPrefix(p, "docs/")))); err == nil {
-			t.Errorf("%s is private and reached the site", p)
-		}
 	}
 }
 
@@ -231,15 +217,14 @@ func TestTheBuildRefusesADocumentDirectoryItWouldBeDangerousToReplace(t *testing
 	}
 }
 
-// fixture is the smallest repository the build can read: one documented package, and a private
-// list naming one private document.
+// fixture is the smallest repository the build can read: one documented package and the documents
+// the caller asks for.
 func fixture(t *testing.T, docs map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
 	write(t, root, "README.md", "# Fixture\n")
 	write(t, root, "Makefile", "# Builds it.\nbuild:\n\tgo build ./...\n")
 	write(t, root, "internal/ok/ok.go", "// Package ok is documented.\npackage ok\n\n// Answer is documented too.\nconst Answer = 42\n")
-	write(t, root, privateList, "# What never leaves the development repository.\ndocs/secret.md\n")
 	for name, body := range docs {
 		write(t, root, "docs/"+name, body)
 	}
@@ -273,11 +258,7 @@ func TestAPackageWithNoDocCommentIsRefused(t *testing.T) {
 	if strings.Contains(err.Error(), "internal/ok") {
 		t.Errorf("a package documented in another file was refused: %v", err)
 	}
-	private, err := privatePaths(repoRoot(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	packages, err := loadPackages(repoRoot(t), private)
+	packages, err := loadPackages(repoRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,67 +286,6 @@ func TestALinkThatNamesNothingIsRefused(t *testing.T) {
 	for _, example := range []string{"not-a-link.md", "nor-this.md"} {
 		if strings.Contains(err.Error(), example) {
 			t.Errorf("%s is an example inside code, and was treated as a link", example)
-		}
-	}
-}
-
-func TestALinkIntoAPrivateDocumentIsRefusedAndThePrivateDocumentIsNotPublished(t *testing.T) {
-	root := fixture(t, map[string]string{
-		"SUMMARY.md": navigation,
-		"a.md":       "# A\n\nSee [the plan](secret.md).\n",
-		"secret.md":  "# Secret\n",
-	})
-	err := buildFixture(t, root)
-	if err == nil || !strings.Contains(err.Error(), "docs/a.md: secret.md is private") {
-		t.Fatalf("got %v, want a refusal of the link into the private document", err)
-	}
-	// Without the link, the private document is simply not there: not staged, not required in the
-	// navigation, so the build goes on to the substrate.
-	write(t, root, "docs/a.md", "# A\n")
-	err = buildFixture(t, root)
-	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "SUMMARY") {
-		t.Fatalf("got %v, want the build to stop only at the unreachable database", err)
-	}
-}
-
-func TestAPublicPageThatCitesPrivateMaterialIsRefused(t *testing.T) {
-	root := fixture(t, map[string]string{
-		"SUMMARY.md": navigation,
-		"a.md": strings.Join([]string{
-			"# A",
-			"Decided in D70.",
-			"Goal G5b says so.",
-			"Tracked in (#228).",
-			"See https://github.com/althunibat/taisce for more.",
-			"A colour such as #0f9d9a, a heading like ## Two, and HTTP/2 are none of these.",
-		}, "\n"),
-	})
-	err := buildFixture(t, root)
-	if err == nil {
-		t.Fatal("a page citing private material was accepted")
-	}
-	for _, want := range []string{"docs/a.md:2 cites a decision number", "docs/a.md:3 cites a goal number", "docs/a.md:4 cites an issue number", "docs/a.md:5 cites the private repository"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal does not say %q:\n%v", want, err)
-		}
-	}
-	if strings.Contains(err.Error(), "docs/a.md:6") {
-		t.Errorf("an ordinary line was taken for a citation:\n%v", err)
-	}
-}
-
-func TestATreeThatCannotSayWhatIsPrivateIsRefused(t *testing.T) {
-	root := fixture(t, map[string]string{"SUMMARY.md": navigation, "a.md": "# A\n"})
-	if err := os.Remove(filepath.Join(root, filepath.FromSlash(privateList))); err != nil {
-		t.Fatal(err)
-	}
-	if err := buildFixture(t, root); err == nil || !strings.Contains(err.Error(), privateList) {
-		t.Fatalf("got %v, want a refusal naming the missing private list", err)
-	}
-	private := map[string]bool{"marketing": true, "docs/01-decisions.md": true}
-	for p, want := range map[string]bool{"marketing/social/a.png": true, "marketing": true, "marketingx": false, "docs/01-decisions.md": true, "docs/02-contract.md": false} {
-		if isPrivate(private, p) != want {
-			t.Errorf("isPrivate(%s) = %v", p, !want)
 		}
 	}
 }

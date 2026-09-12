@@ -179,8 +179,7 @@ build:
 	go build -ldflags "-X main.version=$$(./scripts/version.sh current)" ./...
 
 # The documentation site: the written documents in docs/, and a reference generated from the code
-# and from a freshly migrated database, rendered by the site in site/. It is the public version:
-# nothing named in scripts/private-paths.txt reaches it, and a page citing private material is refused.
+# and from a freshly migrated database, rendered by the site in site/.
 #
 # Needs the substrate (`make db-up`) for the same reason the suite does: the schema reference is read
 # from what PostgreSQL built, not parsed from what the migrations asked for. The generator refuses a
