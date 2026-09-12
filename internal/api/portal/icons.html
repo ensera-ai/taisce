@@ -1,0 +1,29 @@
+{{/* The portal's icons, drawn here as inline SVG: the page's policy loads no image, and an icon
+     font or a sprite from elsewhere would be a request off the deployment for a decoration. Each
+     is a 24-unit stroke drawing in currentColor, so it takes its colour from where it sits. */}}
+{{define "mark"}}<svg class="mark" viewBox="0 0 100 100" role="img" aria-label="Taisce"><defs><linearGradient id="tsg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5fb8ff"/><stop offset=".5" stop-color="#7fe0c8"/><stop offset="1" stop-color="#d6f26b"/></linearGradient></defs><rect width="100" height="100" rx="22" fill="#0b1f2a"/><g transform="translate(50 50) scale(0.82) translate(-48 -50)"><path fill="url(#tsg)" d="M21 22h54a7 7 0 0 1 0 14h-47v7h26a7 7 0 0 1 0 14h-26v7h47a7 7 0 0 1 0 14h-54a7 7 0 0 1-7-7v-42a7 7 0 0 1 7-7z"/><path fill="#7fe0c8" d="M68 50a7 7 0 1 0 14 0a7 7 0 1 0-14 0z"/></g></svg>{{end}}
+{{define "i-open"}}<svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{{end}}
+{{define "i-grid"}}{{template "i-open"}}<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>{{end}}
+{{define "i-ledger"}}{{template "i-open"}}<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 12h7M9 16h7M9 8h3"/></svg>{{end}}
+{{define "i-folder"}}{{template "i-open"}}<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>{{end}}
+{{define "i-logout"}}{{template "i-open"}}<path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="M15 16l4-4-4-4M19 12H9"/></svg>{{end}}
+{{define "i-activity"}}{{template "i-open"}}<path d="M3 12h4l3-8 4 16 3-8h4"/></svg>{{end}}
+{{define "i-pause"}}{{template "i-open"}}<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg>{{end}}
+{{define "i-cpu"}}{{template "i-open"}}<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>{{end}}
+{{define "i-alert"}}{{template "i-open"}}<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></svg>{{end}}
+{{define "i-db"}}{{template "i-open"}}<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>{{end}}
+{{define "i-gauge"}}{{template "i-open"}}<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg>{{end}}
+{{define "i-shield"}}{{template "i-open"}}<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5L15.5 10"/></svg>{{end}}
+{{define "i-check"}}{{template "i-open"}}<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>{{end}}
+{{define "i-key"}}{{template "i-open"}}<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>{{end}}
+{{define "i-eraser"}}{{template "i-open"}}<path d="M4 16l9-9 7 7-6 6H8z"/><path d="M13 20h7"/></svg>{{end}}
+{{define "i-ban"}}{{template "i-open"}}<circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></svg>{{end}}
+{{define "i-plus"}}{{template "i-open"}}<path d="M12 5v14M5 12h14"/></svg>{{end}}
+{{define "i-lock"}}{{template "i-open"}}<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>{{end}}
+{{define "i-eye-off"}}{{template "i-open"}}<path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.1 6.1A17 17 0 0 0 2 12s4 7 10 7a9.7 9.7 0 0 0 5.9-2.1"/></svg>{{end}}
+{{define "i-user"}}{{template "i-open"}}<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>{{end}}
+{{define "i-refresh"}}{{template "i-open"}}<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>{{end}}
+{{define "i-chevron"}}{{template "i-open"}}<path d="M6 9l6 6 6-6"/></svg>{{end}}
+{{define "i-search"}}{{template "i-open"}}<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>{{end}}
+{{define "i-inbox"}}{{template "i-open"}}<path d="M4 13h4l2 3h4l2-3h4"/><path d="M4 13l2-8h12l2 8v6H4z"/></svg>{{end}}
+{{define "i-chart"}}{{template "i-open"}}<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>{{end}}

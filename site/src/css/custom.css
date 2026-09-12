@@ -1,0 +1,219 @@
+/* Copyright 2026 The Taisce Authors
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Ensera's design language on the renderer's theme: ink and deep teal grounds, lime for the one
+ * action that matters on a screen, mint and sky as signals, the sky→mint→lime gradient as the brand
+ * mark; Space Grotesk for display and Manrope for reading; pill buttons, soft-cornered panels.
+ * Overridden through the theme's variables wherever it has one, so an upgrade restyles itself.
+ */
+
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/700.css';
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+
+:root {
+  --ts-ink: #0b1f2a;
+  --ts-teal: #0f9d9a;
+  --ts-teal-deep: #087873;
+  --ts-lime: #d6f26b;
+  --ts-mint: #8fe3c0;
+  --ts-sky: #5fb8ff;
+  --ts-sky-soft: #bfe3ff;
+  --ts-deep: #031015;
+  --ts-panel: #071821;
+  --ts-panel-2: #06131d;
+  --ts-line: rgba(11, 31, 42, 0.12);
+  --ts-grad: linear-gradient(135deg, #5fb8ff 0%, #7fe0c8 50%, #d6f26b 100%);
+  --ts-display: 'Space Grotesk', system-ui, sans-serif;
+  --ts-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --ifm-font-family-base: 'Manrope', system-ui, -apple-system, sans-serif;
+  --ifm-heading-font-family: var(--ts-display);
+  --ifm-font-family-monospace: var(--ts-mono);
+  --ifm-heading-font-weight: 700;
+  --ifm-font-weight-bold: 700;
+  --ifm-line-height-base: 1.72;
+  --ifm-code-font-size: 88%;
+
+  --ifm-color-primary: #0f9d9a;
+  --ifm-color-primary-dark: #0e8d8b;
+  --ifm-color-primary-darker: #0d8583;
+  --ifm-color-primary-darkest: #0a6e6c;
+  --ifm-color-primary-light: #11ada9;
+  --ifm-color-primary-lighter: #12b5b1;
+  --ifm-color-primary-lightest: #15ccc8;
+
+  --ifm-background-color: #ffffff;
+  --ifm-font-color-base: #1d3440;
+  --ifm-heading-color: var(--ts-ink);
+  --ifm-link-color: #087873;
+  --ifm-toc-border-color: var(--ts-line);
+  --ifm-hr-border-color: var(--ts-line);
+  --ifm-table-border-color: var(--ts-line);
+  --ifm-table-stripe-background: #f6fafa;
+  --ifm-code-background: #edf6f5;
+  --ifm-code-border-radius: 6px;
+  --ifm-global-radius: 14px;
+  --ifm-button-border-radius: 999px;
+  --ifm-navbar-height: 64px;
+  --ifm-navbar-shadow: none;
+  --docusaurus-highlighted-code-line-bg: rgba(15, 157, 154, 0.12);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #8fe3c0;
+  --ifm-color-primary-dark: #74dbb1;
+  --ifm-color-primary-darker: #67d7a9;
+  --ifm-color-primary-darkest: #40cc92;
+  --ifm-color-primary-light: #aaebcf;
+  --ifm-color-primary-lighter: #b7eed7;
+  --ifm-color-primary-lightest: #dff7ec;
+
+  --ifm-background-color: var(--ts-panel);
+  --ifm-background-surface-color: var(--ts-panel-2);
+  --ifm-font-color-base: rgba(255, 255, 255, 0.8);
+  --ifm-heading-color: #ffffff;
+  --ifm-link-color: var(--ts-mint);
+  --ts-line: rgba(255, 255, 255, 0.11);
+  --ifm-toc-border-color: var(--ts-line);
+  --ifm-hr-border-color: var(--ts-line);
+  --ifm-table-border-color: var(--ts-line);
+  --ifm-table-stripe-background: rgba(255, 255, 255, 0.02);
+  --ifm-code-background: rgba(143, 227, 192, 0.09);
+  --ifm-navbar-background-color: rgba(3, 16, 21, 0.86);
+  --ifm-footer-background-color: var(--ts-deep);
+  --ifm-menu-color: rgba(255, 255, 255, 0.7);
+  --ifm-menu-color-background-active: rgba(143, 227, 192, 0.08);
+  --ifm-menu-color-background-hover: rgba(255, 255, 255, 0.04);
+  --ifm-toc-link-color: rgba(255, 255, 255, 0.62);
+  --docusaurus-highlighted-code-line-bg: rgba(143, 227, 192, 0.1);
+}
+
+/* ── Type ─────────────────────────────────────────────────────────────────────────────────────── */
+
+h1, h2, h3, h4 { letter-spacing: -0.03em; }
+.markdown h1:first-child { font-size: clamp(2.2rem, 4vw, 3.1rem); line-height: 1.02; letter-spacing: -0.045em; }
+.markdown h2 { margin-top: 2.6rem; padding-top: 0.2rem; font-size: 1.75rem; }
+.markdown h3 { font-size: 1.28rem; }
+.markdown > p:first-of-type { font-size: 1.08rem; }
+.markdown { --ifm-h1-vertical-rhythm-bottom: 0.9; }
+
+/* ── Navbar: white on light, deep and translucent on dark, the gradient hairline under both ────── */
+
+.navbar {
+  backdrop-filter: saturate(160%) blur(12px);
+  border-bottom: 1px solid var(--ts-line);
+}
+.navbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ts-grad);
+  opacity: 0.8;
+}
+.navbar__title {
+  font-family: var(--ts-display);
+  font-weight: 700;
+  font-size: 1.45rem;
+  letter-spacing: -0.06em;
+}
+.navbar__brand::before {
+  content: '';
+  width: 26px;
+  height: 26px;
+  margin-right: 10px;
+  border-radius: 7px;
+  background: url('/img/favicon.svg') center / contain no-repeat;
+}
+.navbar__link { font-weight: 600; font-size: 0.93rem; }
+.navbar-ensera {
+  padding: 6px 16px !important;
+  border-radius: 999px;
+  color: var(--ts-ink) !important;
+  background: var(--ts-lime);
+  margin-left: 6px;
+}
+.navbar-ensera:hover { background: #ffffff; }
+.navbar-ensera svg { display: none; }
+
+/* ── Sidebar and table of contents ────────────────────────────────────────────────────────────── */
+
+.menu { font-size: 0.92rem; }
+.menu__link { border-radius: 10px; }
+.menu__link--active:not(.menu__link--sublist) { font-weight: 700; }
+.theme-doc-sidebar-item-category-level-1 > .menu__list-item-collapsible > .menu__link,
+.theme-doc-sidebar-item-category-level-1 > .menu__link {
+  font-family: var(--ts-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ts-teal-deep);
+}
+[data-theme='dark'] .theme-doc-sidebar-item-category-level-1 > .menu__list-item-collapsible > .menu__link,
+[data-theme='dark'] .theme-doc-sidebar-item-category-level-1 > .menu__link { color: var(--ts-mint); }
+.table-of-contents__link--active { color: var(--ifm-color-primary); font-weight: 600; }
+
+/* ── Code, tables, disclosure, admonitions ────────────────────────────────────────────────────── */
+
+.theme-code-block { border-radius: 14px; border: 1px solid var(--ts-line); box-shadow: none; }
+[data-theme='dark'] .theme-code-block { border-color: rgba(143, 227, 192, 0.18); }
+[data-theme='dark'] .prism-code { background-color: var(--ts-deep) !important; }
+.markdown code { border: none; }
+
+.markdown table { display: table; width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--ts-line); border-radius: 14px; overflow: hidden; font-size: 0.92rem; }
+.markdown table thead tr { background: rgba(15, 157, 154, 0.07); }
+[data-theme='dark'] .markdown table thead tr { background: rgba(143, 227, 192, 0.06); }
+.markdown table th { font-family: var(--ts-display); font-weight: 500; text-align: left; }
+.markdown table th, .markdown table td { border: none; border-bottom: 1px solid var(--ts-line); }
+.markdown table tr:last-child td { border-bottom: none; }
+
+.markdown details {
+  --docusaurus-details-decoration-color: var(--ifm-color-primary);
+  border: 1px solid var(--ts-line);
+  border-radius: 14px;
+  background: transparent;
+  box-shadow: none;
+}
+.markdown details > summary { font-weight: 600; }
+
+.theme-admonition { border-radius: 14px; border-width: 1px; border-style: solid; box-shadow: none; }
+
+.markdown .docusaurus-mermaid-container {
+  display: flex;
+  justify-content: center;
+  margin: 1.6rem 0;
+  padding: 1.2rem;
+  border: 1px solid var(--ts-line);
+  border-radius: 18px;
+  background: rgba(15, 157, 154, 0.04);
+  overflow-x: auto;
+}
+[data-theme='dark'] .markdown .docusaurus-mermaid-container { background: rgba(143, 227, 192, 0.035); border-color: rgba(143, 227, 192, 0.16); }
+
+/* ── Language tabs built from adjacent code blocks (src/clientModules/codeTabs.js) ────────────── */
+
+.code-tabs__bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.theme-code-block[hidden] { display: none; }
+.code-tabs__tab {
+  padding: 5px 13px;
+  border: 1px solid var(--ts-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ifm-font-color-base);
+  font: 600 0.78rem var(--ts-mono);
+  cursor: pointer;
+}
+.code-tabs__tab[aria-selected='true'] { background: var(--ts-lime); border-color: var(--ts-lime); color: var(--ts-ink); }
+
+/* ── Footer ───────────────────────────────────────────────────────────────────────────────────── */
+
+.footer--dark { background: var(--ts-deep); border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.footer__title { font-family: var(--ts-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ts-mint); }
+.footer__copyright { font-size: 0.82rem; color: rgba(255, 255, 255, 0.55); }
+.footer__copyright a { color: var(--ts-lime); }

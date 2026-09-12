@@ -1,0 +1,41 @@
+-- Copyright 2026 The Taisce Authors
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- ── The fanout cap bounds what is read, not only what is returned ────────────────────────────
+--
+-- Each hop of the recall traversal takes at most a fanout of an entity's current facts, ordered by
+-- fact_id: `ORDER BY f.fact_id LIMIT $7`, once with the entity as subject and once as object. No
+-- index held an entity's facts in that order, so at a hub — an organisation half the project works
+-- at — Postgres read every current fact naming it and sorted them to keep the first sixty-four. The
+-- cap bounded the answer and not the work, on the hottest read there is.
+--
+-- These two indexes hold an entity's current facts in fact_id order, so each side of a hop is a seek
+-- that stops at the cap. They are partial on exactly the current read's predicate: that read is the
+-- one on every recall, and an index over every superseded version would grow with history the read
+-- never looks at. The as-of reads keep the GiST indexes they are planned on (0001).
+--
+-- ── WHY THE ENTITY LEADS, NOT THE SCOPE ───────────────────────────────────────────────────────
+--
+-- The traversal filters `f.scope = ANY($1)`. An array on the leading column is a set of ranges, and a
+-- btree cannot hand back rows from several ranges in one fact_id order — so with scope first the
+-- planner fetched every one of the hub's facts and sorted them anyway, which is what the index was
+-- for. Measured: 5,000 rows read for a cap of 64. The entity id is a UUID that already belongs to
+-- exactly one scope, so leading with it makes the seek an equality and the order real, and the scope
+-- check becomes a per-row filter that every row of that entity passes.
+--
+-- ── WHAT THEY DO NOT BOUND ────────────────────────────────────────────────────────────────────
+--
+-- The role and subject filters are checked on each fetched row, not in the index. A hub whose first
+-- facts in fact_id order are all of a role the caller did not select is read past them until the cap
+-- fills. That is bounded by how those rows fall, not by the cap, and it is the next thing to look at
+-- if a plan shows it.
+--
+-- ── WHAT THEY COST ────────────────────────────────────────────────────────────────────────────
+--
+-- Two more indexes maintained on every fact written or superseded. Built inside the migration's
+-- transaction, so writes to fact wait while they build on an existing deployment; the bootstrap
+-- runs migrations before the servers start.
+CREATE INDEX fact_subject_walk_idx ON {schema}.fact (subject_entity_id, fact_id)
+    WHERE upper_inf(valid) AND upper_inf(known) AND subject_entity_id IS NOT NULL;
+CREATE INDEX fact_object_walk_idx ON {schema}.fact (object_entity_id, fact_id)
+    WHERE upper_inf(valid) AND upper_inf(known) AND object_entity_id IS NOT NULL;

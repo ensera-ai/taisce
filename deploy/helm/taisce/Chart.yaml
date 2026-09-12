@@ -1,0 +1,9 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: taisce
+description: Open-source agentic memory, run by the people who use it. Highly available by default.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.29.0-0"

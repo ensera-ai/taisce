@@ -1,0 +1,53 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The build checks the floor (rule 6). This is the same target a developer runs, against the same
+# substrate image, on every push and pull request: the complete uncached suite with cross-package
+# coverage, the coverage gate, vet and the licence gate. There is no
+# skip-when-absent arm anywhere below: a missing database fails the run rather than passing it empty.
+# The live-inference target is deliberately not here; it costs money and sends text to a provider,
+# which is a command somebody types on purpose (`make test-inference`).
+name: test
+
+# Run by hand only. The account's included Actions minutes are finite, and on
+# 2026-09-11 they ran out — 1,997 of 2,000 billed minutes, a third of this repository's share spent
+# re-running on main what had just passed on its pull request. The same gate now runs locally, in a
+# Linux container under colima, against a clean clone of the commit: `make gate`. This workflow is
+# kept rather than deleted so it can still be run when the minutes are there.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The substrate is the project's own image, built from deploy/postgres, so the extensions and
+      # settings the tests need are the ones a deployment has. `make db-up` waits until it answers.
+      - name: Start the substrate
+        run: make db-up
+
+      # `make test` is licence gate, then the suite with -coverpkg=./..., then the coverage gate.
+      - name: Test, coverage gate, licence gate
+        run: make test COVER_PROFILE=coverage.out
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Stop the substrate
+        if: always()
+        run: make db-down

@@ -1,0 +1,63 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Both ingresses are opt-in. The memory API is what applications reach; the portal is not
+# exposed by default, and enabling its ingress is the deliberate act that exposes it.
+{{- if .Values.ingress.api.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "taisce.name" . }}-api
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+  {{- with .Values.ingress.api.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.api.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.api.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ required "ingress.api.host is required when the API ingress is enabled" .Values.ingress.api.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "taisce.name" . }}-api
+                port: {name: http}
+{{- end }}
+{{- if .Values.ingress.portal.enabled }}
+{{- if ne (toString .Values.manage.portal) "on" }}
+{{- fail "ingress.portal.enabled needs manage.portal set to \"on\"; an ingress to a portal that does not exist exposes the management surface's door instead" }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "taisce.name" . }}-portal
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+  {{- with .Values.ingress.portal.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.portal.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.portal.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ required "ingress.portal.host is required when the portal ingress is enabled" .Values.ingress.portal.host | quote }}
+      http:
+        paths:
+          - path: /portal
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "taisce.name" . }}-manage
+                port: {name: http}
+{{- end }}

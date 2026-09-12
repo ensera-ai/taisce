@@ -1,0 +1,22 @@
+{{/* The entry template: every page renders through "login", which lays out either the sign-in page
+     or the console, and "body" chooses the console's page. The name predates the console; it is the
+     one the handler executes and changing it buys nothing. */}}
+{{define "login"}}{{template "layout" .}}{{end}}
+{{define "guard"}}<input type="hidden" name="guard" value="{{.}}">{{end}}
+{{define "outcome"}}{{with .Outcome}}<div class="banner {{if .Done}}ok{{else}}bad{{end}}" role="status">{{if .Done}}{{template "i-check"}}{{else}}{{template "i-alert"}}{{end}}<div><strong>{{if .Done}}Done.{{else}}Not done.{{end}}</strong> <code>{{.Action}}</code> — {{.Detail}}</div></div>{{end}}{{end}}
+{{define "body"}}{{template "outcome" .}}{{if .Home}}{{template "page-home" .}}{{else if .Project}}{{template "page-project" .}}{{else if .Ledger}}{{template "page-ledger" .}}{{else}}<p><a class="btn" href="/portal/">{{template "i-grid"}}Back to the overview</a></p>{{end}}{{end}}
+{{define "page-login"}}<div class="auth">
+<section class="auth-brand">
+<div class="brand">{{template "mark"}}<span><b>taisce</b><small>ops centre</small></span></div>
+<div><h1>The console for <span class="grad">one Taisce instance</span>.</h1>
+<p class="lede">Projects, credentials, formation and the ledger: everything an operator acts on, and nothing anybody told the memory.</p></div>
+<ul class="facts"><li>{{template "i-lock"}}Opens only for an operator credential</li><li>{{template "i-ledger"}}Every action lands on the ledger</li><li>{{template "i-eye-off"}}Shows no memory, by construction</li></ul>
+</section>
+<section class="auth-form"><div class="auth-card">
+<p class="kicker">Operator</p><h2>Sign in</h2>
+<p class="note">The portal opens for an operator credential and shows nothing before one is presented. The token is kept in this process for the session and never written anywhere.</p>
+{{if .Refused}}<div class="banner bad" role="alert">{{template "i-alert"}}<div><strong>Refused.</strong> That credential does not open the portal.</div></div>{{end}}
+<form method="post" action="/portal/login"><label class="field">Operator token<input type="password" name="token" autocomplete="off" required></label>
+<button class="btn btn-primary btn-block">Sign in</button></form>
+<p class="note">No credential yet? <code>taisce operator issue &lt;name&gt;</code> mints one over the administrative connection, and shows it once.</p>
+</div></section></div>{{end}}

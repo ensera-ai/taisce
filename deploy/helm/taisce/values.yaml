@@ -1,0 +1,107 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The chart is highly available by default: three PostgreSQL instances under the
+# CloudNativePG operator, two API replicas and two workers. Shrinking it is documented in the
+# README and is the operator's deliberate act; the failure this avoids is a single-node default
+# believed to be the other thing. No RTO or RPO is claimed anywhere here: this is a topology with a
+# failover path, and the number is measured, not promised.
+
+image:
+  repository: ghcr.io/ensera-ai/taisce
+  tag: ""            # defaults to the chart's appVersion
+  pullPolicy: IfNotPresent
+
+# The memory namespace and the first project bootstrap creates.
+schema: memory
+project: default
+
+postgresql:
+  # cnpg: a CloudNativePG Cluster this chart declares (the operator must be installed first;
+  # it is the machinery that knows how to promote a replica). external: an existing database,
+  # reached through the secret named below, which must carry adminDSN, memoryDSN and registryDSN.
+  mode: cnpg
+  cnpg:
+    instances: 3
+    # An image the operator accepts that provides the vector extension; btree_gist and
+    # pg_stat_statements are contrib modules of every PostgreSQL build. The operator's
+    # "standard" image family bundles pgvector; a deployment that builds its own image sets it here.
+    image: ghcr.io/cloudnative-pg/postgresql:18-standard-bookworm
+    storage:
+      size: 250Gi
+      storageClass: ""
+    sharedMemory: 4Gi
+    resources:
+      requests: {cpu: "2", memory: 8Gi}
+      limits: {memory: 32Gi}
+    parameters:
+      shared_buffers: 8GB
+      effective_cache_size: 22GB
+      work_mem: 16MB
+      maintenance_work_mem: 2GB
+      max_connections: "200"
+      max_wal_size: 16GB
+      wal_compression: "on"
+      track_io_timing: "on"
+  external:
+    existingSecret: ""
+
+# Runtime role passwords. Left empty, the chart generates them once and keeps them across
+# upgrades; an existing secret must carry dataPassword and controlPassword.
+credentials:
+  existingSecret: ""
+
+inference:
+  endpoint: ""            # OpenAI-compatible base URL; required for formation
+  extractorModel: ""
+  allowlist: ""           # hosts permitted to receive somebody's words; empty permits nothing
+  apiKeySecret: ""        # a secret with key apiKey; empty sends no key
+  embedding:
+    endpoint: ""
+    model: ""
+    revision: ""
+    apiKeySecret: ""
+
+api:
+  replicas: 2
+  requireFormation: true
+  bundleCharacters: ""
+  resources:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {memory: 1Gi}
+  podDisruptionBudget:
+    minAvailable: 1
+
+worker:
+  replicas: 2
+  turnBudget: 5m
+  resources:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+# The management surface: in-cluster only unless its ingress is enabled; the portal
+# is off unless switched on.
+manage:
+  enabled: true
+  portal: "off"
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 512Mi}
+
+ingress:
+  api:
+    enabled: false
+    className: ""
+    host: ""
+    tls: []
+    annotations: {}
+  portal:
+    enabled: false
+    className: ""
+    host: ""
+    tls: []
+    annotations: {}
+
+serviceAccount:
+  create: true
+  name: ""

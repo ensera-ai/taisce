@@ -1,0 +1,10 @@
+Taisce {{ .Chart.AppVersion }} is installing as {{ .Release.Name }}.
+
+Topology: PostgreSQL {{ if eq .Values.postgresql.mode "cnpg" }}under CloudNativePG, {{ .Values.postgresql.cnpg.instances }} instance(s){{ else }}external, from secret {{ .Values.postgresql.external.existingSecret }}{{ end }};
+{{ .Values.api.replicas }} API replica(s); {{ .Values.worker.replicas }} worker(s); management surface {{ if .Values.manage.enabled }}in-cluster at {{ include "taisce.name" . }}-manage:8081{{ else }}disabled{{ end }}; portal {{ .Values.manage.portal }}.
+
+The first credentials are printed once by the bootstrap Job:
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "taisce.name" . }}-bootstrap-{{ .Release.Revision }} | grep token
+
+No RTO or RPO is claimed: this is a topology with a failover path, and the recovery time is what
+the failover script measures on your cluster (deploy/helm/README.md).

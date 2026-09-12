@@ -1,0 +1,48 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Workers form; several are safe by construction, because formation takes a per-scope advisory
+# lock and a second worker finds a busy scope and moves on. Only a loopback health listener.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "taisce.name" . }}-worker
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taisce
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels: {{- include "taisce.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "taisce.serviceAccount" . }}
+      securityContext: {{- include "taisce.securityContext" . | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "taisce.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          securityContext: {{- include "taisce.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: TAISCE_ROLE
+              value: worker
+            - name: TAISCE_HEALTH_ADDR
+              value: "127.0.0.1:8082"
+            - name: TAISCE_FORMATION_TURN_BUDGET
+              value: {{ .Values.worker.turnBudget | quote }}
+            {{- include "taisce.serviceEnv" . | nindent 12 }}
+          readinessProbe:
+            exec: {command: ["/taisce", "probe", "--worker"]}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            exec: {command: ["/taisce", "probe", "--worker", "--live"]}
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}

@@ -1,0 +1,86 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# PostgreSQL qualification profile for Colima and other single-VM Docker hosts.
+#
+# Use this only as an override of compose.yaml, under a separate project name:
+#
+#   docker compose --project-name taisce-perf -f compose.yaml -f compose.perf.yaml up -d
+#
+# The project name gives this stack its own postgres-data volume. Durability stays enabled: this
+# profile is for finding production candidates, so making writes cheaper by changing their meaning
+# would invalidate the result. See docs/21-production-postgresql.md for the measurement contract.
+
+services:
+  postgres:
+    # Six of the current Colima profile's eight CPUs and eight of its twelve GiB leave the API,
+    # worker, Docker daemon and guest kernel room to make progress during a database-heavy run.
+    cpus: 6.0
+    mem_limit: 8g
+
+    # pgvector parallel HNSW maintenance uses dynamic shared memory. Keep this at least as large as
+    # maintenance_work_mem; one GiB leaves headroom above the 512 MiB qualification setting.
+    shm_size: 1g
+
+    environment:
+      # A separate, overridable credential keeps the host-side workload independent of an unrelated
+      # POSTGRES_PASSWORD in .env. This profile is loopback-only and is not a production secret.
+      POSTGRES_PASSWORD: ${TAISCE_PERF_POSTGRES_PASSWORD:-taisce-perf}
+
+    # During first initialization the image starts a temporary Unix-socket-only server, then stops
+    # it before the final server starts. Checking TCP prevents Compose from releasing bootstrap in
+    # that narrow shutdown/restart window.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d taisce"]
+
+    ports:
+      - "127.0.0.1:${TAISCE_PERF_POSTGRES_PORT:-55433}:5432"
+
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=6GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - autovacuum_work_mem=128MB
+      - -c
+      - max_connections=60
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_compression=on
+      - -c
+      - track_io_timing=on
+      - -c
+      - track_wal_io_timing=on
+      - -c
+      - log_autovacuum_min_duration=1s
+
+  bootstrap:
+    environment:
+      TAISCE_ADMIN_DSN: "postgres://postgres:${TAISCE_PERF_POSTGRES_PASSWORD:-taisce-perf}@postgres:5432/taisce?sslmode=disable"
+
+  api:
+    environment:
+      # Admission reserves one memory connection outside HTTP work. Eight therefore admits at most
+      # seven concurrent memory operations in this API process; authentication uses at most two.
+      TAISCE_MEMORY_DSN: "postgres://taisce_data:${TAISCE_DATA_PASSWORD:-change-me-data}@postgres:5432/taisce?sslmode=disable&pool_max_conns=8&pool_min_conns=2&pool_max_conn_lifetime=55m&pool_max_conn_lifetime_jitter=5m"
+      TAISCE_REGISTRY_DSN: "postgres://taisce_control:${TAISCE_CONTROL_PASSWORD:-change-me-control}@postgres:5432/taisce?sslmode=disable&pool_max_conns=2&pool_min_conns=1&pool_max_conn_lifetime=55m&pool_max_conn_lifetime_jitter=5m"
+
+  worker:
+    environment:
+      # A worker drains one scope at a time. Four memory connections preserve room for its
+      # transaction, health work and maintenance without multiplying idle connections per replica.
+      TAISCE_MEMORY_DSN: "postgres://taisce_data:${TAISCE_DATA_PASSWORD:-change-me-data}@postgres:5432/taisce?sslmode=disable&pool_max_conns=4&pool_min_conns=1&pool_max_conn_lifetime=55m&pool_max_conn_lifetime_jitter=5m"
+      TAISCE_REGISTRY_DSN: "postgres://taisce_control:${TAISCE_CONTROL_PASSWORD:-change-me-control}@postgres:5432/taisce?sslmode=disable&pool_max_conns=1&pool_min_conns=1&pool_max_conn_lifetime=55m&pool_max_conn_lifetime_jitter=5m"

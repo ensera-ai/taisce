@@ -1,0 +1,54 @@
+{{define "page-home"}}<header class="head"><div><p class="kicker">Instance</p><h1>Overview</h1>
+<p class="sub">What this instance has been doing, how it is running, and every project it holds.</p></div></header>
+{{with .Activity}}<div class="rangebar"><nav class="tabs" aria-label="Window">{{range .Ranges}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
+<a class="btn btn-sm" href="{{.Refresh}}">{{template "i-refresh"}}Refresh</a><span class="updated">Updated {{.Updated}}</span></div>
+<div class="kpis">
+{{with .Turns}}<div class="kpi"><div class="label">{{template "i-inbox"}}Turns stored</div><div class="value">{{.Value}}</div><div class="kpi-foot">{{if .Trend}}<span class="trend {{.Direction}}">{{.Trend}}</span><span class="muted">{{$.Activity.Compared}}</span>{{else}}<span class="muted">{{.Detail}}</span>{{end}}</div></div>{{end}}
+{{with .Recalls}}<div class="kpi"><div class="label">{{template "i-search"}}Recalls served</div><div class="value">{{.Value}}</div><div class="kpi-foot">{{if .Trend}}<span class="trend {{.Direction}}">{{.Trend}}</span><span class="muted">{{$.Activity.Compared}}</span>{{else}}<span class="muted">{{.Detail}}</span>{{end}}</div></div>{{end}}
+{{with .Refused}}<div class="kpi{{if .Value}} alert{{end}}"><div class="label">{{template "i-ban"}}Refused</div><div class="value">{{.Value}}</div><div class="kpi-foot">{{if .Trend}}<span class="trend {{.Direction}}">{{.Trend}}</span><span class="muted">{{$.Activity.Compared}}</span>{{else}}<span class="muted">{{.Detail}}</span>{{end}}</div></div>{{end}}
+{{with .Erasures}}<div class="kpi"><div class="label">{{template "i-eraser"}}Erasures</div><div class="value">{{.Value}}</div><div class="kpi-foot"><span class="muted">{{.Detail}}</span></div></div>{{end}}
+</div>
+<div class="panels">
+<section class="card chart-card"><div class="card-head"><div><div class="title-row">{{template "i-chart"}}<h2>Operations</h2></div><p class="big">{{.Total}}</p></div>
+<div class="legend"><span><i class="sw allowed"></i>allowed</span><span><i class="sw refused"></i>refused · {{.TotalRefused}}</span></div></div>
+<div class="chart" role="img" aria-label="Operations per interval, allowed and refused">{{range .Bars}}<div class="bar" title="{{.Title}}"><i class="r" style="--h:{{.Refused}}%"></i><i class="a" style="--h:{{.Allowed}}%"></i></div>{{end}}</div>
+<div class="axis">{{range .Axis}}<span>{{.}}</span>{{end}}</div>
+<details class="breakdown"><summary>View breakdown</summary><div class="scroll"><table><thead><tr><th>Operation</th><th class="num">Allowed</th><th class="num">Refused</th><th class="num">Rows touched</th></tr></thead><tbody>
+{{range .Operations}}<tr><td><code>{{.Operation}}</code></td><td class="num mono">{{.Allowed}}</td><td class="num">{{if .Refused}}<span class="pill bad">{{.Refused}}</span>{{else}}<span class="muted mono">0</span>{{end}}</td><td class="num mono">{{.Magnitude}}</td></tr>
+{{else}}<tr><td colspan="4" class="empty">Nothing was done in this window.</td></tr>{{end}}</tbody></table></div></details>
+</section>
+<section class="card"><div class="card-head"><div class="title-row">{{template "i-activity"}}<h2>{{.RankTitle}}</h2></div></div>
+<div class="ranking">{{range .Ranking}}<div class="rank">{{if .Href}}<a href="{{.Href}}">{{.Label}}</a>{{else}}<code>{{.Label}}</code>{{end}}<span class="rank-count mono">{{.Operations}}{{if .Refused}} <span class="pill bad">{{.Refused}} refused</span>{{end}}</span><div class="meter"><i style="--fill:{{.Share}}%"></i></div></div>
+{{else}}<p class="empty">Nothing was done in this window.</p>{{end}}</div>
+<p class="note">Counted from the ledger, which holds no words: how many operations, and whether each was allowed.</p></section>
+</div>
+{{else}}{{if .ActivityUnavailable}}<div class="banner bad" role="status">{{template "i-alert"}}<div><strong>The ledger could not be counted.</strong> There is no activity to show for that reason, not because nothing happened; the rest of this page is unaffected.</div></div>{{end}}{{end}}
+{{with .Health}}<section class="section">
+<div class="section-head"><h2>How it is running</h2>{{if not .WorkerResponsive}}<span class="pill bad dot">Formation has stopped</span>{{else if .Tight}}<span class="pill bad dot">Connections are low</span>{{else if .Parked}}<span class="pill warn dot">Turns are parked</span>{{else}}<span class="pill ok dot">Nothing needs attention</span>{{end}}</div>
+<div class="tiles six">
+<div class="tile"><div class="label">{{template "i-activity"}}Formation backlog</div><div class="value">{{.Pending}}<small> of {{.PendingLimit}}</small></div><div class="meter"><i style="--fill:{{.PendingShare}}%"></i></div></div>
+<div class="tile{{if .Parked}} warn{{end}}"><div class="label">{{template "i-pause"}}Parked</div><div class="value">{{.Parked}}</div><p class="hint">turns formation gave up on</p></div>
+<div class="tile{{if not .WorkerResponsive}} bad{{end}}"><div class="label">{{template "i-cpu"}}Worker</div><div class="value word">{{if .WorkerResponsive}}answering{{else}}not answering{{end}}</div></div>
+<div class="tile{{if .FailedAttempts}} warn{{end}}"><div class="label">{{template "i-alert"}}Failed attempts</div><div class="value">{{.FailedAttempts}}</div></div>
+<div class="tile{{if .Tight}} bad{{end}}"><div class="label">{{template "i-db"}}Connections</div><div class="value">{{.Connections}}<small> of {{.MaxConnections}}</small></div><div class="meter"><i style="--fill:{{.ConnectionShare}}%"></i></div></div>
+<div class="tile{{if .Tight}} bad{{end}}"><div class="label">{{template "i-gauge"}}Headroom</div><div class="value">{{.Headroom}}<small> sessions</small></div></div>
+</div>
+<p class="note">The backlog is unfinished turns against the instance's admission limit; a worker that is not answering means formation has stopped even though writes are still accepted. Headroom is how many database sessions are left before the server refuses one — a deployment that runs out of those loses writes, so it is on this page rather than in a log.{{if .Tight}} <strong>It is low: the next process to start may be refused.</strong>{{end}}</p>
+</section>{{end}}
+<section class="card" id="projects">
+<div class="card-head"><div><div class="title-row">{{template "i-folder"}}<h2>Projects and formation</h2></div><p class="sub">{{len .Scopes}} on this instance</p></div>
+<form class="row" method="post" action="/portal/actions/create">{{template "guard" .Guard}}<input name="project" maxlength="63" required autocomplete="off" pattern="[a-z][a-z0-9_]*" placeholder="new_project" aria-label="New project"><button class="btn btn-primary">{{template "i-plus"}}Create</button></form></div>
+<div class="scroll"><table><thead><tr><th>Project</th><th>State</th><th class="num">Stored offset</th><th class="num">Formed offset</th><th class="num">Behind by</th><th class="num">Parked</th><th class="act"></th></tr></thead><tbody>
+{{range .Scopes}}<tr><td><a class="project-link" href="/portal/projects/{{.Project}}"><span class="avatar">{{slice .Project 0 1}}</span>{{.Project}}</a></td>
+<td>{{if .Suspended}}<span class="pill warn dot">suspended</span>{{else}}<span class="pill ok dot">active</span>{{end}}</td>
+<td class="num mono">{{if .Stored}}{{.Stored}}{{else}}–{{end}}</td><td class="num mono">{{if .Formed}}{{.Formed}}{{else}}–{{end}}</td>
+<td class="num">{{if .Behind}}<span class="pill warn">{{.Behind}}</span>{{else}}<span class="muted mono">0</span>{{end}}</td>
+<td class="num">{{if .Parked}}<span class="pill warn">{{.Parked}}</span>{{else}}<span class="muted mono">0</span>{{end}}</td>
+<td class="act"><form method="post" action="/portal/actions/{{if .Suspended}}resume{{else}}suspend{{end}}">{{template "guard" $.Guard}}<input type="hidden" name="project" value="{{.Project}}"><button class="btn btn-sm">{{if .Suspended}}Resume{{else}}Suspend{{end}}</button></form></td></tr>
+{{else}}<tr><td colspan="7" class="empty">No projects yet. Name one above to create it.</td></tr>{{end}}
+</tbody></table></div>
+<p class="note">Stored and formed are the watermark: how far the log has been written and how far formation has caught up. Behind is the gap, in turns. Parked turns are ones formation gave up on; they are listed per project.</p>
+</section>
+<section class="card"><div class="card-head"><div class="title-row">{{template "i-gauge"}}<h2>What the model costs</h2></div><span class="pill">Not recorded</span></div>
+<p class="note">Not recorded. No table holds a token or a bill, and this panel does not invent one; the model gateway, when one is deployed, is where that number lives.</p></section>
+{{end}}

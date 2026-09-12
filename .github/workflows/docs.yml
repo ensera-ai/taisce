@@ -1,0 +1,84 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The documentation site. The build refuses a link or an anchor that names nothing, a document the
+# navigation does not reach, a page that cites private material, and a package with no doc comment.
+# The schema reference is read from a database the migrations have just built, so the job starts the
+# same substrate the tests use.
+#
+# ── WHEN IT RUNS ─────────────────────────────────────────────────────────────────────────────────
+#
+# In the development repository, only when started by hand, like the suite's workflow: the account's
+# included Actions minutes are finite. On a push or a pull request there the jobs are skipped by their
+# conditions, and a skipped job bills no minutes. `make site` is the local equivalent.
+#
+# In the public repository, on every push to main and every pull request, on standard GitHub-hosted
+# runners, which GitHub's billing documentation lists as free for public repositories.
+#
+# ── WHERE THE RENDERER'S DEPENDENCIES ARE ALLOWED TO RUN ────────────────────────────────────────
+#
+# The renderer is a Node application with a large dependency tree, pinned by site/package-lock.json
+# and installed with install scripts disabled (site/.npmrc). That code runs only in the build job,
+# whose token can read the repository and nothing else. The deploy job runs no third-party package
+# code: it takes the built pages as an artefact and publishes them. A compromised package can at worst
+# produce a wrong artefact, and it never holds the credential that publishes.
+#
+# The site is deployed only by this workflow running in the public repository, from its main branch,
+# which receives nothing but reviewed release snapshots.
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'ensera-ai/taisce' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Start the substrate
+        run: make db-up
+      # Source links point at the repository and commit the site was built from.
+      - name: Build the site
+        run: make site SITE_REPO="${{ github.repository }}" SITE_REF="${{ github.sha }}"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/build
+      - name: Stop the substrate
+        if: always()
+        run: make db-down
+
+  deploy:
+    needs: build
+    if: github.repository == 'ensera-ai/taisce' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

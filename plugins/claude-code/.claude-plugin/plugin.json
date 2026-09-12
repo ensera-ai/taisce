@@ -1,0 +1,38 @@
+{
+  "name": "taisce-memory",
+  "displayName": "Taisce Memory",
+  "version": "0.1.0",
+  "description": "Memory that outlives the session, backed by a Taisce deployment: recall what was decided with the words behind it, and record decisions so the next session starts informed.",
+  "author": {
+    "name": "The Taisce Authors"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["memory", "recall", "mcp", "taisce"],
+  "userConfig": {
+    "endpoint": {
+      "type": "string",
+      "title": "Taisce endpoint",
+      "description": "Base URL of the deployment, without a trailing slash. The plugin appends /mcp.",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Credential",
+      "description": "A write-enabled credential for one project. It is scoped, revocable and audited, which is why the plugin asks for one rather than running an OAuth flow.",
+      "required": true,
+      "sensitive": true
+    },
+    "data_subject_id": {
+      "type": "string",
+      "title": "Data subject",
+      "description": "Who these sessions are about, as registered with the deployment. Leave empty for project-wide memory.",
+      "required": false
+    },
+    "auto_capture": {
+      "type": "boolean",
+      "title": "Record turns automatically",
+      "description": "OFF by default, deliberately: turning it on sends the user's message of every completed turn to the deployment. Leave it off and use /taisce-memory:remember for what is worth keeping.",
+      "default": false
+    }
+  }
+}

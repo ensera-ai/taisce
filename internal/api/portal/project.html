@@ -1,0 +1,50 @@
+{{define "page-project"}}{{with .Project}}<header class="head"><div>
+<p class="kicker"><a href="/portal/">Overview</a><span class="sep">/</span>Project</p>
+<div class="title-row"><span class="avatar lg">{{slice .Name 0 1}}</span><h1>{{.Name}}</h1></div>
+<p class="sub">Its credentials, the turns formation parked, its erasures and what extraction refused. Nothing anybody said is shown here.</p></div></header>
+<div class="tiles">
+<div class="tile"><div class="label">{{template "i-key"}}Credentials</div><div class="value">{{len .Credentials}}</div></div>
+<div class="tile{{if .Parked.Items}} warn{{end}}"><div class="label">{{template "i-pause"}}Parked turns</div><div class="value">{{len .Parked.Items}}</div></div>
+<div class="tile"><div class="label">{{template "i-eraser"}}Erasures</div><div class="value">{{len .Erasures}}</div></div>
+<div class="tile"><div class="label">{{template "i-ban"}}Refusals</div><div class="value">{{.Refusals.Total}}</div></div>
+</div>
+
+<section class="card" id="credentials">
+<div class="card-head"><div><div class="title-row">{{template "i-key"}}<h2>Credentials</h2></div><p class="sub">Keys that reach this project's memory. A token is never shown here.</p></div></div>
+<div class="scroll"><table><thead><tr><th>Name</th><th>Prefix</th><th>Access</th><th>Created</th><th>State</th><th class="act">Revoke</th></tr></thead><tbody>
+{{range .Credentials}}<tr><td><strong>{{.Name}}</strong></td><td><code>{{.TokenPrefix}}…</code></td><td><span class="pill sky">{{.Access}}</span></td><td class="mono">{{.CreatedAt.UTC.Format "2006-01-02"}}</td>
+<td>{{if .RevokedAt}}<span class="pill bad dot">revoked</span>{{else}}<span class="pill ok dot">live</span>{{end}}</td>
+<td class="act">{{if not .RevokedAt}}<details class="reveal"><summary class="btn btn-sm btn-danger">Revoke</summary><form class="confirm" method="post" action="/portal/actions/revoke">{{template "guard" $.Guard}}<input type="hidden" name="project" value="{{$.Project.Name}}"><input type="hidden" name="id" value="{{.CredentialID}}"><small>type <code>{{.CredentialID}}</code> to confirm</small><span class="confirm-line"><input name="confirm" size="14" autocomplete="off" required aria-label="The credential's identifier, typed back"><button class="btn btn-sm btn-danger">Revoke for good</button></span></form></details>{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">none</td></tr>{{end}}
+</tbody></table></div>
+<div class="card-foot"><h3>Issue a credential</h3>
+<form class="row" method="post" action="/portal/actions/issue">{{template "guard" $.Guard}}<input type="hidden" name="project" value="{{.Name}}">
+<label class="field">Name<input name="name" maxlength="128" required autocomplete="off"></label>
+<label class="field">Access<select name="access"><option value="read_write">read and write</option><option value="read_only">read only</option></select></label>
+<button class="btn btn-primary">{{template "i-plus"}}Issue</button></form>
+<p class="note" style="margin-top:14px">Revoking cannot be undone from here: the token is gone and every client holding it stops at once. Typing the identifier back is the confirmation, because a box people tick is a box people tick by accident. The token is not shown here and cannot be recovered afterwards. A token rendered into a page is a token in a screenshot, a scroll buffer and a printer queue; issue from the CLI when you need to hand one to somebody.</p></div>
+</section>
+
+<section class="card" id="parked">
+<div class="card-head"><div class="title-row">{{template "i-pause"}}<h2>Parked turns</h2></div>{{if .Parked.Items}}<span class="pill warn dot">formation gave up on these</span>{{end}}</div>
+<div class="scroll"><table><thead><tr><th class="num">Log offset</th><th>Observation</th><th class="num">Attempts</th><th>Parked at</th><th class="act"></th></tr></thead><tbody>
+{{range .Parked.Items}}<tr><td class="num mono">{{.LogOffset}}</td><td><code>{{.ObservationID}}</code></td><td class="num mono">{{.Attempts}}</td><td class="mono">{{.ParkedAt.UTC.Format "2006-01-02 15:04:05"}}</td>
+<td class="act"><form method="post" action="/portal/actions/unpark">{{template "guard" $.Guard}}<input type="hidden" name="project" value="{{$.Project.Name}}"><input type="hidden" name="observation" value="{{.ObservationID}}"><button class="btn btn-sm">Retry</button></form></td></tr>
+{{else}}<tr><td colspan="5" class="empty">none</td></tr>{{end}}
+</tbody></table></div></section>
+
+<section class="card" id="erasures">
+<div class="card-head"><div class="title-row">{{template "i-eraser"}}<h2>Erasures</h2></div></div>
+<div class="scroll"><table><thead><tr><th>Requested</th><th>Selector</th><th>Reason</th><th>Completed</th><th>Residual</th></tr></thead><tbody>
+{{range .Erasures}}<tr><td class="mono">{{.RequestedAt.UTC.Format "2006-01-02 15:04:05"}}</td><td class="wrap"><code>{{printf "%s" .Selector}}</code></td><td>{{.Reason}}</td><td>{{if .CompletedAt}}<span class="mono">{{.CompletedAt.UTC.Format "2006-01-02 15:04:05"}}</span>{{else}}<span class="pill warn dot">open</span>{{end}}</td><td class="wrap"><code>{{printf "%s" .Residual}}</code></td></tr>
+{{else}}<tr><td colspan="5" class="empty">none</td></tr>{{end}}
+</tbody></table></div></section>
+
+<section class="card" id="refusals">
+<div class="card-head"><div><div class="title-row">{{template "i-ban"}}<h2>What extraction refused</h2></div><p class="sub">{{.Refusals.Total}} refusal(s) on record, counted by reason and by the relation the model proposed.</p></div></div>
+<div class="scroll"><table><thead><tr><th>Reason</th><th>Proposed relation</th><th class="num">Count</th></tr></thead><tbody>
+{{range .Refusals.Counts}}<tr><td>{{.Reason}}</td><td><code>{{.Predicate}}</code></td><td class="num mono">{{.Count}}</td></tr>
+{{else}}<tr><td colspan="3" class="empty">none</td></tr>{{end}}
+</tbody></table></div>
+<p class="note">The words are somebody's and are not shown here; they are read under a credential for this project through the memory routes.</p></section>
+{{end}}{{end}}

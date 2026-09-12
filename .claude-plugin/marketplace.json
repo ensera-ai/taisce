@@ -1,0 +1,14 @@
+{
+  "name": "taisce",
+  "owner": {
+    "name": "The Taisce Authors"
+  },
+  "description": "Taisce's own plugins: agent memory backed by a deployment you run.",
+  "plugins": [
+    {
+      "name": "taisce-memory",
+      "source": "./plugins/claude-code",
+      "description": "Memory that outlives the session, backed by a Taisce deployment you run."
+    }
+  ]
+}

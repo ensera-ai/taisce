@@ -1,0 +1,1717 @@
+{
+  "version": "v1",
+  "operations": [
+    {
+      "name": "message.get",
+      "method": "POST",
+      "path": "/v1/messages/get",
+      "success": 200,
+      "request": [
+        {
+          "name": "chunk_id",
+          "kind": "string"
+        },
+        {
+          "name": "byte_start",
+          "kind": "integer"
+        },
+        {
+          "name": "byte_limit",
+          "kind": "integer, optional"
+        },
+        {
+          "name": "expected_digest",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "chunk_id",
+          "kind": "string"
+        },
+        {
+          "name": "source_id",
+          "kind": "string"
+        },
+        {
+          "name": "ordinal",
+          "kind": "integer"
+        },
+        {
+          "name": "role",
+          "kind": "string"
+        },
+        {
+          "name": "occurred_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "content_digest",
+          "kind": "string"
+        },
+        {
+          "name": "message_bytes",
+          "kind": "integer"
+        },
+        {
+          "name": "byte_start",
+          "kind": "integer"
+        },
+        {
+          "name": "byte_end",
+          "kind": "integer"
+        },
+        {
+          "name": "text",
+          "kind": "string"
+        },
+        {
+          "name": "complete",
+          "kind": "boolean"
+        },
+        {
+          "name": "next_byte_start",
+          "kind": "integer, optional"
+        }
+      ]
+    },
+    {
+      "name": "embedding.search",
+      "method": "POST",
+      "path": "/v1/passages/search",
+      "success": 200,
+      "request": [
+        {
+          "name": "question",
+          "kind": "string"
+        },
+        {
+          "name": "limit",
+          "kind": "integer, optional"
+        },
+        {
+          "name": "candidates",
+          "kind": "integer"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "source_role",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "generation_id",
+          "kind": "string"
+        },
+        {
+          "name": "through_offset",
+          "kind": "integer"
+        },
+        {
+          "name": "covered_through_offset",
+          "kind": "integer"
+        },
+        {
+          "name": "build_state",
+          "kind": "string"
+        },
+        {
+          "name": "approximate",
+          "kind": "boolean"
+        },
+        {
+          "name": "passages",
+          "kind": "array of {chunk_id: string, source_id: string, ordinal: integer, role: string, preview: string, similarity: number, occurred_at: timestamp (RFC 3339), message_bytes: integer, preview_complete: boolean, preview_byte_end: integer, content_digest: string}"
+        }
+      ]
+    },
+    {
+      "name": "entity_embedding.search",
+      "method": "POST",
+      "path": "/v1/entities/candidates",
+      "success": 200,
+      "request": [
+        {
+          "name": "question",
+          "kind": "string"
+        },
+        {
+          "name": "limit",
+          "kind": "integer, optional"
+        },
+        {
+          "name": "candidates",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "generation_id",
+          "kind": "string"
+        },
+        {
+          "name": "target_count",
+          "kind": "integer"
+        },
+        {
+          "name": "build_state",
+          "kind": "string"
+        },
+        {
+          "name": "approximate",
+          "kind": "boolean"
+        },
+        {
+          "name": "candidates",
+          "kind": "array of {entity_id: string, identity_kind: string, name_preview: string, name_bytes: integer, name_truncated: boolean, similarity: number}"
+        }
+      ]
+    },
+    {
+      "name": "report_embedding.search",
+      "method": "POST",
+      "path": "/v1/reports/candidates",
+      "success": 200,
+      "request": [
+        {
+          "name": "question",
+          "kind": "string"
+        },
+        {
+          "name": "limit",
+          "kind": "integer, optional"
+        },
+        {
+          "name": "candidates",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "generation_id",
+          "kind": "string"
+        },
+        {
+          "name": "target_count",
+          "kind": "integer"
+        },
+        {
+          "name": "build_state",
+          "kind": "string"
+        },
+        {
+          "name": "approximate",
+          "kind": "boolean"
+        },
+        {
+          "name": "candidates",
+          "kind": "array of {report_id: string, community_id: string, title_preview: string, title_bytes: integer, title_truncated: boolean, summary_preview: string, summary_bytes: integer, summary_truncated: boolean, importance: number, similarity: number}"
+        }
+      ]
+    },
+    {
+      "name": "entity.list",
+      "method": "POST",
+      "path": "/v1/entities/list",
+      "success": 200,
+      "request": [
+        {
+          "name": "after",
+          "kind": "{id: string}, optional"
+        },
+        {
+          "name": "limit",
+          "kind": "integer, optional"
+        }
+      ],
+      "response": [
+        {
+          "name": "entities",
+          "kind": "array of {id: string, identity_kind: string, name_preview: string, name_bytes: integer, name_truncated: boolean, alias_count: integer, first_seen_at: timestamp (RFC 3339)}"
+        },
+        {
+          "name": "next",
+          "kind": "{id: string}, optional"
+        }
+      ]
+    },
+    {
+      "name": "entity.get",
+      "method": "POST",
+      "path": "/v1/entities/get",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "identity_kind",
+          "kind": "string"
+        },
+        {
+          "name": "canonical_name",
+          "kind": "string"
+        },
+        {
+          "name": "aliases",
+          "kind": "array of string"
+        },
+        {
+          "name": "speaker_subject_id",
+          "kind": "string, optional"
+        },
+        {
+          "name": "first_seen_at",
+          "kind": "timestamp (RFC 3339)"
+        }
+      ]
+    },
+    {
+      "name": "subject.register",
+      "method": "POST",
+      "path": "/v1/subjects/register",
+      "success": 200,
+      "request": [
+        {
+          "name": "idempotency_key",
+          "kind": "string"
+        },
+        {
+          "name": "external_reference",
+          "kind": "string"
+        },
+        {
+          "name": "label",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "version",
+          "kind": "string"
+        },
+        {
+          "name": "external_reference",
+          "kind": "string"
+        },
+        {
+          "name": "label",
+          "kind": "string"
+        },
+        {
+          "name": "updated_by",
+          "kind": "string"
+        },
+        {
+          "name": "created_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "updated_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "inactive_after",
+          "kind": "timestamp (RFC 3339), optional"
+        },
+        {
+          "name": "replayed",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "subject.get",
+      "method": "POST",
+      "path": "/v1/subjects/get",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "external_reference",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "version",
+          "kind": "string"
+        },
+        {
+          "name": "external_reference",
+          "kind": "string"
+        },
+        {
+          "name": "label",
+          "kind": "string"
+        },
+        {
+          "name": "updated_by",
+          "kind": "string"
+        },
+        {
+          "name": "created_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "updated_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "inactive_after",
+          "kind": "timestamp (RFC 3339), optional"
+        }
+      ]
+    },
+    {
+      "name": "subject.list",
+      "method": "POST",
+      "path": "/v1/subjects/list",
+      "success": 200,
+      "request": [
+        {
+          "name": "after",
+          "kind": "string"
+        },
+        {
+          "name": "limit",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "subjects",
+          "kind": "array of {id: string, version: string, external_reference: string, label: string, updated_by: string, created_at: timestamp (RFC 3339), updated_at: timestamp (RFC 3339), inactive_after: timestamp (RFC 3339), optional}"
+        },
+        {
+          "name": "next",
+          "kind": "{id: string}, optional"
+        }
+      ]
+    },
+    {
+      "name": "subject.update",
+      "method": "POST",
+      "path": "/v1/subjects/update",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "expected_version",
+          "kind": "string"
+        },
+        {
+          "name": "external_reference",
+          "kind": "string"
+        },
+        {
+          "name": "label",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "version",
+          "kind": "string"
+        },
+        {
+          "name": "external_reference",
+          "kind": "string"
+        },
+        {
+          "name": "label",
+          "kind": "string"
+        },
+        {
+          "name": "updated_by",
+          "kind": "string"
+        },
+        {
+          "name": "created_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "updated_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "inactive_after",
+          "kind": "timestamp (RFC 3339), optional"
+        },
+        {
+          "name": "replayed",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "artifact.put",
+      "method": "POST",
+      "path": "/v1/artifacts/put",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "expected_version",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "kind",
+          "kind": "string"
+        },
+        {
+          "name": "name",
+          "kind": "string"
+        },
+        {
+          "name": "content",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "version",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "kind",
+          "kind": "string"
+        },
+        {
+          "name": "name",
+          "kind": "string"
+        },
+        {
+          "name": "source_observation_id",
+          "kind": "string"
+        },
+        {
+          "name": "bytes",
+          "kind": "integer"
+        },
+        {
+          "name": "authored_by",
+          "kind": "string"
+        },
+        {
+          "name": "created_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "updated_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "expires_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "replayed",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "artifact.get",
+      "method": "POST",
+      "path": "/v1/artifacts/get",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "version",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "kind",
+          "kind": "string"
+        },
+        {
+          "name": "name",
+          "kind": "string"
+        },
+        {
+          "name": "source_observation_id",
+          "kind": "string"
+        },
+        {
+          "name": "bytes",
+          "kind": "integer"
+        },
+        {
+          "name": "authored_by",
+          "kind": "string"
+        },
+        {
+          "name": "created_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "updated_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "expires_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "content",
+          "kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "artifact.list",
+      "method": "POST",
+      "path": "/v1/artifacts/list",
+      "success": 200,
+      "request": [
+        {
+          "name": "kind",
+          "kind": "string"
+        },
+        {
+          "name": "name_prefix",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "after",
+          "kind": "string"
+        },
+        {
+          "name": "limit",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "artifacts",
+          "kind": "array of {id: string, version: string, data_subject_id: string, kind: string, name: string, source_observation_id: string, bytes: integer, authored_by: string, created_at: timestamp (RFC 3339), updated_at: timestamp (RFC 3339), expires_at: timestamp (RFC 3339)}"
+        },
+        {
+          "name": "next",
+          "kind": "{id: string}, optional"
+        }
+      ]
+    },
+    {
+      "name": "artifact.delete",
+      "method": "POST",
+      "path": "/v1/artifacts/delete",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "expected_version",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "deleted",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "observe",
+      "method": "POST",
+      "path": "/v1/observations",
+      "success": 201,
+      "request": [
+        {
+          "name": "idempotency_key",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "occurred_at",
+          "kind": "timestamp (RFC 3339), optional"
+        },
+        {
+          "name": "messages",
+          "kind": "array of {group_ordinal: integer, optional, role: string, content: string, occurred_at: timestamp (RFC 3339), optional}"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "scope",
+          "kind": "string"
+        },
+        {
+          "name": "log_offset",
+          "kind": "integer"
+        }
+      ]
+    },
+    {
+      "name": "freshness",
+      "method": "GET",
+      "path": "/v1/freshness",
+      "success": 200,
+      "no_body": true,
+      "response": [
+        {
+          "name": "scope",
+          "kind": "string"
+        },
+        {
+          "name": "stored",
+          "kind": "integer, optional"
+        },
+        {
+          "name": "formed",
+          "kind": "integer, optional"
+        },
+        {
+          "name": "parked",
+          "kind": "integer"
+        }
+      ]
+    },
+    {
+      "name": "recall",
+      "method": "POST",
+      "path": "/v1/recalls",
+      "success": 200,
+      "request": [
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "question",
+          "kind": "string"
+        },
+        {
+          "name": "as_of",
+          "kind": "timestamp (RFC 3339), optional"
+        },
+        {
+          "name": "as_known_at",
+          "kind": "timestamp (RFC 3339), optional"
+        },
+        {
+          "name": "max_characters",
+          "kind": "integer, optional"
+        },
+        {
+          "name": "source_roles",
+          "kind": "array of string"
+        },
+        {
+          "name": "hops",
+          "kind": "integer"
+        },
+        {
+          "name": "surfaces",
+          "kind": "array of string"
+        },
+        {
+          "name": "themes",
+          "kind": "boolean"
+        }
+      ],
+      "response": [
+        {
+          "name": "controls",
+          "kind": "{max_characters: integer, max_rows: integer, source_roles: array of string, hops: integer, surfaces: array of string, themes: boolean}"
+        },
+        {
+          "name": "anchors",
+          "kind": "array of {entity_id: string, name: string, type: string, matched: string}"
+        },
+        {
+          "name": "facts",
+          "kind": "array of {fact_id: string, subject: string, predicate: string, object: string, statement: string, confidence: number, valid_from: timestamp (RFC 3339), valid_until: timestamp (RFC 3339), optional, anchored_on: string, source_role: string, hops: integer, path: array of string, via: array of string, co_derived_with: array of string, evidence: {observation_id: string, source_ordinal: integer, quote: string, byte_start: integer, byte_end: integer, context: string, context_start: integer, context_complete: boolean}}"
+        },
+        {
+          "name": "reports",
+          "kind": "array of {community_id: string, report_id: string, title: string, summary: string, importance: number, similarity: number, level: integer, parent: string, sources: array of string}"
+        },
+        {
+          "name": "passages",
+          "kind": "array of {chunk_id: string, source_id: string, ordinal: integer, role: string, quote: string, similarity: number, occurred_at: timestamp (RFC 3339), complete: boolean}"
+        },
+        {
+          "name": "truncated",
+          "kind": "boolean"
+        },
+        {
+          "name": "characters",
+          "kind": "integer"
+        },
+        {
+          "name": "degraded",
+          "kind": "array of string"
+        },
+        {
+          "name": "reach",
+          "kind": "{terms: integer, anchored: integer, named_nothing_known: boolean, facts_per_anchor: object of integer}"
+        }
+      ]
+    },
+    {
+      "name": "context.assemble",
+      "method": "POST",
+      "path": "/v1/contexts",
+      "success": 200,
+      "request": [
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "max_characters",
+          "kind": "integer, optional"
+        }
+      ],
+      "response": [
+        {
+          "name": "segments",
+          "kind": "array of {segment_id: string, level: integer, from_offset: integer, to_offset: integer, covered: integer, summary: string}"
+        },
+        {
+          "name": "turns",
+          "kind": "array of {log_offset: integer, occurred_at: timestamp (RFC 3339), messages: array of {role: string, content: string}}"
+        },
+        {
+          "name": "watermark",
+          "kind": "{scope: string, stored: integer, optional, formed: integer, optional, parked: integer}"
+        },
+        {
+          "name": "characters",
+          "kind": "integer"
+        },
+        {
+          "name": "truncated",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "erase",
+      "method": "POST",
+      "path": "/v1/erasures",
+      "success": 200,
+      "request": [
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "source_observation_ids",
+          "kind": "array of string"
+        },
+        {
+          "name": "reason",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "request_id",
+          "kind": "string"
+        },
+        {
+          "name": "scope",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "source_observation_ids",
+          "kind": "array of string"
+        },
+        {
+          "name": "completed_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "deleted",
+          "kind": "object of integer"
+        },
+        {
+          "name": "residual",
+          "kind": "object of integer"
+        },
+        {
+          "name": "clean",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "export",
+      "method": "POST",
+      "path": "/v1/exports",
+      "success": 200,
+      "request": [
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "scope",
+          "kind": "string"
+        },
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "sections",
+          "kind": "object of array of opaque JSON"
+        },
+        {
+          "name": "rows",
+          "kind": "object of integer"
+        }
+      ]
+    },
+    {
+      "name": "citation.resolve",
+      "method": "POST",
+      "path": "/v1/citations/resolve",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "after",
+          "kind": "{source_observation_id: string, source_ordinal: integer, byte_start: integer}, optional"
+        },
+        {
+          "name": "limit",
+          "kind": "integer, optional"
+        }
+      ],
+      "response": [
+        {
+          "name": "generation",
+          "kind": "{generation_id: string, extractor_version: string, applied_at: timestamp (RFC 3339)}, optional"
+        },
+        {
+          "name": "reinterpreted_by",
+          "kind": "{generation_id: string, extractor_version: string, applied_at: timestamp (RFC 3339)}, optional"
+        },
+        {
+          "name": "version",
+          "kind": "string"
+        },
+        {
+          "name": "retraction",
+          "kind": "{operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339), replacement_source_observation_id: string, optional, replacement_record_id: string, optional}, optional"
+        },
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "superseded_by",
+          "kind": "string, optional"
+        },
+        {
+          "name": "supersession_source_observation_id",
+          "kind": "string, optional"
+        },
+        {
+          "name": "scope",
+          "kind": "string"
+        },
+        {
+          "name": "subject_entity_id",
+          "kind": "string, optional"
+        },
+        {
+          "name": "object_entity_id",
+          "kind": "string, optional"
+        },
+        {
+          "name": "predicate",
+          "kind": "string"
+        },
+        {
+          "name": "statement",
+          "kind": "string"
+        },
+        {
+          "name": "confidence",
+          "kind": "number"
+        },
+        {
+          "name": "source_role",
+          "kind": "string"
+        },
+        {
+          "name": "recorded_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "valid",
+          "kind": "{from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}"
+        },
+        {
+          "name": "known",
+          "kind": "{from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}"
+        },
+        {
+          "name": "status",
+          "kind": "string"
+        },
+        {
+          "name": "evidence",
+          "kind": "array of {authored_by: string, optional, source_observation_id: string, source_ordinal: integer, log_offset: integer, role: string, occurred_at: timestamp (RFC 3339), quote: string, byte_start: integer, byte_end: integer, extractor_version: string, context: string, context_byte_start: integer, context_byte_end: integer, context_complete: boolean}"
+        },
+        {
+          "name": "next",
+          "kind": "{source_observation_id: string, source_ordinal: integer, byte_start: integer}, optional"
+        }
+      ]
+    },
+    {
+      "name": "notification.register",
+      "method": "POST",
+      "path": "/v1/notifications/endpoints/register",
+      "success": 200,
+      "request": [
+        {
+          "name": "url",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "url",
+          "kind": "string"
+        },
+        {
+          "name": "created_at",
+          "kind": "timestamp (RFC 3339)"
+        },
+        {
+          "name": "disabled_at",
+          "kind": "timestamp (RFC 3339), optional"
+        },
+        {
+          "name": "secret",
+          "kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "notification.list",
+      "method": "POST",
+      "path": "/v1/notifications/endpoints/list",
+      "success": 200,
+      "response": [
+        {
+          "name": "endpoints",
+          "kind": "array of {id: string, url: string, created_at: timestamp (RFC 3339), disabled_at: timestamp (RFC 3339), optional}"
+        }
+      ]
+    },
+    {
+      "name": "notification.disable",
+      "method": "POST",
+      "path": "/v1/notifications/endpoints/disable",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "disabled",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "notification.deliveries",
+      "method": "POST",
+      "path": "/v1/notifications/deliveries/list",
+      "success": 200,
+      "request": [
+        {
+          "name": "limit",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "deliveries",
+          "kind": "array of {id: string, endpoint_id: string, url: string, formed_through: integer, stored_through: integer, attempts: integer, delivered_at: timestamp (RFC 3339), optional, parked_at: timestamp (RFC 3339), optional, last_status: integer, optional, last_error: string, optional, created_at: timestamp (RFC 3339)}"
+        }
+      ]
+    },
+    {
+      "name": "entity.purge",
+      "method": "POST",
+      "path": "/v1/entities/purge",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "reason",
+          "kind": "string"
+        },
+        {
+          "name": "confirm",
+          "kind": "boolean"
+        }
+      ],
+      "response": [
+        {
+          "name": "entity_id",
+          "kind": "string"
+        },
+        {
+          "name": "canonical_name",
+          "kind": "string"
+        },
+        {
+          "name": "reason",
+          "kind": "string"
+        },
+        {
+          "name": "previewed",
+          "kind": "boolean"
+        },
+        {
+          "name": "removed",
+          "kind": "object of integer"
+        },
+        {
+          "name": "residual",
+          "kind": "object of integer"
+        },
+        {
+          "name": "contributing_subjects",
+          "kind": "integer"
+        },
+        {
+          "name": "claims_from_unattributed_turns",
+          "kind": "integer"
+        },
+        {
+          "name": "source_turns_kept",
+          "kind": "integer"
+        },
+        {
+          "name": "completed_at",
+          "kind": "timestamp (RFC 3339)"
+        }
+      ]
+    },
+    {
+      "name": "record.list",
+      "method": "POST",
+      "path": "/v1/records/list",
+      "success": 200,
+      "request": [
+        {
+          "name": "data_subject_id",
+          "kind": "string"
+        },
+        {
+          "name": "after",
+          "kind": "{id: string}, optional"
+        },
+        {
+          "name": "limit",
+          "kind": "integer, optional"
+        }
+      ],
+      "response": [
+        {
+          "name": "records",
+          "kind": "array of {version: string, id: string, subject_entity_id: string, optional, object_entity_id: string, optional, predicate: string, statement_preview: string, statement_bytes: integer, preview_truncated: boolean, source_role: string, recorded_at: timestamp (RFC 3339), status: string}"
+        },
+        {
+          "name": "next",
+          "kind": "{id: string}, optional"
+        }
+      ]
+    },
+    {
+      "name": "record.history",
+      "method": "POST",
+      "path": "/v1/records/history",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "before",
+          "kind": "{known_until: timestamp (RFC 3339), history_id: string}, optional"
+        },
+        {
+          "name": "limit",
+          "kind": "integer, optional"
+        }
+      ],
+      "response": [
+        {
+          "name": "version",
+          "kind": "string"
+        },
+        {
+          "name": "retraction",
+          "kind": "{operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339), replacement_source_observation_id: string, optional, replacement_record_id: string, optional}, optional"
+        },
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "current",
+          "kind": "{valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}}"
+        },
+        {
+          "name": "previous",
+          "kind": "array of {history_id: string, valid: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, known: {from: timestamp (RFC 3339), optional, until: timestamp (RFC 3339), optional, from_inclusive: boolean, until_inclusive: boolean}, ended_by_observation_id: string}"
+        },
+        {
+          "name": "next",
+          "kind": "{known_until: timestamp (RFC 3339), history_id: string}, optional"
+        }
+      ]
+    },
+    {
+      "name": "record.assert",
+      "method": "POST",
+      "path": "/v1/records/assert",
+      "success": 200,
+      "request": [
+        {
+          "name": "records",
+          "kind": "array of {idempotency_key: string, data_subject_id: string, subject: string, predicate: string, object: string, statement: string, valid_from: timestamp (RFC 3339)}"
+        }
+      ],
+      "response": [
+        {
+          "name": "records",
+          "kind": "array of {id: string, version: string, source_observation_id: string, replayed: boolean}"
+        }
+      ]
+    },
+    {
+      "name": "record.correct",
+      "method": "POST",
+      "path": "/v1/records/correct",
+      "success": 200,
+      "request": [
+        {
+          "name": "records",
+          "kind": "array of {id: string, expected_version: string, object: string, statement: string, valid_from: timestamp (RFC 3339)}"
+        }
+      ],
+      "response": [
+        {
+          "name": "records",
+          "kind": "array of {original_id: string, id: string, version: string, source_observation_id: string}"
+        }
+      ]
+    },
+    {
+      "name": "record.retract",
+      "method": "POST",
+      "path": "/v1/records/retract",
+      "success": 200,
+      "request": [
+        {
+          "name": "records",
+          "kind": "array of {id: string, expected_version: string}"
+        }
+      ],
+      "response": [
+        {
+          "name": "records",
+          "kind": "array of {id: string, version: string, operation_id: string, principal_id: string, retracted_at: timestamp (RFC 3339), replacement_source_observation_id: string, optional, replacement_record_id: string, optional}"
+        }
+      ]
+    }
+  ],
+  "management": [
+    {
+      "name": "project.create",
+      "method": "POST",
+      "path": "/manage/v1/projects/create",
+      "success": 201,
+      "request": [
+        {
+          "name": "name",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "suspended",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "project.list",
+      "method": "POST",
+      "path": "/manage/v1/projects/list",
+      "success": 200,
+      "no_body": true,
+      "response": [
+        {
+          "name": "projects",
+          "kind": "array of {project: string, label: string, surfaces: array of string, retention: string, suspended: boolean}"
+        }
+      ]
+    },
+    {
+      "name": "project.suspend",
+      "method": "POST",
+      "path": "/manage/v1/projects/suspend",
+      "success": 200,
+      "request": [
+        {
+          "name": "name",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "suspended",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "project.resume",
+      "method": "POST",
+      "path": "/manage/v1/projects/resume",
+      "success": 200,
+      "request": [
+        {
+          "name": "name",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "suspended",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "credential.issue",
+      "method": "POST",
+      "path": "/manage/v1/credentials/issue",
+      "success": 201,
+      "request": [
+        {
+          "name": "name",
+          "kind": "string"
+        },
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "access",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "name",
+          "kind": "string"
+        },
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "access",
+          "kind": "string"
+        },
+        {
+          "name": "token",
+          "kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "credential.list",
+      "method": "POST",
+      "path": "/manage/v1/credentials/list",
+      "success": 200,
+      "request": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "limit",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "credentials",
+          "kind": "array of {id: string, name: string, kind: string, project: string, access: string, token_prefix: string, created_at: timestamp (RFC 3339), revoked_at: timestamp (RFC 3339), optional}"
+        }
+      ]
+    },
+    {
+      "name": "credential.revoke",
+      "method": "POST",
+      "path": "/manage/v1/credentials/revoke",
+      "success": 200,
+      "request": [
+        {
+          "name": "id",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "id",
+          "kind": "string"
+        },
+        {
+          "name": "revoked",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "refusal.summary",
+      "method": "POST",
+      "path": "/manage/v1/refusals/summary",
+      "success": 200,
+      "request": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "limit",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "total",
+          "kind": "integer"
+        },
+        {
+          "name": "counts",
+          "kind": "array of {reason: string, predicate: string, count: integer}"
+        }
+      ]
+    },
+    {
+      "name": "erasure.list",
+      "method": "POST",
+      "path": "/manage/v1/erasures/list",
+      "success": 200,
+      "request": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "limit",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "erasures",
+          "kind": "array of {id: string, project: string, selector: opaque JSON, reason: string, requested_at: timestamp (RFC 3339), completed_at: timestamp (RFC 3339), optional, residual: opaque JSON}"
+        }
+      ]
+    },
+    {
+      "name": "formation.status",
+      "method": "POST",
+      "path": "/manage/v1/formation/status",
+      "success": 200,
+      "no_body": true,
+      "response": [
+        {
+          "name": "scopes",
+          "kind": "array of {project: string, suspended: boolean, stored: integer, optional, formed: integer, optional, parked: integer}"
+        }
+      ]
+    },
+    {
+      "name": "formation.parked",
+      "method": "POST",
+      "path": "/manage/v1/formation/parked",
+      "success": 200,
+      "request": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "after",
+          "kind": "integer, optional"
+        },
+        {
+          "name": "limit",
+          "kind": "integer"
+        }
+      ],
+      "response": [
+        {
+          "name": "items",
+          "kind": "array of {observation_id: string, log_offset: integer, attempts: integer, parked_at: timestamp (RFC 3339)}"
+        },
+        {
+          "name": "next_after",
+          "kind": "integer, optional"
+        }
+      ]
+    },
+    {
+      "name": "formation.unpark",
+      "method": "POST",
+      "path": "/manage/v1/formation/unpark",
+      "success": 200,
+      "request": [
+        {
+          "name": "project",
+          "kind": "string"
+        },
+        {
+          "name": "observation_id",
+          "kind": "string"
+        }
+      ],
+      "response": [
+        {
+          "name": "observation_id",
+          "kind": "string"
+        },
+        {
+          "name": "unparked",
+          "kind": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "audit.seal",
+      "method": "POST",
+      "path": "/manage/v1/audit/seal",
+      "success": 200,
+      "no_body": true,
+      "response": [
+        {
+          "name": "From",
+          "kind": "integer"
+        },
+        {
+          "name": "To",
+          "kind": "integer"
+        },
+        {
+          "name": "Entries",
+          "kind": "integer"
+        },
+        {
+          "name": "Digest",
+          "kind": "string"
+        }
+      ]
+    },
+    {
+      "name": "audit.verify",
+      "method": "POST",
+      "path": "/manage/v1/audit/verify",
+      "success": 200,
+      "no_body": true,
+      "response": [
+        {
+          "name": "Valid",
+          "kind": "boolean"
+        },
+        {
+          "name": "Seals",
+          "kind": "integer"
+        },
+        {
+          "name": "Entries",
+          "kind": "integer"
+        },
+        {
+          "name": "Unsealed",
+          "kind": "integer"
+        },
+        {
+          "name": "Head",
+          "kind": "string"
+        },
+        {
+          "name": "Failure",
+          "kind": "string"
+        }
+      ]
+    }
+  ],
+  "codes": [
+    "artifact_conflict",
+    "citation_limit",
+    "entity_candidates_unavailable",
+    "forbidden",
+    "idempotency_conflict",
+    "internal",
+    "invalid_artifact",
+    "invalid_body",
+    "invalid_citation",
+    "invalid_context",
+    "invalid_credential",
+    "invalid_destination",
+    "invalid_entity_candidate_query",
+    "invalid_entity_page",
+    "invalid_erasure",
+    "invalid_message_window",
+    "invalid_passage_query",
+    "invalid_project",
+    "invalid_question",
+    "invalid_recall_controls",
+    "invalid_record_mutation",
+    "invalid_record_page",
+    "invalid_report_candidate_query",
+    "invalid_subject",
+    "invalid_turn",
+    "no_subject",
+    "not_found",
+    "notifications_unavailable",
+    "passage_unavailable",
+    "rate_limited",
+    "record_conflict",
+    "record_mutation_limit",
+    "report_candidates_unavailable",
+    "source_changed",
+    "storage_capacity",
+    "subject_conflict",
+    "unauthenticated"
+  ]
+}

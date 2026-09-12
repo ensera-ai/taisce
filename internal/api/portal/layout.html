@@ -1,0 +1,25 @@
+{{define "layout"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Taisce · {{.Title}}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark">
+{{template "styles"}}</head>
+<body>{{if .Login}}{{template "page-login" .}}{{else}}<div class="shell">
+<aside class="rail">
+<a class="brand" href="/portal/">{{template "mark"}}<span><b>taisce</b><small>ops centre</small></span></a>
+<nav aria-label="Portal">
+<span class="group">Monitor</span>
+<a href="/portal/"{{if .Home}} aria-current="page"{{end}}>{{template "i-grid"}}Overview</a>
+<a href="/portal/ledger"{{if .Ledger}} aria-current="page"{{end}}>{{template "i-ledger"}}Ledger</a>
+<span class="group">Manage</span>
+<a href="/portal/#projects">{{template "i-folder"}}Projects</a>
+{{with .Project}}<a class="sub" href="/portal/projects/{{.Name}}" aria-current="page">{{.Name}}</a>
+<a class="sub2" href="#credentials">Credentials</a><a class="sub2" href="#parked">Parked turns</a><a class="sub2" href="#erasures">Erasures</a><a class="sub2" href="#refusals">Refusals</a>{{end}}
+</nav>
+{{with .Health}}<div class="usage" aria-label="Instance load"><p class="usage-title">Instance load</p>
+<div class="usage-row"><span>Backlog</span><span class="mono">{{.Pending}} / {{.PendingLimit}}</span></div><div class="meter"><i style="--fill:{{.PendingShare}}%"></i></div>
+<div class="usage-row"><span>Connections</span><span class="mono">{{.Connections}} / {{.MaxConnections}}</span></div><div class="meter{{if .Tight}} tight{{end}}"><i style="--fill:{{.ConnectionShare}}%"></i></div>
+<div class="usage-row"><span>Worker</span>{{if .WorkerResponsive}}<span class="ok-text">answering</span>{{else}}<span class="bad-text">not answering</span>{{end}}</div></div>{{end}}
+{{if .Operator}}<div class="who"><div class="who-id">{{template "i-user"}}<span><small>Operator</small><b>{{.Operator}}</b></span></div>
+<form method="post" action="/portal/logout"><button class="btn btn-ghost btn-sm btn-block">{{template "i-logout"}}Sign out</button></form></div>{{end}}
+</aside>
+<main class="content">{{with .Switch}}<div class="topbar"><details class="switch"><summary>{{template "i-folder"}}<span class="switch-label">{{.Label}}</span>{{template "i-chevron"}}</summary>
+<nav class="menu" aria-label="Projects">{{range .Items}}<a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}</nav></details></div>{{end}}{{template "body" .}}</main></div>{{end}}</body></html>{{end}}

@@ -1,0 +1,264 @@
+# Taisce, on one machine.
+#
+# `docker compose up` brings up the substrate, applies every migration, creates a project, mints a
+# credential and serves memory. What it does NOT do is provide a model: see the `model` note below,
+# because extraction is the one thing that cannot be shipped.
+#
+# ── THIS IS ONE MACHINE, AND IT SAYS SO ──────────────────────────────────────────────────────────
+#
+# One host is one failure domain. Nothing here survives losing it, and no arrangement of containers
+# on a single machine would — a compose file dressed up to look highly available would survive a
+# process dying and not the machine it is on. The Helm chart is where availability lives.
+#
+# ── THE TWO DATABASE IDENTITIES ARE THE POINT ────────────────────────────────────────────────────
+#
+# The server holds two connections: one that can serve memory and one that can read the registry.
+# Neither can change the schema. Only `bootstrap` connects as an identity that can, and it exits
+# before the server starts. That separation is what stops a memory query reading a credential, and
+# collapsing these three URLs into one would leave it drawn in the migration and untrue in the
+# process.
+
+name: taisce
+
+# ── What the api and the workers share ───────────────────────────────────────────────────────
+#
+# An anchor rather than two copies. The two services differ only in role, and a connection string
+# that drifted between them would be a defect nobody sees until one half is talking to the wrong
+# database.
+x-service: &service
+  build: .
+  depends_on:
+    bootstrap:
+      condition: service_completed_successfully
+  environment: &service-env
+    # ── Pool sizes are set, not defaulted ──────────────────────────────────────────────────────
+    #
+    # pgx sizes a pool it is not told about at the machine's CPU count. On a laptop that is eight
+    # and nobody notices; on a node with a hundred cores, twenty-eight workers ask for thousands of
+    # connections against a server that has eighty — which is how a corpus pass lost ten documents
+    # to the write path while the component that was scaled kept running.
+    #
+    # So every DSN says what it may open. The numbers are docs/21's, per process, and a process now
+    # refuses to start when the server cannot satisfy them — so these and `max_connections` cannot
+    # drift apart silently.
+    #
+    # Serves memory. Cannot read the registry, cannot change the schema.
+    TAISCE_MEMORY_DSN: postgres://taisce_data:${TAISCE_DATA_PASSWORD:-change-me-data}@postgres:5432/taisce?sslmode=disable&pool_max_conns=${TAISCE_MEMORY_POOL:-8}&pool_min_conns=2
+    TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
+
+    # ── The model ──────────────────────────────────────────────────────────────────────────────
+    #
+    # Extraction is the one thing that cannot be shipped: no key can be baked into an open
+    # repository, and a hosted provider means the first five minutes contain a signup.
+    #
+    # So the default points at Ollama on the host. On macOS with Colima, and on Docker Desktop,
+    # `host.docker.internal` is the host from inside a container — and Ollama must be told to
+    # listen beyond loopback or nothing reaches it:
+    #
+    #     OLLAMA_HOST=0.0.0.0 ollama serve
+    #     ollama pull qwen3.6:35b-a3b-mxfp8
+    #
+    # Without a model the instance still starts. It stores turns, serves recall of whatever is
+    # already formed, and erases — and it says loudly at startup that memory will not form, because
+    # a system that silently stores and never extracts looks like a memory that does not work.
+    TAISCE_INFERENCE_ENDPOINT: ${TAISCE_INFERENCE_ENDPOINT:-http://host.docker.internal:11434/v1}
+    TAISCE_INFERENCE_EXTRACTOR_MODEL: ${TAISCE_INFERENCE_EXTRACTOR_MODEL:-qwen3.6:35b-a3b-mxfp8}
+    TAISCE_INFERENCE_API_KEY: ${TAISCE_INFERENCE_API_KEY:-}
+
+    # ── Two providers, if that is what suits ───────────────────────────────────────────────────
+    #
+    # Generation and embedding are different jobs. Extraction is slow, is the expensive part, runs on
+    # a background pass where nobody is waiting, and is where a better model shows. Embedding is a
+    # cheap forward pass over short text and is the one most worth keeping on the operator's own
+    # hardware.
+    #
+    # So these may point somewhere else, and both fall back to the endpoint above when unset — one
+    # provider is the ordinary case and should need one variable. A hosted extractor with a local
+    # embedder looks like:
+    #
+    #     TAISCE_INFERENCE_ENDPOINT=https://openrouter.ai/api/v1
+    #     TAISCE_INFERENCE_EXTRACTOR_MODEL=<a model that provider serves>
+    #     TAISCE_INFERENCE_API_KEY=<their key>
+    #     TAISCE_INFERENCE_EMBEDDING_ENDPOINT=http://host.docker.internal:11434/v1
+    #     TAISCE_INFERENCE_EMBEDDING_MODEL=qwen3-embedding:4b-q8_0
+    #     TAISCE_INFERENCE_ALLOWLIST=openrouter.ai,host.docker.internal:11434
+    #
+    # Note the allowlist names BOTH. Every host that receives somebody's words is listed, and a second
+    # endpoint does not inherit the first one's permission — see below.
+    TAISCE_INFERENCE_EMBEDDING_ENDPOINT: ${TAISCE_INFERENCE_EMBEDDING_ENDPOINT:-}
+    TAISCE_INFERENCE_EMBEDDING_MODEL: ${TAISCE_INFERENCE_EMBEDDING_MODEL:-}
+    TAISCE_INFERENCE_EMBEDDING_API_KEY: ${TAISCE_INFERENCE_EMBEDDING_API_KEY:-}
+    # The pinned revision a generation is built and searched under; without it the API cannot switch
+    # the semantic surfaces on.
+    TAISCE_INFERENCE_EMBEDDING_REVISION: ${TAISCE_INFERENCE_EMBEDDING_REVISION:-}
+    # Closed when unset, deliberately. This is the list of hosts permitted to receive message
+    # content, and it is the difference between an endpoint typo that fails and one that silently
+    # sends a customer's conversations somewhere nobody chose. Changing an endpoint above means
+    # changing this too — that is the mechanism working, not an inconvenience.
+    #
+    # ONE LIST, EVERY ENDPOINT. Generation sends a message and embedding sends text written from
+    # several of them, so both are an egress of exactly the data this exists to hold. A list per role
+    # would be two places to forget a host, and it would let a deployment permit a host for one role
+    # while believing it had permitted nothing.
+    #
+    # A hosted provider means somebody's words leave this machine. That is the operator's decision to
+    # make and this list is where they make it — deliberately, by writing the host down.
+    TAISCE_INFERENCE_ALLOWLIST: ${TAISCE_INFERENCE_ALLOWLIST:-host.docker.internal:11434}
+  extra_hosts:
+    # Colima and Docker Desktop resolve this already; declaring it makes the file work on plain
+    # Linux Docker too, where it otherwise does not exist.
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+
+services:
+  # The substrate. Built here rather than pulled because the schema depends on extensions that are
+  # not in the stock image, and a test that skips when they are absent proves nothing about a system
+  # whose whole design is in its DDL.
+  postgres:
+    build: ./deploy/postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taisce}
+      POSTGRES_DB: taisce
+    # Not published by default. A database on a laptop's network is a database on whatever network
+    # that laptop joins next. Uncomment to inspect it with psql.
+    # ports: ["55432:5432"]
+    volumes:
+      # Mounted at /var/lib/postgresql rather than at .../data, which is what PostgreSQL 18's image
+      # expects: it places the cluster in a subdirectory so that a later `pg_upgrade --link` does not
+      # have to cross a mount point. Mounting the older path starts, finds data where it does not
+      # expect it, and refuses — found by running this file rather than by reading it.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d taisce"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Migrations, provisioning and the first credential. Runs to completion and exits.
+  #
+  # A separate service rather than an entrypoint in the server, because migration is DDL and DDL
+  # takes locks a serving process must not hold — and because two server replicas starting together
+  # would otherwise both try to migrate.
+  bootstrap:
+    build: .
+    command: ["bootstrap", "-project", "${TAISCE_PROJECT:-default}"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # The only place a superuser connection appears. The server never gets one.
+      TAISCE_ADMIN_DSN: postgres://postgres:${POSTGRES_PASSWORD:-taisce}@postgres:5432/taisce?sslmode=disable
+      TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
+      TAISCE_CONTROL_PASSWORD: ${TAISCE_CONTROL_PASSWORD:-change-me-control}
+      TAISCE_DATA_PASSWORD: ${TAISCE_DATA_PASSWORD:-change-me-data}
+    restart: "no"
+
+  # The API. One of these.
+  #
+  # It serves reads and accepts writes and extracts nothing, so it is bound by the database rather
+  # than by a model — its cost per request is a query, and it does not need to grow with the work.
+  api:
+    <<: *service
+    environment:
+      <<: *service-env
+      TAISCE_ROLE: api
+      # Resolves credentials. Cannot read memory. Only the role that authenticates holds it: the
+      # workers resolve no credentials and are never given this login.
+      TAISCE_REGISTRY_DSN: postgres://taisce_control:${TAISCE_CONTROL_PASSWORD:-change-me-control}@postgres:5432/taisce?sslmode=disable&pool_max_conns=${TAISCE_REGISTRY_POOL:-2}&pool_min_conns=1
+      TAISCE_ADDR: ":8080"
+      TAISCE_REQUIRE_FORMATION: ${TAISCE_REQUIRE_FORMATION:-false}
+    healthcheck:
+      test: ["CMD", "/taisce", "probe"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "${TAISCE_PORT:-8080}:8080"
+
+  # The workers. These do the work, and these are what scale.
+  #
+  #     docker compose up --scale worker=3
+  #
+  # Extraction is a model call per message, so this is where the time goes. Several are safe by
+  # construction rather than by configuration: formation takes a per-scope advisory lock, so a second
+  # worker finds a busy scope and moves to the next one instead of forming the same turn twice.
+  #
+  # Only a loopback health listener; no published port or memory routes.
+  worker:
+    <<: *service
+    environment:
+      <<: *service-env
+      TAISCE_ROLE: worker
+      TAISCE_HEALTH_ADDR: "127.0.0.1:8082"
+      # A worker forms one turn at a time and resolves no credentials, so it needs a fraction of
+      # what the API does. Overriding here rather than widening the shared default keeps the API's
+      # concurrency where admission expects it.
+      TAISCE_MEMORY_DSN: postgres://taisce_data:${TAISCE_DATA_PASSWORD:-change-me-data}@postgres:5432/taisce?sslmode=disable&pool_max_conns=${TAISCE_WORKER_MEMORY_POOL:-4}&pool_min_conns=1
+      # How long one formation attempt may take. A conversation turn never needs more than the
+      # default; a document-sized turn under a busy model server can, and until documents are
+      # segmented on the way in this is the operator's knob for it.
+      TAISCE_FORMATION_TURN_BUDGET: ${TAISCE_FORMATION_TURN_BUDGET:-5m}
+    healthcheck:
+      test: ["CMD", "/taisce", "probe", "--worker"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  # The management surface: what an operator does, over HTTP with an operator credential.
+  # It holds the one superuser connection the serving roles never get, because creating a project is
+  # DDL, and it is bound to loopback by default: an operator reaches it from the host, and nothing
+  # else does until the port is deliberately published elsewhere.
+  manage:
+    build: .
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      TAISCE_ROLE: manage
+      TAISCE_ADMIN_DSN: postgres://postgres:${POSTGRES_PASSWORD:-taisce}@postgres:5432/taisce?sslmode=disable
+      TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
+      TAISCE_MANAGE_ADDR: ":8081"
+      # The portal is off unless an operator switches it on; it then shares this loopback port.
+      TAISCE_PORTAL: ${TAISCE_PORTAL:-off}
+    healthcheck:
+      test: ["CMD", "/taisce", "probe", "--manage"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    ports:
+      - "${TAISCE_MANAGE_PORT:-127.0.0.1:8081}:8081"
+    restart: unless-stopped
+
+  # ── Why these are two services and not one ───────────────────────────────────────────────────
+  #
+  # The same image and the same binary; only TAISCE_ROLE differs. Splitting them here is not about
+  # this machine — one container would start marginally faster — it is so the compose file teaches
+  # the shape a real deployment has. A quickstart whose topology is nothing like production is a
+  # quickstart that has to be unlearned.
+  #
+  # It also buys something on one machine: scaling the workers when a backlog is deep, and stopping
+  # them during a provider incident while reads keep answering. Turns still arrive and are stored,
+  # because the backlog is in the database rather than in a process.
+
+  # ── Optional: a model gateway ────────────────────────────────────────────────────────────────
+  #
+  # `docker compose --profile gateway up` puts LiteLLM in front, which is worth it when there are
+  # several providers to reach, one place to keep keys, or a need to see what inference costs. It is
+  # not the default because it does not remove the thing that makes a signup necessary — it still
+  # needs a provider behind it — so by default it would be a container that buys nothing.
+  litellm:
+    profiles: ["gateway"]
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+    volumes:
+      - ./deploy/litellm:/etc/litellm:ro
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

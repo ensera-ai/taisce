@@ -1,0 +1,13 @@
+# Everything the build does not need. Kept small deliberately: the build context is uploaded to the
+# daemon on every build, and .git alone is most of it.
+.git
+.env
+.env.*
+coverage.out
+*.test
+docs/
+# Disposable GPU qualification secrets and generated evidence never enter an image layer.
+qualification-tls/
+qualification-topology.yaml
+qualification-generation-nginx.conf
+results/

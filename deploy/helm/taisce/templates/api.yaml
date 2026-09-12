@@ -1,0 +1,89 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "taisce.name" . }}-api
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taisce
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels: {{- include "taisce.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: {{ include "taisce.serviceAccount" . }}
+      securityContext: {{- include "taisce.securityContext" . | nindent 8 }}
+      # Two replicas on two nodes when the cluster has them: one node is one failure domain.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: api
+      containers:
+        - name: api
+          image: {{ include "taisce.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          securityContext: {{- include "taisce.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - name: TAISCE_ROLE
+              value: api
+            - name: TAISCE_ADDR
+              value: ":8080"
+            - name: TAISCE_REQUIRE_FORMATION
+              value: {{ .Values.api.requireFormation | quote }}
+            {{- with .Values.api.bundleCharacters }}
+            - name: TAISCE_BUNDLE_CHARACTERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- include "taisce.serviceEnv" . | nindent 12 }}
+            {{- include "taisce.registryEnv" . | nindent 12 }}
+          readinessProbe:
+            exec: {command: ["/taisce", "probe"]}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            exec: {command: ["/taisce", "probe", "--live"]}
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "taisce.name" . }}-api
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: taisce
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "taisce.name" . }}-api
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.api.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taisce
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api

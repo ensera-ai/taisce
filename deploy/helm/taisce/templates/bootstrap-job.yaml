@@ -1,0 +1,46 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Bootstrap: establishes the two database planes, provisions the schema and the first project, and
+# mints the first credentials, which it prints once (read them from the Job's log, then delete the
+# Job). It is the one place the administrative connection and the role passwords meet. It is an
+# ordinary resource named by the release revision rather than a Helm hook: a post-install hook
+# waits for the API to be ready, and the API is not ready until bootstrap has run. The serving pods
+# restart until it completes, which on a fresh cluster is the database's start-up time.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "taisce.name" . }}-bootstrap-{{ .Release.Revision }}
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels: {{- include "taisce.labels" . | nindent 8 }}
+        app.kubernetes.io/component: bootstrap
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "taisce.serviceAccount" . }}
+      securityContext: {{- include "taisce.securityContext" . | nindent 8 }}
+      containers:
+        - name: bootstrap
+          image: {{ include "taisce.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["bootstrap", "-project", {{ .Values.project | quote }}]
+          securityContext: {{- include "taisce.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: TAISCE_SCHEMA
+              value: {{ .Values.schema | quote }}
+            {{- include "taisce.adminEnv" . | nindent 12 }}
+            {{- if ne .Values.postgresql.mode "external" }}
+            - name: TAISCE_DATA_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" . | quote }}, key: dataPassword}}
+            - name: TAISCE_CONTROL_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" . | quote }}, key: controlPassword}}
+            {{- else }}
+            - name: TAISCE_DATA_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.postgresql.external.existingSecret | quote }}, key: dataPassword}}
+            - name: TAISCE_CONTROL_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.postgresql.external.existingSecret | quote }}, key: controlPassword}}
+            {{- end }}

@@ -1,0 +1,302 @@
+{
+  "suite": "taisce-conformance/v1",
+  "memory_message_prefix": "taisce-memory/v1 untrusted",
+  "cases": [
+    {
+      "name": "memory_is_one_untrusted_user_message",
+      "rule": "Injected memory is exactly one user message, marked untrusted, carrying the watermark and the plan; never system, never assistant.",
+      "seed": [
+        {
+          "subject": "Marta",
+          "predicate": "works_at",
+          "object": "Ensera",
+          "statement": "Marta works at Ensera."
+        }
+      ],
+      "turn": {
+        "user": "Where does Marta work?",
+        "assistant": "At Ensera."
+      },
+      "expect": {
+        "memory_messages": 1,
+        "memory_role": "user",
+        "memory_untrusted": true,
+        "memory_carries": [
+          "watermark",
+          "plan",
+          "facts"
+        ],
+        "fatal": false,
+        "stored": 1
+      }
+    },
+    {
+      "name": "recall_failure_is_not_fatal",
+      "rule": "When recall is unavailable the agent runs without memory: no memory message, no error raised to the turn, and the turn is still stored.",
+      "seed": [
+        {
+          "subject": "Marta",
+          "predicate": "works_at",
+          "object": "Ensera",
+          "statement": "Marta works at Ensera."
+        }
+      ],
+      "faults": {
+        "recall": "unavailable"
+      },
+      "turn": {
+        "user": "Where does Marta work?",
+        "assistant": "I do not know."
+      },
+      "expect": {
+        "memory_messages": 0,
+        "fatal": false,
+        "stored": 1
+      }
+    },
+    {
+      "name": "write_failure_is_never_silent",
+      "rule": "When the store is unavailable the failure is surfaced to the application; a lost turn is invisible until a subject access request asks for it.",
+      "faults": {
+        "observe": "unavailable"
+      },
+      "turn": {
+        "user": "Remember that I prefer written notes.",
+        "assistant": "Noted."
+      },
+      "expect": {
+        "store_error": true,
+        "stored": 0
+      }
+    },
+    {
+      "name": "store_only_on_success",
+      "rule": "A failed turn is not a memory: when the model call fails nothing is observed.",
+      "turn": {
+        "user": "Remember that I prefer written notes.",
+        "model_failure": true
+      },
+      "expect": {
+        "observed": false,
+        "stored": 0
+      }
+    },
+    {
+      "name": "filters_default_to_external_messages",
+      "rule": "Internal tool traffic does not become memory by default: only the person's message and the final reply are observed. Each observed message stands alone: what was not one atomic unit in the turn is not one in the memory.",
+      "turn": {
+        "user": "Book the room for Tuesday.",
+        "tool_calls": [
+          {
+            "call": "calendar.book(room=A, day=Tuesday)",
+            "result": "booked: A/Tuesday"
+          }
+        ],
+        "assistant": "Room A is booked for Tuesday."
+      },
+      "expect": {
+        "observed_roles": [
+          "user",
+          "assistant"
+        ],
+        "stored": 1,
+        "observed_groups": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "no_synthetic_message_reaches_observe",
+      "rule": "A message the framework wrote, a summary or the injected memory itself, is never observed as though a person said it.",
+      "seed": [
+        {
+          "subject": "Marta",
+          "predicate": "works_at",
+          "object": "Ensera",
+          "statement": "Marta works at Ensera."
+        }
+      ],
+      "turn": {
+        "user": "Where does Marta work?",
+        "synthetic": [
+          {
+            "role": "assistant",
+            "content": "Summary of earlier conversation: the user asked about colleagues."
+          }
+        ],
+        "assistant": "At Ensera."
+      },
+      "expect": {
+        "observed_contents": [
+          "Where does Marta work?",
+          "At Ensera."
+        ],
+        "stored": 1
+      }
+    },
+    {
+      "name": "compaction_hands_the_model_the_deployments_context",
+      "rule": "When compaction is due the adapter asks the deployment for the subject's context and hands the model exactly that: one untrusted user message with the segments and the verbatim turns unchanged, in place of the history the framework held. The person's message stays; nothing synthetic is observed.",
+      "context": {
+        "watermark": {
+          "stored": 12,
+          "formed": 12,
+          "parked": 0
+        },
+        "segments": [
+          {
+            "segment_id": "5c2d0f6e-2c4e-5d6a-9f1e-0c3b2a1d4e5f",
+            "level": 1,
+            "from_offset": 1,
+            "to_offset": 8,
+            "covered": 8,
+            "summary": "The office moved to Cork in March and two engineers were hired in April."
+          }
+        ],
+        "turns": [
+          {
+            "log_offset": 9,
+            "occurred_at": "2026-09-01T09:00:00Z",
+            "messages": [
+              {
+                "role": "user",
+                "content": "Book the all-hands for Friday."
+              },
+              {
+                "role": "assistant",
+                "content": "Friday it is."
+              }
+            ]
+          }
+        ],
+        "characters": 140,
+        "truncated": false
+      },
+      "turn": {
+        "history": [
+          {
+            "role": "user",
+            "content": "I moved the office to Cork in March."
+          },
+          {
+            "role": "assistant",
+            "content": "Noted: the office is in Cork."
+          },
+          {
+            "role": "user",
+            "content": "We hired two engineers in April."
+          },
+          {
+            "role": "assistant",
+            "content": "Noted: two engineers joined in April."
+          }
+        ],
+        "user": "Where is the office now?",
+        "assistant": "In Cork.",
+        "compact": true
+      },
+      "expect": {
+        "memory_messages": 1,
+        "memory_role": "user",
+        "memory_untrusted": true,
+        "memory_carries": [
+          "watermark",
+          "plan",
+          "segments",
+          "turns"
+        ],
+        "model_carries": [
+          "Where is the office now?"
+        ],
+        "model_lacks": [
+          "I moved the office to Cork in March.",
+          "Noted: the office is in Cork.",
+          "We hired two engineers in April.",
+          "Noted: two engineers joined in April."
+        ],
+        "fatal": false,
+        "observed_contents": [
+          "Where is the office now?",
+          "In Cork."
+        ],
+        "stored": 1
+      }
+    },
+    {
+      "name": "context_failure_is_not_fatal",
+      "rule": "When the context cannot be fetched the history stays as the framework held it: no memory message, no error raised to the turn, and the turn is still stored.",
+      "faults": {
+        "context": "unavailable"
+      },
+      "turn": {
+        "history": [
+          {
+            "role": "user",
+            "content": "I moved the office to Cork in March."
+          },
+          {
+            "role": "assistant",
+            "content": "Noted: the office is in Cork."
+          },
+          {
+            "role": "user",
+            "content": "We hired two engineers in April."
+          },
+          {
+            "role": "assistant",
+            "content": "Noted: two engineers joined in April."
+          }
+        ],
+        "user": "Where is the office now?",
+        "assistant": "In Cork.",
+        "compact": true
+      },
+      "expect": {
+        "memory_messages": 0,
+        "model_carries": [
+          "I moved the office to Cork in March.",
+          "Noted: the office is in Cork.",
+          "We hired two engineers in April.",
+          "Noted: two engineers joined in April.",
+          "Where is the office now?"
+        ],
+        "fatal": false,
+        "stored": 1
+      }
+    },
+    {
+      "name": "a_retried_turn_is_stored_once",
+      "rule": "A turn the application retries is one memory: the adapter derives the observation's idempotency key from the turn itself, so the retry carries the same key and the deployment folds it into the observation it already holds.",
+      "turn": {
+        "user": "I moved to Oslo last month.",
+        "assistant": "Noted.",
+        "repeat": 2
+      },
+      "expect": {
+        "fatal": false,
+        "observed": true,
+        "observe_calls": 2,
+        "observe_keys_equal": true,
+        "stored": 1
+      }
+    },
+    {
+      "name": "a_turn_retried_a_second_later_is_stored_once",
+      "rule": "A retry that comes a second or more after the first attempt, as one after a timeout does, is still one memory. An adapter may stamp the time it stores a turn; the deployment recognises the same turn under the same key whatever time the retry carries.",
+      "turn": {
+        "user": "I moved to Oslo last month.",
+        "assistant": "Noted.",
+        "repeat": 2,
+        "repeat_after_ms": 1500
+      },
+      "expect": {
+        "fatal": false,
+        "observed": true,
+        "observe_calls": 2,
+        "observe_keys_equal": true,
+        "stored": 1
+      }
+    }
+  ]
+}

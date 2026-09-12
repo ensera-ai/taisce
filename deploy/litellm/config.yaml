@@ -1,0 +1,19 @@
+# LiteLLM, when it is wanted.
+#
+# This file exists so that `--profile gateway` starts something that works rather than something that
+# needs a file written first. It defines one route by default — the same local Ollama the service
+# would otherwise reach directly — so that turning the gateway on changes where requests go and not
+# whether they succeed.
+#
+# Add providers here. The point of the gateway is that the service keeps speaking one interface while
+# this file decides what is behind it, so nothing in Taisce changes when a provider does.
+model_list:
+  - model_name: extractor
+    litellm_params:
+      model: ollama/qwen3.6:35b-a3b-mxfp8
+      api_base: http://host.docker.internal:11434
+
+litellm_settings:
+  # Extraction is not a creative task, and two extractions of one message that disagree produce a
+  # fact that appears once or one that disappears — neither of which anybody can debug.
+  drop_params: true

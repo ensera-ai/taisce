@@ -1,0 +1,48 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The substrate under the CloudNativePG operator: three instances by default, one primary and two
+# synchronous-capable replicas the operator promotes on failure. The operator owns failover; this
+# chart owns nothing about it but the request. The extensions the schema needs are created at
+# initialisation, the way deploy/postgres/initdb does for the compose deployment.
+#
+# The administrative identity is the database's owner, created by initdb with the password the
+# operator writes to the application secret at that moment, and granted CREATEROLE then: that is
+# every privilege bootstrap and the manage role need, and it is deterministic. The superuser stays
+# closed (enableSuperuserAccess false): the operator applies a superuser password after the fact by
+# reconciliation, and a deployment that depends on that arriving is one that starts before it does.
+{{- if eq .Values.postgresql.mode "cnpg" }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "taisce.db" . }}
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgresql.cnpg.instances }}
+  imageName: {{ .Values.postgresql.cnpg.image | quote }}
+  enableSuperuserAccess: false
+  primaryUpdateStrategy: unsupervised
+  storage:
+    size: {{ .Values.postgresql.cnpg.storage.size | quote }}
+    {{- with .Values.postgresql.cnpg.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  ephemeralVolumesSizeLimit:
+    shm: {{ .Values.postgresql.cnpg.sharedMemory | quote }}
+  resources: {{- toYaml .Values.postgresql.cnpg.resources | nindent 4 }}
+  postgresql:
+    shared_preload_libraries: [pg_stat_statements]
+    parameters:
+      {{- range $k, $v := .Values.postgresql.cnpg.parameters }}
+      {{ $k }}: {{ $v | quote }}
+      {{- end }}
+  bootstrap:
+    initdb:
+      database: taisce
+      owner: taisce_admin
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector
+        - CREATE EXTENSION IF NOT EXISTS btree_gist
+        - CREATE EXTENSION IF NOT EXISTS pg_stat_statements
+        - ALTER ROLE taisce_admin CREATEROLE
+{{- end }}

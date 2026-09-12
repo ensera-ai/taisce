@@ -1,0 +1,189 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+# Disposable qualification override. Run only on an owned eight-A100 test node.
+# Models and application traffic stay on the Compose network; host access is loopback-only.
+x-generation-replica: &generation-replica
+  image: vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8
+  command:
+    - Qwen/Qwen3.8-27B
+    - --revision=1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
+    - --dtype=bfloat16
+    - --tensor-parallel-size=1
+    - --structured-outputs-config.backend=guidance
+    - --max-model-len=32768
+    - --max-num-seqs=8
+    - --gpu-memory-utilization=0.95
+    - --reasoning-parser=qwen3
+    - --default-chat-template-kwargs={"enable_thinking":false}
+    - --ssl-keyfile=/tls/server.key
+    - --ssl-certfile=/tls/server.crt
+  shm_size: 8g
+  environment:
+    HF_HOME: /models
+  volumes: ["gpu-models:/models", "./qualification-tls:/tls:ro"]
+  healthcheck:
+    test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8000/health',context=ssl.create_default_context(cafile='/tls/ca.crt'),timeout=5)"]
+    interval: 15s
+    timeout: 10s
+    retries: 120
+    start_period: 20m
+
+services:
+  generation:
+    image: nginx@sha256:42a516af16b852e33b7682d5ef8acbd5d13fe08fecadc7ed98605ba5e3b26ab8
+    depends_on:
+      generation-0: {condition: service_healthy}
+      generation-1: {condition: service_healthy}
+      generation-2: {condition: service_healthy}
+      generation-3: {condition: service_healthy}
+      generation-4: {condition: service_healthy}
+      generation-5: {condition: service_healthy}
+      generation-6: {condition: service_healthy}
+    volumes:
+      - ./deploy/gpu/generation-nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./qualification-tls:/tls:ro
+      - ./qualification-tls/ca.crt:/etc/ssl/certs/ca-certificates.crt:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "https://127.0.0.1:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  generation-0:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["0"], capabilities: [gpu]}]}}}
+  generation-1:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["1"], capabilities: [gpu]}]}}}
+  generation-2:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["2"], capabilities: [gpu]}]}}}
+  generation-3:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["3"], capabilities: [gpu]}]}}}
+  generation-4:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["4"], capabilities: [gpu]}]}}}
+  generation-5:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["5"], capabilities: [gpu]}]}}}
+  generation-6:
+    <<: *generation-replica
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, device_ids: ["6"], capabilities: [gpu]}]}}}
+  embedding:
+    image: vllm/vllm-openai:v0.28.0
+    command:
+      - Qwen/Qwen3-Embedding-4B
+      - --revision=5cf2132abc99cad020ac570b19d031efec650f2b
+      - --runner=pooling
+      - --dtype=bfloat16
+      - --max-model-len=8192
+      - --gpu-memory-utilization=0.5
+      - --ssl-keyfile=/tls/server.key
+      - --ssl-certfile=/tls/server.crt
+    shm_size: 4g
+    environment:
+      HF_HOME: /models
+    volumes: ["gpu-models:/models", "./qualification-tls:/tls:ro"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["7"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8000/health',context=ssl.create_default_context(cafile='/tls/ca.crt'),timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 120
+      start_period: 20m
+  postgres:
+    shm_size: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d taisce"]
+  # Integration fixtures deliberately alter cluster-wide roles. A second cluster keeps those
+  # tests from changing credentials beneath the deployed API and worker.
+  test-postgres:
+    build: ./deploy/postgres
+    cpus: 8.0
+    mem_limit: 32g
+    shm_size: 4g
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: taisce
+    volumes: ["gpu-test-postgres:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d taisce"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    command:
+      - postgres
+      - -c
+      - shared_buffers=8GB
+      - -c
+      - effective_cache_size=22GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=2GB
+      - -c
+      - autovacuum_work_mem=512MB
+      - -c
+      # Sized for the topology this overlay actually runs, not for a laptop's. Coverage mode scales
+      # workers to four per generation replica — seven replicas is twenty-eight workers, which at
+      # docs/21's per-process sizes is 28x5 = 140 plus the API's 10 plus transient bootstrap and
+      # operator sessions. 240 leaves room for those and for the read-path measurement's own
+      # connection, and a process that still does not fit refuses to start rather than losing
+      # writes half an hour later.
+      - max_connections=240
+      - -c
+      - max_wal_size=16GB
+      - -c
+      - min_wal_size=4GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_compression=on
+      - -c
+      - track_io_timing=on
+      - -c
+      - track_wal_io_timing=on
+      - -c
+      - log_autovacuum_min_duration=1s
+  api:
+    volumes: ["./qualification-tls/ca.crt:/tls/ca.crt:ro"]
+    environment:
+      SSL_CERT_FILE: /tls/ca.crt
+      TAISCE_REQUIRE_FORMATION: "true"
+      TAISCE_INFERENCE_EMBEDDING_REVISION: 5cf2132abc99cad020ac570b19d031efec650f2b
+  worker:
+    volumes: ["./qualification-tls/ca.crt:/tls/ca.crt:ro"]
+    environment:
+      SSL_CERT_FILE: /tls/ca.crt
+  test:
+    image: golang:1.27.1-bookworm
+    profiles: [qualification]
+    working_dir: /src
+    volumes:
+      - .:/src
+      - gpu-go-cache:/go
+      - ./qualification-tls/ca.crt:/tls/ca.crt:ro
+    environment:
+      SSL_CERT_FILE: /tls/ca.crt
+      TAISCE_TEST_DSN: postgres://postgres:${POSTGRES_PASSWORD:?required}@test-postgres:5432/taisce?sslmode=disable
+      TAISCE_INFERENCE_ENDPOINT: https://generation:8000/v1
+      TAISCE_INFERENCE_EXTRACTOR_MODEL: Qwen/Qwen3.8-27B
+      TAISCE_INFERENCE_EMBEDDING_ENDPOINT: https://embedding:8000/v1
+      TAISCE_INFERENCE_EMBEDDING_MODEL: Qwen/Qwen3-Embedding-4B
+      TAISCE_INFERENCE_EMBEDDING_REVISION: 5cf2132abc99cad020ac570b19d031efec650f2b
+      TAISCE_INFERENCE_ALLOWLIST: generation:8000,embedding:8000
+      GOMAXPROCS: "16"
+    command: [bash, deploy/gpu/tests.sh]
+volumes:
+  gpu-models:
+  gpu-go-cache:
+  gpu-test-postgres:

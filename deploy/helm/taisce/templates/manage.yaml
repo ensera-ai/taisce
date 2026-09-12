@@ -1,0 +1,70 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The management surface and, when switched on, the portal. One replica: it holds
+# the administrative connection and serves an operator, not traffic. Reached inside the cluster
+# only, unless the portal's ingress is deliberately enabled.
+{{- if .Values.manage.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "taisce.name" . }}-manage
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taisce
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: manage
+  template:
+    metadata:
+      labels: {{- include "taisce.labels" . | nindent 8 }}
+        app.kubernetes.io/component: manage
+    spec:
+      serviceAccountName: {{ include "taisce.serviceAccount" . }}
+      securityContext: {{- include "taisce.securityContext" . | nindent 8 }}
+      containers:
+        - name: manage
+          image: {{ include "taisce.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          securityContext: {{- include "taisce.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 8081}
+          env:
+            - name: TAISCE_ROLE
+              value: manage
+            - name: TAISCE_MANAGE_ADDR
+              value: ":8081"
+            - name: TAISCE_PORTAL
+              value: {{ .Values.manage.portal | quote }}
+            - name: TAISCE_SCHEMA
+              value: {{ .Values.schema | quote }}
+            {{- include "taisce.adminEnv" . | nindent 12 }}
+          readinessProbe:
+            exec: {command: ["/taisce", "probe", "--manage"]}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            exec: {command: ["/taisce", "probe", "--manage", "--live"]}
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources: {{- toYaml .Values.manage.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "taisce.name" . }}-manage
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manage
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: taisce
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: manage
+  ports:
+    - {name: http, port: 8081, targetPort: http}
+{{- end }}

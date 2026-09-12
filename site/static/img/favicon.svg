@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Ensera">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#5fb8ff"/><stop offset=".5" stop-color="#7fe0c8"/><stop offset="1" stop-color="#d6f26b"/>
+  </linearGradient></defs>
+  <rect width="100" height="100" rx="22" fill="#0b1f2a"/>
+  <g transform="translate(50 50) scale(0.82) translate(-48 -50)">
+    <path fill="url(#g)" d="M21 22h54a7 7 0 0 1 0 14h-47v7h26a7 7 0 0 1 0 14h-26v7h47a7 7 0 0 1 0 14h-54a7 7 0 0 1-7-7v-42a7 7 0 0 1 7-7z"/>
+    <path fill="#7fe0c8" d="M68 50a7 7 0 1 0 14 0a7 7 0 1 0-14 0z"/>
+  </g>
+</svg>

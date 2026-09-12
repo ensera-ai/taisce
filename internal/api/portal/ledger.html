@@ -1,0 +1,16 @@
+{{define "page-ledger"}}{{with .Ledger}}<header class="head"><div><p class="kicker">Audit</p><h1>Ledger</h1>
+<p class="sub">Every operation on this instance: who performed it, on which project, how much it touched and whether it was allowed. Sealed into a chain an operator can verify.</p></div>
+<form method="post" action="/portal/actions/seal">{{template "guard" $.Guard}}<button class="btn btn-primary">{{template "i-lock"}}Seal to here</button></form></header>
+<div class="banner {{if .Verified}}ok{{else}}bad{{end}}" role="status">{{if .Verified}}{{template "i-shield"}}{{else}}{{template "i-alert"}}{{end}}<div>{{if .Verified}}<strong>Verified.</strong>{{else}}<strong>Not verified.</strong>{{end}} {{.Detail}}</div></div>
+<section class="card">
+<div class="card-head"><div class="title-row">{{template "i-ledger"}}<h2>What has been done</h2></div><span class="row">{{if .Project}}<span class="pill sky">project {{.Project}}</span><a class="btn btn-sm" href="/portal/ledger">Show every project</a>{{end}}<span class="pill">newest first</span></span></div>
+{{if .Unavailable}}<p class="note">The rows could not be read, so this table is empty for that reason and not because the ledger is.</p>{{else}}
+<div class="scroll"><table><thead><tr><th>When</th><th>Operation</th><th>Principal</th><th>Kind</th><th>Project</th><th class="num">Count</th><th>Outcome</th></tr></thead><tbody>
+{{range .Entries}}<tr><td class="mono">{{.OccurredAt.UTC.Format "2006-01-02 15:04:05"}}</td><td><code>{{.Operation}}</code></td><td><span class="mono trunc" title="{{.Principal}}">{{.Principal}}</span></td><td>{{.PrincipalKind}}</td><td>{{if .Project}}<a href="/portal/projects/{{.Project}}">{{.Project}}</a>{{else}}<span class="muted">instance</span>{{end}}</td><td class="num mono">{{.Magnitude}}</td>
+<td>{{if eq .Outcome "refused"}}<span class="pill bad dot">refused</span>{{else}}<span class="pill ok dot">{{.Outcome}}</span>{{end}}</td></tr>
+{{else}}<tr><td colspan="7" class="empty">none</td></tr>{{end}}
+</tbody></table></div>
+<p class="note">The most recent operations, newest first. The ledger holds no words by construction — an operation, who performed it, which project, how many rows it touched and whether it was allowed — so this shows everything it has and nothing about anybody's memory.</p>{{end}}
+</section>
+<section class="card"><details><summary><span class="title-row">{{template "i-shield"}}<h2>Verification document</h2></span></summary><pre>{{.Document}}</pre></details></section>
+{{end}}{{end}}

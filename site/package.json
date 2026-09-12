@@ -1,0 +1,30 @@
+{
+  "name": "taisce-site",
+  "private": true,
+  "description": "The Taisce documentation site: the written documents, and a reference generated from the code and a migrated database.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "start": "docusaurus start",
+    "build": "docusaurus build",
+    "serve": "docusaurus serve",
+    "clear": "docusaurus clear"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@docusaurus/theme-mermaid": "3.10.2",
+    "@easyops-cn/docusaurus-search-local": "0.55.3",
+    "@fontsource/manrope": "5.3.0",
+    "@fontsource/space-grotesk": "5.3.0",
+    "@mdx-js/react": "3.1.1",
+    "@mermaid-js/layout-elk": "0.1.9",
+    "clsx": "2.1.1",
+    "mermaid": "11.17.2",
+    "prism-react-renderer": "2.4.1",
+    "react": "19.1.9",
+    "react-dom": "19.1.9"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
