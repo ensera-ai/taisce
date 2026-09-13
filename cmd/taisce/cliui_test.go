@@ -124,3 +124,64 @@ func TestCLIThemeConfigurationAndCancelledActivity(t *testing.T) {
 	stop := startCLIActivity(ctx, "safe\x1b[31m activity")
 	stop()
 }
+
+// TestTheProgressMeterRefusesToInventProgress holds the two cases where a meter would otherwise
+// print something untrue.
+//
+// A meter is read as a fact about how far along something is, so the interesting inputs are the ones
+// where there is no such fact. A total of zero is not "nothing done" — a division by it is a panic,
+// and treating it as a full or empty bar would state a completion nobody measured; it says
+// `unknown`. A count past the total happens when a pass is re-driven over work already counted, and
+// a bar wider than its own track is a rendering bug dressed as progress; the count is clamped.
+//
+// Both are one-line branches, which is exactly why they are worth a named test: nothing else in the
+// suite ever passes a zero total, so the first caller who does would find out in front of an
+// operator.
+func TestTheProgressMeterRefusesToInventProgress(t *testing.T) {
+	if got := meter(3, 0, 10, true); got != "unknown" {
+		t.Fatalf("a meter with no total said %q, and it cannot know", got)
+	}
+	if got := meter(0, -1, 10, true); got != "unknown" {
+		t.Fatalf("a negative total said %q", got)
+	}
+	over := meter(99, 10, 10, true)
+	if over != "########## 10/10" {
+		t.Fatalf("a count past the total rendered %q, wanted it clamped to the total", over)
+	}
+}
+
+// TestANarrowTerminalStillGetsAPanelWideEnoughToRead pins the floor under the panel width.
+//
+// The width comes from the terminal, and a terminal can be narrower than the content is legible in.
+// Without the floor the box characters and padding consume the line and the panel degrades into
+// unreadable fragments — worse than a panel that overflows, because overflow is obvious and
+// fragments look like corruption.
+func TestANarrowTerminalStillGetsAPanelWideEnoughToRead(t *testing.T) {
+	narrow := statusPanel(cliTheme{width: 10, ascii: true}, "state", []string{"one"})
+	widest := 0
+	for _, line := range strings.Split(strings.TrimRight(narrow, "\n"), "\n") {
+		if n := displayWidth(line); n > widest {
+			widest = n
+		}
+	}
+	if widest < 36 {
+		t.Fatalf("a 10-column terminal produced a %d-column panel; the floor is 36", widest)
+	}
+}
+
+// TestClippingBelowTwoColumnsDropsTheMarkerRatherThanTheContent is the limit at which the marker
+// stops being worth a column.
+//
+// The limit bounds the CONTENT and the marker is added beyond it — `clipDisplay("A界é Z", 4)` above
+// returns four columns of value plus the `…`. That convention breaks down at one column: a marker
+// there would be as wide as everything it was appended to, and a reader would see a bare `…`
+// standing in for a value that was one character long. So under two columns the marker is dropped
+// and the content keeps the space.
+func TestClippingBelowTwoColumnsDropsTheMarkerRatherThanTheContent(t *testing.T) {
+	if got := clipDisplay("abcdef", 1); got != "a" {
+		t.Fatalf("clipping to one column produced %q, wanted the column spent on content", got)
+	}
+	if got := clipDisplay("abcdef", 2); got != "ab…" {
+		t.Fatalf("clipping to two columns produced %q, wanted two columns and the marker", got)
+	}
+}
