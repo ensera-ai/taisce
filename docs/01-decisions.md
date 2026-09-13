@@ -270,3 +270,44 @@ decision does not obstruct. The claim is one section of `SECURITY.md`.
 **Impact.** Security: consumers can check a release against a pinned identity rather than an
 organisation-wide or pattern match, and the release proves that check passes on every artifact before
 announcing it. It changes nothing a release produces.
+
+## D7 — The coverage floor is absolute, and a change that only deletes code can fail it
+
+**Date.** 2026-09-13. **Issue.** [#15](https://github.com/ensera-ai/taisce/issues/15).
+
+**Why it was open.** A change merged without the suite ever running on it and deleted 469 lines of
+covered Go. Nothing became untested — the gate's list of functions no test reaches was empty — but a
+smaller numerator over a smaller denominator took `main` from at or above 92.0% to 91.9%, and every
+pull request after it failed a gate it had done nothing to fail. The question left behind: should a
+change that only removes code be able to fail the coverage gate at all?
+
+**Decided.** Yes. The floor stays an absolute number checked on every run. When a deletion lowers the
+ratio, the remedy is to cover behaviour nothing exercises — there is always some; on 2026-09-13 there
+were 1,019 uncovered statements — and never to lower the floor to meet the suite. The floor moves up
+only when the lowest of several full runs clears it, as `scripts/coverage-gate.sh` says, so noise
+cannot raise it to a peak the next ordinary run misses.
+
+**Rejected: a gate relative to the base branch.** "Coverage must not fall below `main`" lets coverage
+erode in steps each smaller than run-to-run noise, which here is around a tenth of a point, so it
+would also fail unrelated changes on a bad draw. It needs the base branch's number for every pull
+request, which means a second suite run or a stored artefact, and it answers the wrong question: the
+property wanted is that the codebase is well covered, not that it is no worse than yesterday.
+
+**Rejected: exempting changes that only delete.** "Only deletes" is a property of a diff, and a move
+looks like a deletion from where it was. The deletions most worth catching — tests removed along with
+the code they held — are exactly what an exemption would wave through.
+
+**Rejected: lowering the floor to the new ratio after a deletion.** That turns a ratchet into a target
+that follows the suite down.
+
+**Measured.** 91.962% before #17; 92.063% after it. A full run on `ace3f29` measured 92.055%
+(11,807 of 12,826 statements). The tests in this change cover 41 more statements: a full local run measured
+92.382% (11,848 of 12,825) and the pull request's run reported 92.4%. The floor rises from 92.0 to
+**92.3** — below the lower of the two runs by more than run-to-run noise, rather than at 92.4, where
+one run happened to land and the next ordinary run could miss.
+
+**Undo cost.** Low: one number in `coverage.floor` and a few lines of script.
+
+**Impact.** Process: a change that deletes well-covered code can be held until a test is added, which
+costs time on that change. That is accepted — the time is spent on coverage, not on arguing a number
+down. It moves no boundary in the service.
