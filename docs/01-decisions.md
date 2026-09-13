@@ -375,3 +375,44 @@ reference prose, and the HTTP API guide already describes the same surface for a
 **Impact.** Operations: one generated page leaves the public site. It moves no boundary in the service
 and does not change the contract or its check.
 
+## D10 — The documentation recommends a hosted model, and names the Qwen models for self-hosting
+
+**Date.** 2026-09-13. **Issue.** [#56](https://github.com/ensera-ai/taisce/issues/56).
+
+**Why it was open.** The quickstart started every reader with a 38 GB local model before memory could
+form, and the tag it named is an Apple silicon build that Linux and Windows cannot serve (#58). The
+owner asked for DeepSeek to be the preferred way, for OpenRouter to carry embeddings, and for the
+self-hosted Qwen models to be documented for production.
+
+**Decided.** The documentation presents three arrangements, in order:
+- **Hosted:** DeepSeek `deepseek-flash` for extraction and for an agent's model, and OpenRouter
+  `qwen/qwen3-embedding-4b` for embeddings.
+- **Qwen on vLLM**, for production on your own GPUs.
+- **Qwen on Ollama**, for one machine, with the build named per platform.
+
+The quickstart and the README show the hosted path first and say what text goes where; the allowlist
+is where the operator consents to it. `compose.yaml` keeps pointing at a local model. Models are named
+only where they are measured, and anything else is marked as not measured.
+
+**Rejected: Ollama as the only path.** It keeps every word local, at the cost of a first run most
+laptops cannot finish quickly. As written, it did not work on Linux or Windows at all.
+
+**Rejected: DeepSeek as `compose.yaml`'s default endpoint.** A default that needs a key fails for
+everyone without one, and a default that sends text to a third party is consent given by omission.
+
+**Rejected: `openai/text-embedding-3-small`.** It has closed weights and no self-hosted counterpart.
+`qwen3-embedding-4b` is the model family and 2,560 dimensions of the self-hosted options, so moving
+between arrangements changes where the model runs rather than what it is.
+
+**Rejected: a gateway on the first run.** LiteLLM would be a second moving part for nothing a first
+run needs.
+
+**Rejected: recommending models the corpus has not seen.** A named model is a measured one; the Linux
+Ollama build is named because a reader needs a tag that runs, and it is marked as not yet measured.
+
+**Undo cost.** Low: the order in which documentation presents models, and a paragraph per path.
+
+**Impact.** Security: the recommended path sends conversation text to two third parties, which the
+documentation states and the allowlist enforces. Operations: a first run needs API keys rather than a
+local model.
+

@@ -6,28 +6,86 @@
 In this guide you run Taisce on your machine, save one thing a user said, ask about it, and then
 forget it, in seven steps with `curl`. Then, in step 8, you give an agent memory in the framework you
 use: Microsoft Agent Framework in Python or .NET, LangGraph, Spring AI, LangChain4j, or a coding agent
-over MCP. Each step shows the command, what you should see, and what just happened. You don't need an
-account anywhere, because the model runs on your own machine.
+over MCP. Each step shows the command, what you should see, and what just happened.
+
+Taisce needs a model to read conversations. The quickstart uses DeepSeek's hosted API, which is the
+preferred way to start: there is nothing to download, and memory forms in seconds. If what people tell
+your agent must not leave your machine, run a Qwen model on Ollama instead. Step 1 shows both, and
+everything after it is the same.
 
 ## What you need
 
 - **Docker with the Compose plugin**, so `docker compose version` answers. The older standalone
   `docker-compose` will not do.
-- **[Ollama](https://ollama.com), reachable from inside a container**, because that is where Taisce
-  calls the model from.
+- **A model.** Either a [DeepSeek API key](https://platform.deepseek.com/api_keys), the preferred
+  way, or [Ollama](https://ollama.com) reachable from inside a container. An
+  [OpenRouter key](https://openrouter.ai/keys) is only needed later, if you turn on semantic search.
 - **`jq`**, to pull fields out of JSON, and **`uuidgen`**.
 - **An empty directory** to work in. You do not need a checkout and you do not need Go: the compose
   file names images a release published, for `linux/amd64` and `linux/arm64`, and pulls them.
 
-[Set up your machine](../start/your-machine.md) gets you all of these on Linux, macOS with Colima,
-and Windows with WSL2, and ends with a check that a container can reach the model.
+[Set up your machine](../start/your-machine.md) gets you Docker, `jq` and `uuidgen` on Linux, macOS
+with Colima and Windows with WSL2, and Ollama too if you take the local path.
 
-## 1. Pull the model
+## 1. Choose a model
 
-With Ollama running as [Set up your machine](../start/your-machine.md) describes for your system:
+Taisce uses a model to read each conversation turn and propose facts. Pick one of the two below, in
+the terminal you will run step 2 from, so that Compose sees the variables.
+
+### DeepSeek (preferred)
 
 ```bash
+export DEEPSEEK_API_KEY=…                       # from platform.deepseek.com
+export TAISCE_INFERENCE_ENDPOINT=https://api.deepseek.com/v1
+export TAISCE_INFERENCE_EXTRACTOR_MODEL=deepseek-flash
+export TAISCE_INFERENCE_API_KEY=$DEEPSEEK_API_KEY
+export TAISCE_INFERENCE_ALLOWLIST=api.deepseek.com
+curl -sS https://api.deepseek.com/models -H "Authorization: Bearer $DEEPSEEK_API_KEY" | jq -r '.data[].id'
+```
+
+You should see the models your key can use:
+
+```text
+deepseek-flash
+deepseek-v4-pro
+```
+
+**What this sends where.** Every turn you save is sent to DeepSeek to be read. Only the hosts in
+`TAISCE_INFERENCE_ALLOWLIST` ever receive text, so writing `api.deepseek.com` there is you choosing
+that. Asking questions and erasing never call a model.
+
+**Semantic search, later.** Forming facts and asking questions need no embedding model. When you want
+to search the words people said, add OpenRouter for embeddings (DeepSeek's API has none), list its
+host too, and build a generation as [message embeddings](../22-message-embeddings.md) describes:
+
+```bash
+export TAISCE_INFERENCE_EMBEDDING_ENDPOINT=https://openrouter.ai/api/v1
+export TAISCE_INFERENCE_EMBEDDING_MODEL=qwen/qwen3-embedding-4b
+export TAISCE_INFERENCE_EMBEDDING_API_KEY=$OPENROUTER_API_KEY
+export TAISCE_INFERENCE_ALLOWLIST=api.deepseek.com,openrouter.ai
+```
+
+**Didn't work?** A `401` from the `curl` means the key is wrong or not exported in this terminal.
+
+### Ollama (everything stays on your machine)
+
+With Ollama running as [Set up your machine](../start/your-machine.md) describes for your system, pull
+the Qwen build for your machine and tell Taisce its name. Ollama publishes the same model in two
+formats, and each platform can run only one of them:
+
+```bash
+# Apple silicon: the MLX build
 ollama pull qwen3.6:35b-a3b-mxfp8
+export TAISCE_INFERENCE_EXTRACTOR_MODEL=qwen3.6:35b-a3b-mxfp8
+
+# Linux or Windows, including with an NVIDIA GPU: the GGUF build
+ollama pull qwen3.6:35b-a3b-q8_0
+export TAISCE_INFERENCE_EXTRACTOR_MODEL=qwen3.6:35b-a3b-q8_0
+```
+
+Then check that a container can reach it:
+
+```bash
 docker run --rm --add-host host.docker.internal:host-gateway curlimages/curl:8.11.1 \
   -sS --max-time 5 http://host.docker.internal:11434/v1/models | jq -r '.data[].id'
 ```
@@ -35,12 +93,19 @@ docker run --rm --add-host host.docker.internal:host-gateway curlimages/curl:8.1
 You should see the model you pulled, among any others you have:
 
 ```text
-qwen3.6:35b-a3b-mxfp8
+qwen3.6:35b-a3b-q8_0
 ```
 
-Taisce uses this model to read each conversation turn and propose facts. The second command asks for
-the list from inside a throwaway container, which is the way Taisce's worker reaches the model, so a
-model listed here is one Taisce can use.
+Only the Apple silicon build has been through the extraction test corpus. The `q8_0` build is the same
+model at the same 8-bit precision in a format Linux and Windows can run, and it has not been measured
+yet ([#58](https://github.com/ensera-ai/taisce/issues/58)).
+
+The second command asks for the list from inside a throwaway container, which is the way Taisce's
+worker reaches the model, so a model listed here is one Taisce can use.
+
+**Didn't work?** If `curl` prints `Failed to connect`, the container cannot reach Ollama: either it
+is not running, or it listens where a container cannot reach it.
+[When the check fails](../start/your-machine.md#when-the-check-fails) says which, per system.
 
 ### Which model?
 
@@ -50,27 +115,25 @@ keep to that. These were measured against the same 19-message test corpus
 
 | Model | Where it runs | Keeps to the format? | Set it up with |
 |---|---|---|---|
-| `qwen3.6:35b-a3b-mxfp8` | Ollama, on your machine | Yes, all 19 cases | the steps above (the default) |
-| `Qwen/Qwen3.8-27B`, thinking off | vLLM, on a rented GPU | Yes, all 19 cases | [`demo-qwen3.8`](../../deploy/inference/demo-qwen3.8.env) |
-| `deepseek-flash` | the provider's hosted API | Yes, all 19 cases | [`deepseek`](../../deploy/inference/deepseek.env) |
-| `qwen3.8:27b-mxfp8`, thinking on | Ollama, on your machine | No answer: every call ran past the two-minute limit | not recommended |
+| `deepseek-flash` | DeepSeek's hosted API | Yes, all 19 cases | the DeepSeek steps above (preferred) |
+| `qwen3.6:35b-a3b-mxfp8` | Ollama, on Apple silicon | Yes, all 19 cases | the Ollama steps above |
+| `qwen3.6:35b-a3b-q8_0` | Ollama, on Linux or Windows | Not measured yet ([#58](https://github.com/ensera-ai/taisce/issues/58)) | the Ollama steps above |
+| `Qwen/Qwen3.8-27B`, thinking off | vLLM, on your own GPU | Yes, all 19 cases | [choosing a model](../architecture/deployment.md#choosing-a-model), for production |
+| `qwen3.8:27b-mxfp8`, thinking on | Ollama, on Apple silicon | No answer: every call ran past the two-minute limit | not recommended |
 
 With a hosted model, what people tell your agent leaves your machine and goes to that provider.
 Taisce only sends text to hosts you have listed in the allowlist, so that is always your decision.
 
 A model that is not in this table may still work. Check it with `make test-inference` before you
-rely on it.
-
-**Didn't work?** If `curl` prints `Failed to connect`, the container cannot reach Ollama: either it
-is not running, or it listens where a container cannot reach it.
-[When the check fails](../start/your-machine.md#when-the-check-fails) says which, per system. If the
-model answers but nothing ever forms, see
+rely on it. If a model answers but nothing ever forms, see
 [memory isn't forming](troubleshooting.md#memory-isnt-forming).
-To use a hosted model instead, see [reaching a model](../architecture/deployment.md#reaching-a-model).
+[Choosing a model](../architecture/deployment.md#choosing-a-model) covers running Qwen models in
+production.
 
 ## 2. Start Taisce
 
-Fetch the compose file for the release you want, then bring it up:
+In the terminal where you chose a model, fetch the compose file for the release you want, then bring
+it up:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.2/compose.yaml
@@ -288,10 +351,13 @@ which model the agent talks to:
 ```bash
 export TAISCE_API=http://localhost:8080
 export TAISCE_TOKEN=$TOKEN                        # the project token from step 3
-export MODEL_BASE_URL=http://localhost:11434/v1   # any OpenAI-compatible endpoint
-export MODEL_NAME=qwen3.6:35b-a3b-mxfp8
-export MODEL_API_KEY=unused                       # Ollama ignores it; a hosted provider needs its key
+export MODEL_BASE_URL=https://api.deepseek.com/v1 # any OpenAI-compatible endpoint
+export MODEL_NAME=deepseek-flash
+export MODEL_API_KEY=$DEEPSEEK_API_KEY
 ```
+
+With Ollama instead, set `MODEL_BASE_URL=http://localhost:11434/v1`, `MODEL_NAME` to the build you
+pulled in step 1, and `MODEL_API_KEY=unused`.
 
 The agent's model answers the person; Taisce's model, from step 1, reads what was said. They can be
 the same model, as here, or different ones.

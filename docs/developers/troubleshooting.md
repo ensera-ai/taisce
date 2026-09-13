@@ -116,7 +116,9 @@ saved a turn.
    - A container can't reach Ollama. Run the check in
      [set up your machine](../start/your-machine.md#check-that-a-container-reaches-the-model); on
      Linux the usual cause is Ollama listening on loopback only.
-   - The model hasn't been pulled. Run `ollama pull qwen3.6:35b-a3b-mxfp8`.
+   - The model hasn't been pulled, or it is the build for another platform. Pull the one
+     `TAISCE_INFERENCE_EXTRACTOR_MODEL` names: `qwen3.6:35b-a3b-mxfp8` runs only on Apple silicon, and
+     `qwen3.6:35b-a3b-q8_0` is the build for Linux and Windows.
    - You sourced a file from [deploy/inference/](../../deploy/inference/) before running compose.
      Those files say `localhost`, which inside a container means the container itself. Unset those
      variables and let compose use its own defaults.

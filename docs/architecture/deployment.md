@@ -155,11 +155,73 @@ The service speaks the OpenAI-compatible HTTP interface and nothing more vendor-
 inference happens can change without touching the extractor, which is where the correctness checks
 live. A hosted provider, a gateway and a model on the same machine are all just an endpoint.
 
+### Choosing a model
+
+Taisce calls a model for two jobs: **extraction**, which reads each turn and proposes facts under a
+strict JSON contract, and, optionally, **embedding**, which turns text into vectors for semantic
+search. Asking a question and erasing call neither. Any OpenAI-compatible endpoint works. These are
+the arrangements this project recommends, in order:
+
+| Arrangement | Extraction | Embedding | For |
+|---|---|---|---|
+| **Hosted (preferred)** | DeepSeek `deepseek-flash`, at `https://api.deepseek.com/v1` | OpenRouter `qwen/qwen3-embedding-4b`, at `https://openrouter.ai/api/v1` | Most deployments: nothing to run. Conversation text goes to DeepSeek, and text for embedding goes to OpenRouter |
+| **Qwen on your own GPUs (vLLM)** | `Qwen/Qwen3.8-27B`, BF16, thinking off | `Qwen/Qwen3-Embedding-4B`, BF16 | Production where conversation text must not leave your infrastructure |
+| **Qwen on one machine (Ollama)** | `qwen3.6:35b-a3b-mxfp8` on Apple silicon; `qwen3.6:35b-a3b-q8_0` on Linux or Windows | `qwen3-embedding:4b-q8_0` | Development, or a small single-host deployment |
+
+**What has been measured, and what has not:**
+
+- **Extraction.** `deepseek-flash`, `Qwen/Qwen3.8-27B` on vLLM 0.29.0 (one RTX PRO 6000, thinking off)
+  and `qwen3.6:35b-a3b-mxfp8` on Ollama each passed all 19 cases of the extraction corpus, three
+  attempts each ([extraction models, 2026-09-11](../36-extraction-models.md)). The `q8_0` build has
+  not been through the corpus ([#58](https://github.com/ensera-ai/taisce/issues/58)).
+- **Embedding.** `Qwen/Qwen3-Embedding-4B` on vLLM 0.28.0 served the GPU qualification runs, whose
+  deployed checks passed, report search included ([GPU qualification](../23-gpu-qualification.md),
+  [report quality](../26-report-quality-qualification.md)). OpenRouter's `qwen/qwen3-embedding-4b`
+  returned 2,560-dimension vectors and served passage search on a `v0.3.2` deployment on 2026-09-13;
+  its retrieval quality has not been measured.
+- **Speed.** None of this is a latency or throughput figure for your hardware. Check a model you have
+  not seen here with `make test-inference` before you rely on it.
+
+#### Serving Qwen with vLLM
+
+The GPU qualification served the two models with these arguments to the `vllm/vllm-openai` image
+([`compose.gpu.yaml`](../../compose.gpu.yaml)):
+
+```text
+Qwen/Qwen3.8-27B --revision=1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 --dtype=bfloat16
+    --structured-outputs-config.backend=guidance --max-model-len=32768 --max-num-seqs=8
+    --reasoning-parser=qwen3 --default-chat-template-kwargs={"enable_thinking":false}
+
+Qwen/Qwen3-Embedding-4B --revision=5cf2132abc99cad020ac570b19d031efec650f2b --runner=pooling
+    --dtype=bfloat16 --max-model-len=8192
+```
+
+- **Turn thinking off on the server.** The extraction request carries a temperature and a response
+  format, and nothing about reasoning, so the server decides. With thinking on, Qwen3.8-27B never
+  answered within the client's two-minute bound.
+- **Pin the revisions.** When the embedding weights change, build a new generation under a new
+  `TAISCE_INFERENCE_EMBEDDING_REVISION` ([message embeddings](../22-message-embeddings.md)).
+- **List both hosts.** Anything off the machine needs `https`:
+
+  ```bash
+  TAISCE_INFERENCE_ENDPOINT=https://generation.internal/v1
+  TAISCE_INFERENCE_EXTRACTOR_MODEL=Qwen/Qwen3.8-27B
+  TAISCE_INFERENCE_EMBEDDING_ENDPOINT=https://embedding.internal/v1
+  TAISCE_INFERENCE_EMBEDDING_MODEL=Qwen/Qwen3-Embedding-4B
+  TAISCE_INFERENCE_ALLOWLIST=generation.internal,embedding.internal
+  ```
+
+The qualification ran seven single-GPU generation replicas behind one address, and one embedding
+server. That is the arrangement that was run, not a sizing rule for yours.
+
 ### What compose ships by default
 
 Compose points generation at a model on your own machine, reached from the container as
 `http://host.docker.internal:11434/v1`, with an allowlist of `host.docker.internal:11434`. That
-default needs no signup and sends nothing off the machine.
+default needs no signup and sends nothing off the machine. Its default model name is the Apple silicon
+build; on Linux or Windows set `TAISCE_INFERENCE_EXTRACTOR_MODEL=qwen3.6:35b-a3b-q8_0`
+([#58](https://github.com/ensera-ai/taisce/issues/58)). The quickstart sets DeepSeek's variables
+instead, the preferred way to start.
 
 LiteLLM ships as an opt-in profile (`--profile gateway`, configured by
 [`deploy/litellm/config.yaml`](../../deploy/litellm/config.yaml)). It is not the default hop. A
@@ -170,14 +232,16 @@ endpoint is whatever you set.
 
 ### Inference profiles
 
-[`deploy/inference/`](../../deploy/inference/) holds three environment files. Each sets an endpoint,
-a model and an allowlist, and never a key. A key in a committed file is a key in the repository, so
-you export it separately.
+[`deploy/inference/`](../../deploy/inference/) holds environment files for tools that run on the host,
+such as `make test-inference`. Each sets an endpoint, a model and an allowlist, and never a key. A key
+in a committed file is a key in the repository, so you export it separately.
 
 | Profile | Generation | Embedding | For |
 |---|---|---|---|
-| [`local.env`](../../deploy/inference/local.env) | a model on this machine | the same machine | the default; nothing leaves the machine |
-| [`openrouter.env`](../../deploy/inference/openrouter.env) | a hosted provider | this machine | when a hosted extractor is acceptable; conversation text then leaves your infrastructure |
+| [`local.env`](../../deploy/inference/local.env) | Ollama on this machine | the same Ollama | the default for host tools; nothing leaves the machine |
+| [`deepseek.env`](../../deploy/inference/deepseek.env) | DeepSeek | Ollama on this machine | development runs against the preferred hosted extractor |
+| [`openrouter.env`](../../deploy/inference/openrouter.env) | a model on OpenRouter | Ollama on this machine | trying another hosted extractor; conversation text leaves your infrastructure |
+| [`demo-qwen3.6.env`](../../deploy/inference/demo-qwen3.6.env), [`demo-qwen3.8.env`](../../deploy/inference/demo-qwen3.8.env) | vLLM on a rented GPU, through a tunnel | Ollama on this machine | demos and measurement runs |
 | [`gpu.env`](../../deploy/inference/gpu.env) | a host you rented | your choice | measurement runs; the endpoint and allowlist are deliberately empty and must be filled in per run |
 
 The profiles use `localhost` because they are for tools running on the host, such as test targets
