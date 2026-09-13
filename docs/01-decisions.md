@@ -141,3 +141,50 @@ hard to undo.
 **Impact.** Maintainability: the documents can now cite the register that governs them, and there is
 less code. It moves no security boundary — nothing withheld from the public tree remains to be
 protected, because there is no longer a private tree to withhold it from.
+
+## D4 — The compose file pulls a published release, and building is a second file
+
+**Date.** 2026-09-13. **Issue.** [#13](https://github.com/ensera-ai/taisce/issues/13).
+
+**Why it was open.** `docker compose up` built the service from source and compiled pgvector from
+source, on the machine of somebody who wanted to evaluate Taisce rather than build it. The release
+workflow already pushed a service image, so the build was not even producing something unavailable —
+it was producing something that existed and was not being used.
+
+**Decided.** A release publishes both images the compose file needs — the service and its PostgreSQL
+substrate — for `linux/amd64` and `linux/arm64`. `compose.yaml` names them and carries no `build:`
+at all. A contributor running their working tree adds `compose.build.yaml`.
+
+**Both images, because publishing one removes half a build.** The substrate is where the minutes are:
+it clones and compiles pgvector. Publishing only the service would have left the slower half in place
+and still required the repository, which is the thing being removed.
+
+**Both architectures, because the alternative is worse than what it replaced.** The binaries in the
+same job already build `linux/arm64`. An image that did not would hand every Apple Silicon and
+Graviton operator an emulated container — slower than the build a published image exists to replace,
+and slower invisibly, since nothing announces that a container is being emulated.
+
+**Rejected: `image:` and `build:` on the same service.** Compose accepts both and builds when the
+image is not in the local cache. That makes "am I running my change or a release?" a question about
+cache state, and the wrong answer is the silent one — a contributor sees their change work when the
+cache was cold and a release work when it was warm, with nothing in the output distinguishing them.
+Two files cost a longer command and make the build something that was asked for.
+
+**Rejected: pinning `latest`.** A getting-started file that follows a moving tag breaks under people
+who changed nothing, and the failure looks like theirs. `latest` is published — for discovery, and
+for anyone who has decided they want the moving one — and nothing this project ships points at it.
+
+**Rejected: keeping the substrate on the stock PostgreSQL image and installing extensions at
+migration time.** `CREATE EXTENSION` needs privileges the runtime is deliberately never granted, and
+a missing extension should fail while the cluster comes up rather than part-way through a migration.
+That reasoning has not changed; only where the image comes from has.
+
+**Undo cost.** Low. Restoring `build:` to `compose.yaml` is a few lines, and the images are additive:
+a deployment that ignores them is unaffected. What would be harder to undo is a published tag, which
+is why the tags are immutable and only `latest` moves.
+
+**Impact.** Adoption and operations: a first run is two pulls rather than two builds, and it needs
+neither a checkout nor a Go toolchain. Supply chain: what an operator runs is now an artefact that
+was signed and attested rather than one they compiled from a tree they did not read — which is a
+stronger claim, and only true while the packages are public. It moves no boundary inside the service;
+the images run what they always ran.

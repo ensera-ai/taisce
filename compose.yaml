@@ -22,7 +22,7 @@
 #
 # Two files rather than `image:` and `build:` together, because Compose given both will build when
 # the image happens to be missing locally — so whether you tested your own code or a published
-# release would depend on what was in the cache. An overlay makes it something you asked for.
+# release would depend on what was in the cache. An overlay makes it something you asked for (D4).
 #
 # ── THIS IS ONE MACHINE, AND IT SAYS SO ──────────────────────────────────────────────────────────
 #
