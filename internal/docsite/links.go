@@ -20,6 +20,9 @@ import (
 //   - a document that is on the site stays a relative link to its page;
 //   - a Go package directory becomes a link to that package's reference page, which is what a
 //     reader following "internal/formation/" wants and what GitHub's directory listing is not;
+//   - a file under site/static/ becomes the path the renderer serves it at, so a screenshot a
+//     document shows is an image on the site as it is on GitHub. A link to its source page would be
+//     an HTML page, which a browser does not display where an image belongs;
 //   - anything else in the repository becomes a link to the source at the ref the site was built from;
 //   - a path that names nothing is refused, because the reader would find nothing either.
 //
@@ -34,6 +37,10 @@ var (
 	fence         = regexp.MustCompile("^\\s{0,3}(```|~~~)")
 	backtickRun   = regexp.MustCompile("`+")
 )
+
+// staticDir is the renderer's static directory. Its files are served from the site's root: the
+// renderer places site/static/img/x.png at /img/x.png and resolves such a path against the base URL.
+const staticDir = "site/static/"
 
 // resolveLinks rewrites every page's links in place and reports every broken one at once, so a run
 // names the whole list rather than the first.
@@ -159,6 +166,9 @@ func resolveTarget(p page, target string, targets map[string]string, opts Option
 	info, err := os.Stat(filepath.Join(opts.Root, filepath.FromSlash(resolved)))
 	if err != nil {
 		return "", fmt.Errorf("%s names nothing", target)
+	}
+	if served, ok := strings.CutPrefix(resolved, staticDir); ok && !info.IsDir() {
+		return "/" + served + fragment, nil
 	}
 	kind := "blob"
 	if info.IsDir() {

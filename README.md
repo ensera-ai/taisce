@@ -65,6 +65,17 @@ The answer comes with the words behind it (trimmed):
 The [quickstart](docs/developers/quickstart.md) walks through the same steps with what to expect at
 each one, and ends by erasing Alice.
 
+## Operate it
+
+The ops centre is the console for one instance: activity, instance health, projects, API keys,
+parked turns and a ledger you can verify. It is off by default; `TAISCE_PORTAL=on docker compose up -d`
+switches it on at `http://127.0.0.1:8081/portal/`, and it opens only for an operator token.
+
+![The Taisce ops centre](site/static/img/ops-centre/overview.png)
+
+[Operate an instance](docs/operate/overview.md) covers running Taisce from the ops centre, the CLI and
+the management API.
+
 ## Documentation
 
 The documents below are published, with search and the generated reference, at
