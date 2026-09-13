@@ -12,15 +12,13 @@ all of it is Apache-2.0.
 
 ## Run it
 
-You need Docker Compose v2 and [Ollama](https://ollama.com), which runs the model that reads
-conversations on your own machine. Start Ollama so the containers can reach it:
+You need Docker with the Compose plugin and [Ollama](https://ollama.com), which runs the model that
+reads conversations on your own machine and has to be reachable from inside a container.
+[Set up your machine](docs/start/your-machine.md) covers Linux, macOS with Colima and Windows with
+WSL2.
 
-```bash
-OLLAMA_HOST=0.0.0.0 ollama serve
-```
-
-Then, in a second terminal, in an empty directory. You do not need a checkout — the compose file
-names published images and pulls them:
+Then, in an empty directory. You do not need a checkout — the compose file names published images
+and pulls them:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.2/compose.yaml

@@ -71,11 +71,12 @@ x-service: &service
     # Extraction is the one thing that cannot be shipped: no key can be baked into an open
     # repository, and a hosted provider means the first five minutes contain a signup.
     #
-    # So the default points at Ollama on the host. On macOS with Colima, and on Docker Desktop,
-    # `host.docker.internal` is the host from inside a container — and Ollama must be told to
-    # listen beyond loopback or nothing reaches it:
+    # So the default points at Ollama on the host, through `host.docker.internal` (mapped for every
+    # Docker by `extra_hosts` below). Whether Ollama must listen beyond loopback depends on the
+    # machine: under Colima a container reaches the Mac's loopback, and on plain Linux Docker it
+    # reaches the bridge address and not loopback. docs/start/your-machine.md has each system and a
+    # check that runs from inside a container:
     #
-    #     OLLAMA_HOST=0.0.0.0 ollama serve
     #     ollama pull qwen3.6:35b-a3b-mxfp8
     #
     # Without a model the instance still starts. It stores turns, serves recall of whatever is

@@ -11,6 +11,7 @@
 # Start
 
 - [How it works](start/how-it-works.md)
+- [Set up your machine](start/your-machine.md)
 - [Quickstart](developers/quickstart.md)
 - [Examples](examples/overview.md)
   - [Remember and recall](examples/remember-and-recall.md)

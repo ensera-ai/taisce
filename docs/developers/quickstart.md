@@ -9,36 +9,36 @@ happened. You don't need an account anywhere, because the model runs on your own
 
 ## What you need
 
-- **Docker with Compose v2.** Check with `docker compose version`. The older standalone
+- **Docker with the Compose plugin**, so `docker compose version` answers. The older standalone
   `docker-compose` will not do.
-- **[Ollama](https://ollama.com)**, which runs the model that reads conversations. Check with
-  `ollama --version`.
-- **`jq`**, to pull fields out of JSON, and **`uuidgen`**. On Linux without `uuidgen`, use
-  `cat /proc/sys/kernel/random/uuid` wherever it appears.
+- **[Ollama](https://ollama.com), reachable from inside a container**, because that is where Taisce
+  calls the model from.
+- **`jq`**, to pull fields out of JSON, and **`uuidgen`**.
 - **An empty directory** to work in. You do not need a checkout and you do not need Go: the compose
   file names images a release published, for `linux/amd64` and `linux/arm64`, and pulls them.
 
-## 1. Start the model
+[Set up your machine](../start/your-machine.md) gets you all of these on Linux, macOS with Colima,
+and Windows with WSL2, and ends with a check that a container can reach the model.
 
-```bash
-OLLAMA_HOST=0.0.0.0 ollama serve
-```
+## 1. Pull the model
 
-Leave that running. In a second terminal:
+With Ollama running as [Set up your machine](../start/your-machine.md) describes for your system:
 
 ```bash
 ollama pull qwen3.6:35b-a3b-mxfp8
-curl -s http://localhost:11434/v1/models | jq -r '.data[].id'
+docker run --rm --add-host host.docker.internal:host-gateway curlimages/curl:8.11.1 \
+  -sS --max-time 5 http://host.docker.internal:11434/v1/models | jq -r '.data[].id'
 ```
 
-You should see the model you pulled:
+You should see the model you pulled, among any others you have:
 
 ```text
 qwen3.6:35b-a3b-mxfp8
 ```
 
-Taisce uses this model to read each conversation turn and propose facts, and
-`OLLAMA_HOST=0.0.0.0` lets the containers reach it on your machine.
+Taisce uses this model to read each conversation turn and propose facts. The second command asks for
+the list from inside a throwaway container, which is the way Taisce's worker reaches the model, so a
+model listed here is one Taisce can use.
 
 ### Which model?
 
@@ -59,8 +59,10 @@ Taisce only sends text to hosts you have listed in the allowlist, so that is alw
 A model that is not in this table may still work. Check it with `make test-inference` before you
 rely on it.
 
-**Didn't work?** If `curl` cannot connect, Ollama is not running, or it is listening only on
-localhost; restart it with `OLLAMA_HOST=0.0.0.0`. If the model answers but nothing ever forms, see
+**Didn't work?** If `curl` prints `Failed to connect`, the container cannot reach Ollama: either it
+is not running, or it listens where a container cannot reach it.
+[When the check fails](../start/your-machine.md#when-the-check-fails) says which, per system. If the
+model answers but nothing ever forms, see
 [memory isn't forming](troubleshooting.md#memory-isnt-forming).
 To use a hosted model instead, see [reaching a model](../architecture/deployment.md#reaching-a-model).
 
