@@ -311,3 +311,42 @@ one run happened to land and the next ordinary run could miss.
 **Impact.** Process: a change that deletes well-covered code can be held until a test is added, which
 costs time on that change. That is accepted — the time is spent on coverage, not on arguing a number
 down. It moves no boundary in the service.
+
+## D8 — The documentation site publishes documentation, and records for contributors stay in the repository
+
+**Date.** 2026-09-13. **Issue.** [#45](https://github.com/ensera-ai/taisce/issues/45).
+
+**Why it was open.** The site build published every markdown file under `docs/` and refused one the
+navigation did not list, so being in `docs/` meant being on the site. That put this register, and six
+dated measurement runs under a heading called *Measurements*, on taisce.dev beside the quickstart. The
+register is written for whoever is about to change the project, not for someone adding memory to an
+agent. The measurement runs are findings from rented machines and synthetic data, and no latency,
+throughput or corpus target has been agreed for a published number to be read against. A reader quotes
+a number from a page titled *Measurements* whatever else the page says.
+
+**Decided.** A document in `docs/` is either listed in `docs/SUMMARY.md`, and published, or named in
+that file's kept list, and not. The build refuses a document that is neither, one that is both, and a
+kept name that is no document. A kept document is not staged, and a link to it from a published page
+goes to the file on GitHub at the commit the site was built from. Kept from 2026-09-13: this register,
+and documents `23`, `26`, `27`, `28`, `31` and `36`. The site's footer links the register on GitHub.
+Measurements return to the site as a benchmark run against an agreed target, on hardware that can
+speak for the system, published as that.
+
+**Rejected: moving kept documents out of `docs/`.** `docs/01-decisions.md` is the path the project's
+rules, the contributor guide and code comments cite. What a website shows is not a reason to break
+every one of those references.
+
+**Rejected: deleting the measurement records.** They are findings, and several of them changed a
+decision. What changes is where they are shown, not whether they exist.
+
+**Rejected: keeping them on the site under a "not a benchmark" notice.** The notice is read after the
+number.
+
+**Rejected: dropping them from the navigation and relaxing the check.** The check exists so that a page
+is not half-published by omission. Relaxing it re-opens that for every document written after this
+one; a list keeps each exclusion deliberate and visible in review.
+
+**Undo cost.** Low: moving a name from the kept list into the navigation publishes it again.
+
+**Impact.** Operations: what the public site shows is a reviewed list rather than whatever is in a
+directory. It moves no boundary in the service.
