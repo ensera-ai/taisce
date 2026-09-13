@@ -1,0 +1,42 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Build the working tree instead of pulling a release.
+#
+# `compose.yaml` names published images and nothing else, so `docker compose up` runs what a release
+# produced. That is right for everybody evaluating Taisce and wrong for everybody changing it, which
+# is what this overlay is for:
+#
+#     docker compose -f compose.yaml -f compose.build.yaml up -d --build
+#
+# ── WHY THIS IS A SEPARATE FILE ──────────────────────────────────────────────────────────────────
+#
+# Compose accepts `image:` and `build:` on one service and builds when the image is not in the local
+# cache. That makes "did I test my change or a published release?" a question about cache state
+# rather than about what was asked for — and the wrong answer is the silent one. Here, a build is
+# something you named on the command line.
+#
+# `image:` is repeated so the built result lands on the same tag the base file names; without it
+# Compose would invent a project-scoped name and the two files would disagree about what is running.
+
+services:
+  postgres:
+    image: ghcr.io/ensera-ai/taisce-postgres:${TAISCE_VERSION:-v0.3.1}
+    build: ./deploy/postgres
+
+  bootstrap:
+    build: &service-build
+      context: .
+      args:
+        # The binary reports what it was built from. A local build says so rather than claiming a
+        # release tag it is not.
+        VERSION: ${TAISCE_VERSION:-dev}
+
+  api:
+    build: *service-build
+
+  worker:
+    build: *service-build
+
+  manage:
+    build: *service-build

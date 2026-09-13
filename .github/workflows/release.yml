@@ -43,7 +43,12 @@ jobs:
       attestations: write
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/taisce
+      SUBSTRATE: ghcr.io/${{ github.repository_owner }}/taisce-postgres
       CHART: oci://ghcr.io/${{ github.repository_owner }}/charts
+      # Both images carry both architectures. The binaries in this job already build linux/arm64, and
+      # an image that did not would hand every Apple Silicon and Graviton operator an emulated
+      # container — slower than the build a published image exists to replace.
+      PLATFORMS: linux/amd64,linux/arm64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -51,6 +56,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - uses: sigstore/cosign-installer@v3
+      # The runner is amd64. Building arm64 on it means emulating arm64, which is what this provides;
+      # it costs minutes at release time and saves them on every pull.
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -76,11 +84,22 @@ jobs:
         with:
           subject-path: dist/*
 
+      # ── The two images a quickstart pulls ────────────────────────────────────────────────────
+      #
+      # The service and the substrate are published together and tagged together, so `compose.yaml`
+      # needs one version and cannot name a pair that was never built as a pair. The substrate
+      # changes far less often than the service and is rebuilt anyway: the layers are cached, and a
+      # tag that exists for every release is worth more than the minutes saved by skipping one.
+      #
+      # `latest` moves and the version tag does not. The quickstart pins the version deliberately —
+      # a getting-started guide that silently follows `latest` breaks under people who changed
+      # nothing — and `latest` is here for discovery and for anyone who asked for the moving one.
       - name: Image
         id: image
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: ${{ env.PLATFORMS }}
           push: true
           provenance: true
           sbom: true
@@ -88,12 +107,33 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ github.ref_name }}
             ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
       - name: Sign the image
         run: cosign sign --yes "${IMAGE}@${{ steps.image.outputs.digest }}"
       - uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Substrate image
+        id: substrate
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/postgres
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          provenance: true
+          sbom: true
+          tags: |
+            ${{ env.SUBSTRATE }}:${{ github.ref_name }}
+            ${{ env.SUBSTRATE }}:latest
+      - name: Sign the substrate image
+        run: cosign sign --yes "${SUBSTRATE}@${{ steps.substrate.outputs.digest }}"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.SUBSTRATE }}
+          subject-digest: ${{ steps.substrate.outputs.digest }}
           push-to-registry: true
 
       - name: Chart

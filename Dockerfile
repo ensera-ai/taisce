@@ -27,6 +27,20 @@ RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -X main.ver
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /taisce /taisce
 
+# An ARG is scoped to the stage that declares it, so the one the build stage used for the ldflags is
+# out of scope here and ${VERSION} would expand to nothing. Re-declared, not duplicated: the build
+# passes it once and both stages read the same value.
+ARG VERSION=unknown
+
+# The source label is what ties the published package back to the repository it was built from, on
+# the registry's own page rather than in a document somebody has to find. Without it a pulled image
+# is a binary with no stated origin, which is the opposite of what signing it is for.
+LABEL org.opencontainers.image.title="taisce" \
+      org.opencontainers.image.description="Open-source agentic memory: one Go service on PostgreSQL" \
+      org.opencontainers.image.source="https://github.com/ensera-ai/taisce" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${VERSION}"
+
 # Non-root by default. Root in a container is one escape away from root on the host, and nothing this
 # process does needs it.
 USER nonroot:nonroot

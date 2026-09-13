@@ -19,9 +19,11 @@ conversations on your own machine. Start Ollama so the containers can reach it:
 OLLAMA_HOST=0.0.0.0 ollama serve
 ```
 
-Then, in a second terminal, from a checkout of this repository:
+Then, in a second terminal, in an empty directory. You do not need a checkout — the compose file
+names published images and pulls them:
 
 ```bash
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.1/compose.yaml
 ollama pull qwen3.6:35b-a3b-mxfp8
 docker compose up -d
 export TOKEN=$(docker compose logs --no-log-prefix bootstrap | awk '/^token:/ {print $2}')

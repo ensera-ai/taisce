@@ -15,7 +15,8 @@ happened. You don't need an account anywhere, because the model runs on your own
   `ollama --version`.
 - **`jq`**, to pull fields out of JSON, and **`uuidgen`**. On Linux without `uuidgen`, use
   `cat /proc/sys/kernel/random/uuid` wherever it appears.
-- **A checkout of this repository**, as your working directory.
+- **An empty directory** to work in. You do not need a checkout and you do not need Go: the compose
+  file names images a release published, for `linux/amd64` and `linux/arm64`, and pulls them.
 
 ## 1. Start the model
 
@@ -65,13 +66,17 @@ To use a hosted model instead, see [reaching a model](../architecture/deployment
 
 ## 2. Start Taisce
 
+Fetch the compose file for the release you want, then bring it up:
+
 ```bash
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.1/compose.yaml
 docker compose up -d
 docker compose ps -a --format '{{.Service}}\t{{.State}}\t{{.Health}}'
 curl -s localhost:8080/ready
 ```
 
-The first run builds the image, so give it a while. Once the health checks pass, you should see:
+The first run pulls two images — the service and its PostgreSQL substrate — so give it a minute on a
+cold cache. Once the health checks pass, you should see:
 
 ```text
 api        running  healthy
