@@ -34,17 +34,19 @@ sequenceDiagram
 |---|---|---|---|
 | Python | Microsoft Agent Framework | `TaisceContextProvider`, a context provider | `taisce-agent-framework` |
 | Python | LangGraph (`create_agent`) | `TaisceMemory`, agent middleware | `taisce-langgraph` |
-| Java | LangChain4j | `TaisceChatModel`, which wraps your `ChatModel` | `ai.taisce:taisce-langchain4j` |
-| Java | Spring AI | `TaisceMemoryAdvisor`, an advisor on your `ChatClient` | `ai.taisce:taisce-spring-ai` |
+| Java | LangChain4j | `TaisceChatModel`, which wraps your `ChatModel` | `ai.ensera.taisce:taisce-langchain4j` |
+| Java | Spring AI | `TaisceMemoryAdvisor`, an advisor on your `ChatClient` | `ai.ensera.taisce:taisce-spring-ai` |
 | .NET | Microsoft Agent Framework | `TaisceContextProvider`, an `AIContextProvider` | `Taisce.AgentFramework` |
 
 - **Use the one for the framework you already have.** Each adapter plugs into a hook the framework
   already offers, so the rest of your agent stays as it is.
-- **Each language also has a plain client:** `taisce` in Python, `ai.taisce:taisce-client` in Java
-  and `Taisce.Client` in .NET. Use it if you want to call Taisce yourself.
-- **Nothing is published to a package registry yet.** Each guide shows how to install from source:
-  [Python](python.md), [Java](java.md), [.NET](dotnet.md). The code is in
-  [taisce-python](https://github.com/ensera-ai/taisce-python),
+- **Each language also has a plain client:** `taisce` in Python, `ai.ensera.taisce:taisce-client`
+  in Java and `Taisce.Client` in .NET. Use it if you want to call Taisce yourself.
+- **Install from the registry you already use.** Python packages are on
+  [PyPI](https://pypi.org/project/taisce-agent-framework/), .NET packages on
+  [nuget.org](https://www.nuget.org/packages/Taisce.AgentFramework) and Java modules on
+  [Maven Central](https://central.sonatype.com/namespace/ai.ensera.taisce); each guide has the
+  install line. The code is in [taisce-python](https://github.com/ensera-ai/taisce-python),
   [taisce-java](https://github.com/ensera-ai/taisce-java) and
   [taisce-dotnet](https://github.com/ensera-ai/taisce-dotnet).
 - **Building a coding assistant** rather than an agent of your own? Use [MCP](mcp.md) instead.
@@ -118,12 +120,19 @@ For each case, the suite saves a few facts under a new, random person and runs o
 your adapter. A recording proxy sits between the adapter and Taisce, and can pretend a call failed.
 Only the model is faked.
 
-To run it, build the `taisce` command in the service repository and point it at your deployment.
-Run the built-in reference adapter first: if it passes, the deployment and the suite are fine, and
-any failure after that is your adapter's.
+To run it, download the `taisce` command from the
+[release](https://github.com/ensera-ai/taisce/releases/latest), check it against the release's
+checksums, and point it at your deployment. Builds are published for `linux-amd64`, `linux-arm64`
+and `darwin-arm64`. Run the built-in reference adapter first: if it passes, the deployment and the
+suite are fine, and any failure after that is your adapter's.
 
 ```bash
-go build -o taisce ./cmd/taisce
+V=v0.3.2 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
+curl -fsSLO https://github.com/ensera-ai/taisce/releases/download/$V/taisce-$V-$PLATFORM
+curl -fsSLO https://github.com/ensera-ai/taisce/releases/download/$V/taisce-$V-checksums.txt
+shasum -a 256 -c --ignore-missing taisce-$V-checksums.txt
+install -m 0755 taisce-$V-$PLATFORM taisce
+
 export TAISCE_API=http://localhost:8080
 export TAISCE_TOKEN=$(docker compose logs --no-log-prefix bootstrap | awk '/^token:/ {print $2}')
 
