@@ -153,9 +153,6 @@ func resolveTarget(p page, target string, targets map[string]string, opts Option
 	if resolved == ".." || strings.HasPrefix(resolved, "../") {
 		return "", fmt.Errorf("%s leaves the repository", target)
 	}
-	if isPrivate(opts.private, resolved) {
-		return "", fmt.Errorf("%s is private, and the public tree will not have it", target)
-	}
 	if stage, ok := targets[resolved]; ok {
 		return relative(p.Stage, stage) + fragment, nil
 	}

@@ -49,10 +49,10 @@ type goTest struct {
 	Line            int
 }
 
-// loadPackages finds every Go package under cmd/ and internal/ and reads it, leaving out private
-// paths. A package with no doc comment is refused: that comment is where a package says what it may
+// loadPackages finds every Go package under cmd/ and internal/ and reads it. A package with no doc
+// comment is refused: that comment is where a package says what it may
 // decide and what it must not, and nothing else in the code says so.
-func loadPackages(root string, private map[string]bool) ([]goPackage, error) {
+func loadPackages(root string) ([]goPackage, error) {
 	var dirs []string
 	for _, top := range []string{"cmd", "internal"} {
 		if _, err := os.Stat(filepath.Join(root, top)); os.IsNotExist(err) {
@@ -67,7 +67,7 @@ func loadPackages(root string, private map[string]bool) ([]goPackage, error) {
 			}
 			rel, _ := filepath.Rel(root, p)
 			rel = filepath.ToSlash(rel)
-			if name := d.Name(); name == "testdata" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || isPrivate(private, rel) {
+			if name := d.Name(); name == "testdata" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 				return filepath.SkipDir
 			}
 			dirs = append(dirs, rel)
@@ -80,7 +80,7 @@ func loadPackages(root string, private map[string]bool) ([]goPackage, error) {
 	var packages []goPackage
 	var undocumented []string
 	for _, dir := range dirs {
-		p, ok, err := loadPackage(root, dir, private)
+		p, ok, err := loadPackage(root, dir)
 		if err != nil {
 			return nil, err
 		}
@@ -110,9 +110,8 @@ func loadPackages(root string, private map[string]bool) ([]goPackage, error) {
 	return packages, nil
 }
 
-// loadPackage reads one directory, leaving out private files. ok is false when it holds no non-test
-// Go file.
-func loadPackage(root, dir string, private map[string]bool) (goPackage, bool, error) {
+// loadPackage reads one directory. ok is false when it holds no non-test Go file.
+func loadPackage(root, dir string) (goPackage, bool, error) {
 	entries, err := os.ReadDir(filepath.Join(root, dir))
 	if err != nil {
 		return goPackage{}, false, fmt.Errorf("docsite: %w", err)
@@ -125,9 +124,6 @@ func loadPackage(root, dir string, private map[string]bool) (goPackage, bool, er
 	for _, e := range entries {
 		name := e.Name()
 		full := filepath.Join(root, dir, name)
-		if isPrivate(private, path.Join(dir, name)) {
-			continue
-		}
 		switch {
 		case e.IsDir():
 			p.Data = append(p.Data, dataFiles(root, dir, name)...)
