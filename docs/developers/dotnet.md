@@ -115,10 +115,10 @@ var later = await second.CreateSessionAsync();
 Console.WriteLine((await second.RunAsync("Where do I live now?", later)).Text);
 ```
 
-Run it against any OpenAI-compatible endpoint, such as a local Ollama:
+Run it against any OpenAI-compatible endpoint, such as DeepSeek's:
 
 ```bash
-export OPENAI_ENDPOINT=http://localhost:11434/v1 OPENAI_CHAT_MODEL=<a chat model the endpoint serves>
+export OPENAI_ENDPOINT=https://api.deepseek.com/v1 OPENAI_API_KEY=$DEEPSEEK_API_KEY OPENAI_CHAT_MODEL=deepseek-flash
 dotnet run
 ```
 

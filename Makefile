@@ -10,8 +10,12 @@ PERF_PORT ?= 18080
 PERF_POSTGRES_PORT ?= 55433
 PERF_POSTGRES_PASSWORD ?= taisce-perf
 PERF_TEST_DSN ?= postgres://postgres:$(PERF_POSTGRES_PASSWORD)@localhost:$(PERF_POSTGRES_PORT)/taisce?sslmode=disable
+# compose.yaml refuses to run without a model key. The workload runs against the database directly, so
+# the stack's worker gets a placeholder key and an allowlist that names no endpoint: it calls no model,
+# and no workload text leaves the machine, whatever key the shell holds.
 PERF_COMPOSE = TAISCE_PORT=$(PERF_PORT) TAISCE_PERF_POSTGRES_PORT=$(PERF_POSTGRES_PORT) \
 	TAISCE_PERF_POSTGRES_PASSWORD=$(PERF_POSTGRES_PASSWORD) \
+	TAISCE_INFERENCE_API_KEY=perf-forms-nothing TAISCE_INFERENCE_ALLOWLIST=forms-nothing.invalid \
 	docker compose --project-name $(PERF_PROJECT) -f compose.yaml -f compose.perf.yaml
 
 .PHONY: substrate db-up db-down test gate gate-image licence signoff version test-inference golden build contract freeze-contract \
@@ -132,8 +136,8 @@ signoff:
 # configuration FAILS rather than skips. A target whose whole purpose is to reach a live model, and
 # which passes when it did not, is worse than no target.
 #
-#   make test-inference                        against a model on this machine
-#   make test-inference INFERENCE_PROFILE=openrouter   against a hosted one
+#   make test-inference                                 against DeepSeek, with OpenRouter for embedding
+#   make test-inference INFERENCE_PROFILE=demo-qwen3.8  against Qwen on a rented GPU
 #
 # A profile sets the endpoint, the model and the allowlist. The key is yours to export:
 #
@@ -142,7 +146,8 @@ signoff:
 # The allowlist is the mechanism, not a formality. Empty permits nothing, because an allowlist that
 # opens when unset is one forgotten variable away from not being one — and every host that receives
 # somebody's words is listed, including a second endpoint that only embeds.
-# Which model this runs against. `local`, `openrouter` or `gpu` — see deploy/inference/.
+# Which model this runs against: `deepseek`, `openrouter`, `demo-qwen3.6`, `demo-qwen3.8` or `gpu`, in
+# deploy/inference/.
 #
 # A profile carries an endpoint, a model and an allowlist. It never carries a key: a credential in a
 # committed file is a credential in the repository, so keys come from the environment and a profile
@@ -150,7 +155,7 @@ signoff:
 #
 # The profile is loaded first and the surrounding environment wins, so a single variable can be
 # overridden for one run without editing anything.
-INFERENCE_PROFILE ?= local
+INFERENCE_PROFILE ?= deepseek
 
 test-inference:
 	@test -f deploy/inference/$(INFERENCE_PROFILE).env || \

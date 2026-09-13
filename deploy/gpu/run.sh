@@ -56,6 +56,8 @@ values = {
     'TAISCE_INFERENCE_EMBEDDING_ENDPOINT': 'https://embedding:8000/v1',
     'TAISCE_INFERENCE_EMBEDDING_MODEL': 'Qwen/Qwen3-Embedding-4B',
     'TAISCE_INFERENCE_ALLOWLIST': 'generation:8000,embedding:8000',
+    # compose.yaml requires a key; the qualification's vLLM servers are internal and take none.
+    'TAISCE_INFERENCE_API_KEY': 'none',
 }
 p.write_text(''.join(k+'='+v+'\n' for k,v in values.items()))
 p.chmod(0o600)

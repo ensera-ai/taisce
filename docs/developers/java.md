@@ -149,10 +149,10 @@ public class MemoryAgent {
 ```
 
 Run it twice, and give Taisce time to form facts in between. Any OpenAI-compatible endpoint works
-for the model, including a local Ollama:
+for the model, such as DeepSeek's:
 
 ```bash
-export MODEL_BASE_URL=http://localhost:11434/v1 MODEL_API_KEY=unused MODEL_NAME=<a model you serve>
+export MODEL_BASE_URL=https://api.deepseek.com/v1 MODEL_API_KEY=$DEEPSEEK_API_KEY MODEL_NAME=deepseek-flash
 
 mvn -q compile exec:java -Dexec.mainClass=MemoryAgent -Dexec.args="Marta works at Ensera."
 

@@ -6,9 +6,9 @@
 # was produced, what was refused, and whether the case passed — so that is what this shows, and the
 # whole point is that a line differing between two providers is visible without reading either log.
 #
-#     make test-inference INFERENCE_PROFILE=local      > /tmp/local.txt
+#     make test-inference INFERENCE_PROFILE=deepseek   > /tmp/deepseek.txt
 #     make test-inference INFERENCE_PROFILE=openrouter > /tmp/openrouter.txt
-#     scripts/compare-corpus.sh /tmp/local.txt /tmp/openrouter.txt
+#     scripts/compare-corpus.sh /tmp/deepseek.txt /tmp/openrouter.txt
 #
 # It reports what the runs say and adds nothing: a case missing from one run is shown as missing rather
 # than as a difference, because a run that did not measure something has not disagreed with anything.
