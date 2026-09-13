@@ -32,6 +32,19 @@ make site     # build the documentation site (needs the database too)
   builds the site with Docusaurus. It refuses a broken link or a page the navigation does not reach.
   `make site-serve` serves the result at `http://127.0.0.1:3000/taisce/`.
 
+### Running the whole stack from your working tree
+
+`compose.yaml` names published images and never builds, so `docker compose up` runs a release rather
+than your change. To run what you have written, add the overlay:
+
+```sh
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+```
+
+The two files are separate on purpose. Compose given both an `image:` and a `build:` builds only when
+the image is missing from the local cache, which would make "am I running my change or a release?" a
+question about cache state. Naming the overlay makes it a question you answered.
+
 Other targets you may need:
 
 - `make gate` runs the same checks a change must pass before it merges (licence headers, the full
