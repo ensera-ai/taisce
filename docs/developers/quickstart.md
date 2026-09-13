@@ -4,8 +4,10 @@
 # Quickstart
 
 In this guide you run Taisce on your machine, save one thing a user said, ask about it, and then
-forget it. There are seven steps. Each one shows the command, what you should see, and what just
-happened. You don't need an account anywhere, because the model runs on your own machine.
+forget it, in seven steps with `curl`. Then, in step 8, you give an agent memory in the framework you
+use: Microsoft Agent Framework in Python or .NET, LangGraph, Spring AI, LangChain4j, or a coding agent
+over MCP. Each step shows the command, what you should see, and what just happened. You don't need an
+account anywhere, because the model runs on your own machine.
 
 ## What you need
 
@@ -269,6 +271,450 @@ whole project. A receipt with `clean: false` names the kind of thing that surviv
 [forget a person](../examples/forget-a-person.md) recipe explains how to read one, and
 [troubleshooting](troubleshooting.md) covers the rest of a first run.
 
+## 8. Give an agent memory
+
+Steps 1 to 7 called the API yourself. An adapter makes the same calls from inside your agent
+framework: before the model answers, it recalls what Taisce knows about the person and adds it to the
+request as one message marked untrusted; after the model answers, it saves the turn.
+[Adapters](adapters.md) explains what every adapter holds to.
+
+Each example below is the same small program in a different framework. It takes a message on the
+command line, runs one turn for `alice`, prints the reply and exits. You run it twice, and the second
+run is a new process with no chat history, so whatever it knows from the first came from Taisce.
+
+Keep Taisce running from step 2. In the terminal where you run the program, set where Taisce is and
+which model the agent talks to:
+
+```bash
+export TAISCE_API=http://localhost:8080
+export TAISCE_TOKEN=$TOKEN                        # the project token from step 3
+export MODEL_BASE_URL=http://localhost:11434/v1   # any OpenAI-compatible endpoint
+export MODEL_NAME=qwen3.6:35b-a3b-mxfp8
+export MODEL_API_KEY=unused                       # Ollama ignores it; a hosted provider needs its key
+```
+
+The agent's model answers the person; Taisce's model, from step 1, reads what was said. They can be
+the same model, as here, or different ones.
+
+Between the two runs, wait for the first turn to form, as in step 5. This waits until `formed` has
+caught up with `stored`:
+
+```bash
+wait_formed() {
+  until curl -sS "$TAISCE_API/v1/freshness" -H "Authorization: Bearer $TAISCE_TOKEN" \
+    | jq -e '.formed != null and .formed >= .stored' >/dev/null; do sleep 2; done
+}
+```
+
+Pick the framework you use. Microsoft Agent Framework comes first, in Python and in .NET.
+
+### Python: Microsoft Agent Framework
+
+`TaisceContextProvider` is a context provider, the framework's own hook for adding to a request.
+
+1. Install the adapter and the framework's OpenAI-compatible client. You need Python 3.10 or newer.
+
+   ```bash
+   python -m venv .venv && . .venv/bin/activate
+   pip install taisce-agent-framework agent-framework-openai
+   ```
+
+2. Save this as `agent.py`:
+
+   ```python
+   import asyncio
+   import os
+   import sys
+   import uuid
+
+   from agent_framework import Agent
+   from agent_framework.openai import OpenAIChatCompletionClient
+
+   from taisce import Client
+   from taisce_agent_framework import TaisceContextProvider
+
+
+   def report(stage: str, exc: Exception) -> None:
+       print(f"taisce {stage} failed: {exc!r}", file=sys.stderr)
+
+
+   async def main(message: str) -> None:
+       model = OpenAIChatCompletionClient(
+           os.environ["MODEL_NAME"],
+           base_url=os.environ["MODEL_BASE_URL"],
+           api_key=os.environ["MODEL_API_KEY"],
+       )
+       async with Client(os.environ["TAISCE_API"], os.environ["TAISCE_TOKEN"]) as taisce:
+           memory = TaisceContextProvider(
+               taisce,
+               data_subject_id="alice",      # whose memory this is
+               run_id=str(uuid.uuid4()),     # this conversation
+               on_error=report,
+           )
+           agent = Agent(model, context_providers=[memory])
+           response = await agent.run(message)
+           print(response.text)
+
+
+   asyncio.run(main(" ".join(sys.argv[1:])))
+   ```
+
+3. Run it twice:
+
+   ```bash
+   python agent.py "I moved to Cork last month for a new job at Ensera."
+   wait_formed
+   python agent.py "Where do I live now, and where do I work?"
+   ```
+
+   The first reply is whatever the model says to news; the second answers from memory (the wording
+   will differ):
+
+   ```text
+   You live in Cork and work at Ensera.
+   ```
+
+### .NET: Microsoft Agent Framework
+
+`TaisceContextProvider` is an `AIContextProvider`, the framework's own hook for adding to a request.
+
+1. Make a console app and add the adapter and an OpenAI-compatible chat client. You need the .NET 10
+   SDK.
+
+   ```bash
+   dotnet new console -n MemoryAgent && cd MemoryAgent
+   dotnet add package Taisce.AgentFramework --version 0.1.1
+   dotnet add package Microsoft.Extensions.AI.OpenAI --version 10.10.0
+   ```
+
+2. Replace `Program.cs` with:
+
+   ```csharp
+   using System.ClientModel;
+   using Microsoft.Agents.AI;
+   using Microsoft.Extensions.AI;
+   using OpenAI;
+   using Taisce;
+   using Taisce.AgentFramework;
+
+   string Env(string name) => Environment.GetEnvironmentVariable(name)
+       ?? throw new InvalidOperationException($"{name} is not set");
+
+   IChatClient model = new OpenAIClient(
+           new ApiKeyCredential(Env("MODEL_API_KEY")),
+           new OpenAIClientOptions { Endpoint = new Uri(Env("MODEL_BASE_URL")) })
+       .GetChatClient(Env("MODEL_NAME"))
+       .AsIChatClient();
+
+   using var taisce = new TaisceClient(Env("TAISCE_API"), Env("TAISCE_TOKEN"));
+
+   var memory = new TaisceContextProvider(taisce, new TaisceContextProviderOptions
+   {
+       DataSubjectId = "alice",                // whose memory this is
+       RunId = Guid.NewGuid().ToString(),      // this conversation
+       OnError = (stage, ex) => Console.Error.WriteLine($"taisce {stage} failed: {ex.Message}"),
+   });
+
+   AIAgent agent = new ChatClientAgent(model, new ChatClientAgentOptions { AIContextProviders = [memory] });
+   Console.WriteLine(await agent.RunAsync(string.Join(' ', args)));
+   ```
+
+3. Run it twice:
+
+   ```bash
+   dotnet run -- "I moved to Cork last month for a new job at Ensera."
+   wait_formed
+   dotnet run -- "Where do I live now, and where do I work?"
+   ```
+
+   ```text
+   You live in Cork and you work at Ensera.
+   ```
+
+The [.NET guide](dotnet.md) adds the host-builder registration, compaction and saved sessions.
+
+### Python: LangGraph
+
+LangGraph has no context provider; `TaisceMemory` is agent middleware for `create_agent`.
+
+1. Install:
+
+   ```bash
+   python -m venv .venv && . .venv/bin/activate
+   pip install taisce-langgraph langchain-openai
+   ```
+
+2. Save this as `memory_agent.py`:
+
+   ```python
+   import asyncio
+   import os
+   import sys
+   import uuid
+
+   from langchain.agents import create_agent
+   from langchain_core.messages import HumanMessage
+   from langchain_openai import ChatOpenAI
+
+   from taisce import Client
+   from taisce_langgraph import TaisceMemory
+
+
+   def report(stage: str, exc: Exception) -> None:
+       print(f"taisce {stage} failed: {exc}", file=sys.stderr)
+
+
+   async def main(text: str) -> None:
+       model = ChatOpenAI(
+           base_url=os.environ["MODEL_BASE_URL"],
+           api_key=os.environ["MODEL_API_KEY"],
+           model=os.environ["MODEL_NAME"],
+       )
+       async with Client(os.environ["TAISCE_API"], os.environ["TAISCE_TOKEN"]) as client:
+           memory = TaisceMemory(client, data_subject_id="alice", run_id=f"run-{uuid.uuid4()}", on_error=report)
+           agent = create_agent(model, tools=[], middleware=[memory])
+           state = await agent.ainvoke({"messages": [HumanMessage(content=text)]})
+           print(state["messages"][-1].content)
+
+
+   asyncio.run(main(" ".join(sys.argv[1:])))
+   ```
+
+   The middleware is async only, so the agent runs with `ainvoke`.
+
+3. Run it twice:
+
+   ```bash
+   python memory_agent.py "I moved to Cork last month for a new job at Ensera."
+   wait_formed
+   python memory_agent.py "Where do I live now, and where do I work?"
+   ```
+
+   ```text
+   You live in Cork and work at Ensera.
+   ```
+
+### Java: Spring AI
+
+`TaisceMemoryAdvisor` is an advisor on a `ChatClient`. This example builds the client in a plain
+`main`; in a Spring Boot application the `ChatClient.Builder` comes from your model starter instead.
+You need Java 21 and Maven.
+
+1. Make a project with this `pom.xml`. The adapter leaves the Spring AI version to you, so the
+   framework is listed next to it:
+
+   ```xml
+   <project xmlns="http://maven.apache.org/POM/4.0.0">
+     <modelVersion>4.0.0</modelVersion>
+     <groupId>example</groupId>
+     <artifactId>memory-agent</artifactId>
+     <version>1.0</version>
+
+     <properties>
+       <maven.compiler.release>21</maven.compiler.release>
+       <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+     </properties>
+
+     <dependencies>
+       <dependency>
+         <groupId>ai.ensera.taisce</groupId>
+         <artifactId>taisce-spring-ai</artifactId>
+         <version>0.1.1</version>
+       </dependency>
+       <dependency>
+         <groupId>org.springframework.ai</groupId>
+         <artifactId>spring-ai-client-chat</artifactId>
+         <version>2.0.1</version>
+       </dependency>
+       <dependency>
+         <groupId>org.springframework.ai</groupId>
+         <artifactId>spring-ai-openai</artifactId>
+         <version>2.0.1</version>
+       </dependency>
+     </dependencies>
+
+     <build>
+       <plugins>
+         <plugin>
+           <groupId>org.codehaus.mojo</groupId>
+           <artifactId>exec-maven-plugin</artifactId>
+           <version>3.5.0</version>
+           <configuration>
+             <mainClass>MemoryAgent</mainClass>
+           </configuration>
+         </plugin>
+       </plugins>
+     </build>
+   </project>
+   ```
+
+2. Save this as `src/main/java/MemoryAgent.java`:
+
+   ```java
+   import ai.ensera.taisce.client.TaisceClient;
+   import ai.ensera.taisce.springai.TaisceMemoryAdvisor;
+   import java.util.Map;
+   import java.util.UUID;
+   import org.springframework.ai.chat.client.ChatClient;
+   import org.springframework.ai.openai.OpenAiChatModel;
+   import org.springframework.ai.openai.OpenAiChatOptions;
+
+   public class MemoryAgent {
+       public static void main(String[] args) {
+           OpenAiChatModel model = OpenAiChatModel.builder()
+                   .options(OpenAiChatOptions.builder()
+                           .baseUrl(System.getenv("MODEL_BASE_URL"))
+                           .apiKey(System.getenv("MODEL_API_KEY"))
+                           .model(System.getenv("MODEL_NAME"))
+                           .build())
+                   .build();
+           TaisceClient taisce = new TaisceClient(System.getenv("TAISCE_API"), System.getenv("TAISCE_TOKEN"));
+           ChatClient chat = ChatClient.builder(model).build();
+
+           var memory = new TaisceMemoryAdvisor(
+                   taisce,
+                   "alice",                           // whose memory this is
+                   "run-" + UUID.randomUUID(),        // this conversation
+                   Map.of(),                          // recall options; empty uses the server's defaults
+                   (stage, e) -> System.err.println("taisce " + stage + " failed: " + e.getMessage()));
+
+           String reply = chat.prompt()
+                   .user(String.join(" ", args))
+                   .advisors(memory)
+                   .call()
+                   .content();
+           System.out.println(reply);
+       }
+   }
+   ```
+
+3. Run it twice:
+
+   ```bash
+   mvn -q compile exec:java -Dexec.args="I moved to Cork last month for a new job at Ensera."
+   wait_formed
+   mvn -q compile exec:java -Dexec.args="Where do I live now, and where do I work?"
+   ```
+
+   ```text
+   You live in Cork and work at Ensera.
+   ```
+
+   Maven may first print `SLF4J(W): No SLF4J providers were found`: no logging backend is on the
+   classpath, and nothing else is wrong.
+
+### Java: LangChain4j
+
+`TaisceChatModel` wraps the `ChatModel` you already have, because LangChain4j reads its chat memory
+before the new message is in it.
+
+1. Make a project with the `pom.xml` from Spring AI above, with these dependencies in place of its
+   `<dependencies>`:
+
+   ```xml
+   <dependencies>
+     <dependency>
+       <groupId>ai.ensera.taisce</groupId>
+       <artifactId>taisce-langchain4j</artifactId>
+       <version>0.1.1</version>
+     </dependency>
+     <dependency>
+       <groupId>dev.langchain4j</groupId>
+       <artifactId>langchain4j</artifactId>
+       <version>1.20.0</version>
+     </dependency>
+     <dependency>
+       <groupId>dev.langchain4j</groupId>
+       <artifactId>langchain4j-open-ai</artifactId>
+       <version>1.20.0</version>
+     </dependency>
+   </dependencies>
+   ```
+
+2. Save this as `src/main/java/MemoryAgent.java`:
+
+   ```java
+   import ai.ensera.taisce.client.TaisceClient;
+   import ai.ensera.taisce.langchain4j.TaisceChatModel;
+   import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+   import dev.langchain4j.model.chat.ChatModel;
+   import dev.langchain4j.model.openai.OpenAiChatModel;
+   import dev.langchain4j.service.AiServices;
+   import java.util.Map;
+   import java.util.UUID;
+
+   public class MemoryAgent {
+       interface Assistant {
+           String chat(String message);
+       }
+
+       public static void main(String[] args) {
+           ChatModel model = OpenAiChatModel.builder()
+                   .baseUrl(System.getenv("MODEL_BASE_URL"))
+                   .apiKey(System.getenv("MODEL_API_KEY"))
+                   .modelName(System.getenv("MODEL_NAME"))
+                   .build();
+           TaisceClient taisce = new TaisceClient(System.getenv("TAISCE_API"), System.getenv("TAISCE_TOKEN"));
+
+           ChatModel withMemory = new TaisceChatModel(
+                   model,
+                   taisce,
+                   "alice",                           // whose memory this is
+                   "run-" + UUID.randomUUID(),        // this conversation
+                   Map.of(),                          // recall options; empty uses the server's defaults
+                   (stage, e) -> System.err.println("taisce " + stage + " failed: " + e.getMessage()));
+
+           Assistant assistant = AiServices.builder(Assistant.class)
+                   .chatModel(withMemory)
+                   .chatMemory(MessageWindowChatMemory.withMaxMessages(20))
+                   .build();
+
+           System.out.println(assistant.chat(String.join(" ", args)));
+       }
+   }
+   ```
+
+3. Run it twice, the same way as Spring AI:
+
+   ```bash
+   mvn -q compile exec:java -Dexec.args="I moved to Cork last month for a new job at Ensera."
+   wait_formed
+   mvn -q compile exec:java -Dexec.args="Where do I live now, and where do I work?"
+   ```
+
+   ```text
+   You live in Cork and work at Ensera.
+   ```
+
+The [Java guide](java.md) adds Spring Boot wiring, compaction and saved sessions.
+
+### Coding agents: MCP
+
+A coding agent such as Claude Code needs no adapter: Taisce serves MCP at `/mcp` on the same port,
+with the same token.
+
+```bash
+claude mcp add --transport http taisce http://localhost:8080/mcp \
+  --header "Authorization: Bearer $TAISCE_TOKEN"
+claude mcp list
+```
+
+You should see:
+
+```text
+taisce: http://localhost:8080/mcp (HTTP) - ✔ Connected
+```
+
+Claude Code keeps the header in its own configuration on your machine, not in your project. The
+[MCP guide](mcp.md) lists the six tools, and its [Claude Code plugin](mcp.md#the-claude-code-plugin)
+adds what memory knows at the start of a session.
+
+**Didn't work?** If the second run doesn't know about Cork, check that `wait_formed` returned before
+it and that both runs name the same `alice`: the two runs are separate conversations, and only Taisce
+connects them. If your error callback prints `taisce recall failed` or
+`taisce observe failed`, the program can't reach `TAISCE_API` or the token is wrong
+([every call answers 401](troubleshooting.md#every-call-answers-401-unauthenticated)).
+
 ## When you are done
 
 `docker compose down` stops everything. Your data stays in a Docker volume, so
@@ -280,6 +726,6 @@ whole project. A receipt with `clean: false` names the kind of thing that surviv
 - [Examples](../examples/overview.md): recipes for preferences, citations, forgetting, long
   conversations and coding agents.
 - [The HTTP API, by task](http-api.md): every call, option and error.
-- [Adapters](adapters.md) for [Python](python.md), [Java](java.md) and [.NET](dotnet.md), or
-  [MCP](mcp.md) for coding agents: memory from the framework you already use.
+- [Adapters](adapters.md), then the guide for [Python](python.md), [.NET](dotnet.md) or
+  [Java](java.md): options, compaction for long conversations, saved sessions and known limits.
 - [Troubleshooting](troubleshooting.md): the problems a first run actually hits.
