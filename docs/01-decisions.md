@@ -227,3 +227,46 @@ the two names are ever split again.
 **Impact.** Operations: a chart published from now on installs the image published beside it, and a
 release that would break that fails before anything reaches the registry. It moves no boundary in the
 service.
+
+## D6 — A release claims SLSA Build Level 2, and proves its own artifacts before announcing them
+
+**Date.** 2026-09-13. **Issue.** [#7](https://github.com/ensera-ai/taisce/issues/7).
+
+**Why it was open.** The release signs and attests what it builds, and `SECURITY.md` called that
+provenance without saying what level it reaches. A guarantee with no stated width is relied on at
+whatever width the reader imagines.
+
+**Established.** *Fact*, [SLSA v1.0 levels](https://slsa.dev/spec/v1.0/levels), read 2026-09-13:
+Build Level 2 is a hosted build platform with provenance tied to it by a signature. Level 3 adds that
+runs cannot influence each other and that the material used to sign provenance is out of reach of
+the build's own steps. *Fact*,
+[GitHub, Artifact attestations](https://docs.github.com/en/actions/concepts/security/artifact-attestations),
+read 2026-09-13: artifact attestations by themselves provide Build Level 2, and a reusable workflow
+isolated from its caller is what reaches Level 3. In this workflow the job that runs `go build`,
+`docker buildx` and `helm package` holds the identity that signs and attests, so it reaches Level 2.
+
+**Decided.** The release claims Build Level 2, in `SECURITY.md`, with what that does and does not
+establish beside it. Before its release page is published, the release verifies every binary, both
+images and the chart with the commands `SECURITY.md` gives consumers, pinned to this repository, this
+workflow file and this tag.
+
+**Rejected: Level 3 through a reusable workflow in this repository.** It would satisfy the letter and
+not the purpose. The isolation Level 3 asks for protects the signing identity from build steps a
+project cannot fully trust. When the reusable workflow lives beside its caller, the same write access
+edits both, so the thing being isolated against can simply change the isolated half.
+
+**Rejected: Level 3 through a reusable workflow in a separate, more tightly held repository.** That
+does separate the two, but the separation is only as real as the difference in who can change each
+repository. With one maintainer holding both, it moves the trust rather than reducing it, and it puts
+a dependency on a second repository into the most sensitive step this project has. It becomes the
+right answer when there is somebody else to hold the build repository.
+
+**Rejected: keeping the word "provenance" without a level.** That is the defect this entry exists to
+remove.
+
+**Undo cost.** Low. Raising the level later is a restructuring of the release workflow that this
+decision does not obstruct. The claim is one section of `SECURITY.md`.
+
+**Impact.** Security: consumers can check a release against a pinned identity rather than an
+organisation-wide or pattern match, and the release proves that check passes on every artifact before
+announcing it. It changes nothing a release produces.

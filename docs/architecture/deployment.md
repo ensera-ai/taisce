@@ -506,22 +506,26 @@ instance that changes what it runs without anybody saying so is an outage with n
 
 ### Checking what you pulled
 
-Verify the signature, naming the workflow that is allowed to have produced it:
+Provenance — built by this repository's release workflow, from the tag you name:
+
+```bash
+gh attestation verify oci://ghcr.io/ensera-ai/taisce:v0.3.1 \
+  --repo ensera-ai/taisce \
+  --signer-workflow ensera-ai/taisce/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.3.1
+```
+
+Signature — made by that workflow's identity at that tag:
 
 ```bash
 cosign verify ghcr.io/ensera-ai/taisce:v0.3.1 \
-  --certificate-identity-regexp '^https://github.com/ensera-ai/taisce/\.github/workflows/release\.yml@' \
+  --certificate-identity https://github.com/ensera-ai/taisce/.github/workflows/release.yml@refs/tags/v0.3.1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-And the provenance — what built it, from which commit:
-
-```bash
-gh attestation verify oci://ghcr.io/ensera-ai/taisce:v0.3.1 --repo ensera-ai/taisce
-```
-
-Neither is a claim about a maintainer whose account and repository are both compromised.
-[`SECURITY.md`](../../SECURITY.md) says so plainly.
+Both work the same way for `taisce-postgres`, and `cosign verify` for the chart. The release runs these
+checks on its own artifacts before it announces them. What they establish — SLSA Build Level 2 — and
+what they do not is in [`SECURITY.md`](../../SECURITY.md).
 
 ## Where to go next
 

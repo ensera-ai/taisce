@@ -4,7 +4,7 @@
 # A release is a tag on the public repository, and this workflow is the only thing that makes one
 #. It runs the complete gate the build runs on every push, then builds the image, the chart
 # and the binaries, signs them with the workflow's own identity (Sigstore keyless: no signing key
-# exists to steal) and attaches SLSA build provenance, so a package that did not come from here is
+# exists to steal) and attaches SLSA build provenance — Build Level 2, see D6 — so a package that did not come from here is
 # distinguishable from one that did. Nothing here is a claim about a maintainer whose account and
 # repository are both compromised; SECURITY.md says so.
 name: release
@@ -144,6 +144,7 @@ jobs:
           push-to-registry: true
 
       - name: Chart
+        id: chart
         env:
           SEMVER: ${{ steps.version.outputs.semver }}
           RELEASE_TAG: ${{ github.ref_name }}
@@ -160,6 +161,40 @@ jobs:
           helm push "dist/taisce-${SEMVER}.tgz" "$CHART" 2>&1 | tee dist/chart-push.log
           digest="$(grep -o 'sha256:[0-9a-f]*' dist/chart-push.log | head -1)"
           cosign sign --yes "ghcr.io/${{ github.repository_owner }}/charts/taisce@${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      # ── Verify what was published, the way a consumer would ──────────────────────────────────
+      #
+      # SECURITY.md tells people how to check a release without taking this project's word for it.
+      # These are those commands, run here against what this run just pushed, before the release
+      # page announces it — so the documented check is exercised on every release rather than
+      # described, and a release whose artifacts do not verify is never announced (D6).
+      #
+      # Each check is pinned as tightly as the artifact allows: the attestation to this repository,
+      # this workflow file and this tag; the signature to this workflow's exact identity at this tag.
+      # A looser check — any repository in the organisation, any workflow, any ref — would accept an
+      # artifact this release did not produce.
+      - name: Verify the published artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          SUBSTRATE_DIGEST: ${{ steps.substrate.outputs.digest }}
+          CHART_DIGEST: ${{ steps.chart.outputs.digest }}
+        run: |
+          set -euo pipefail
+          workflow="${GITHUB_REPOSITORY}/.github/workflows/release.yml"
+          identity="https://github.com/${workflow}@${GITHUB_REF}"
+          issuer=https://token.actions.githubusercontent.com
+          for bin in dist/taisce-"${TAG}"-*-*; do
+            gh attestation verify "$bin" --repo "$GITHUB_REPOSITORY" --signer-workflow "$workflow" --source-ref "$GITHUB_REF"
+          done
+          for ref in "${IMAGE}@${IMAGE_DIGEST}" "${SUBSTRATE}@${SUBSTRATE_DIGEST}"; do
+            gh attestation verify "oci://${ref}" --repo "$GITHUB_REPOSITORY" --signer-workflow "$workflow" --source-ref "$GITHUB_REF"
+            cosign verify "$ref" --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > /dev/null
+          done
+          cosign verify "ghcr.io/${{ github.repository_owner }}/charts/taisce@${CHART_DIGEST}" \
+            --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > /dev/null
 
       - name: Release page
         uses: softprops/action-gh-release@v2
