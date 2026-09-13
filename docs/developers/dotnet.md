@@ -9,21 +9,10 @@ adds what Taisce knows about the person as one message. After the model answers,
 
 ## Install
 
-The packages aren't on nuget.org yet, so build them into a local folder and use that as a package
-source. You need the .NET 10 SDK.
+The packages are on nuget.org. You need the .NET 10 SDK. In your project:
 
 ```bash
-git clone https://github.com/ensera-ai/taisce-dotnet
-cd taisce-dotnet
-dotnet pack Taisce.Client -c Release -o "$HOME/taisce-feed"
-dotnet pack Taisce.AgentFramework -c Release -o "$HOME/taisce-feed"
-```
-
-Then, in your own project:
-
-```bash
-dotnet nuget add source "$HOME/taisce-feed" --name taisce-local
-dotnet add package Taisce.AgentFramework --version 0.1.0
+dotnet add package Taisce.AgentFramework --version 0.1.1
 ```
 
 | Package | What it is |
@@ -44,10 +33,11 @@ preview (diagnostic `MAAI001`), and the build stops on it otherwise:
 
 ## Start Taisce
 
-From the service repository (the [quickstart](quickstart.md) walks through it, including the
-model Taisce needs to form facts):
+In an empty directory, from the published images (the [quickstart](quickstart.md) walks through it,
+including the model Taisce needs to form facts):
 
 ```bash
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.1/compose.yaml
 docker compose up -d
 export TAISCE_API=http://localhost:8080
 export TAISCE_TOKEN=$(docker compose logs --no-log-prefix bootstrap | awk '/^token:/ {print $2}')
@@ -65,7 +55,7 @@ it into facts, the second conversation asks about it.
 ```bash
 dotnet new console -n MemoryDemo
 cd MemoryDemo
-dotnet add package Taisce.AgentFramework --version 0.1.0
+dotnet add package Taisce.AgentFramework --version 0.1.1
 dotnet add package Microsoft.Extensions.AI.OpenAI --version 10.10.0
 ```
 
@@ -305,7 +295,8 @@ var saved = await sessions.SaveAsync(agent, session, sessionId, "alice", expecte
 
 ## Testing
 
-The adapter's own tests need no deployment:
+The adapter's own tests need no deployment. Run them from a checkout of
+[taisce-dotnet](https://github.com/ensera-ai/taisce-dotnet):
 
 ```bash
 dotnet test Taisce.Tests
@@ -321,7 +312,6 @@ scripts/conformance.sh
 
 ## Known limits
 
-- **Not on nuget.org yet.** Build the packages from source.
 - **A slow server fails the turn.** A timeout is a cancellation in .NET, and the provider lets
   cancellations through, so `RunAsync` throws and `OnError` isn't called. If your agent must keep
   going without memory, catch `TaskCanceledException` around `RunAsync`.

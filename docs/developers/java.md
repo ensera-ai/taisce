@@ -9,34 +9,26 @@ turn. [Adapters](adapters.md) explains what every adapter does.
 
 ## Install
 
-The adapter isn't on Maven Central yet. Build it and install it into your local Maven repository.
-You need Java 21 or newer.
-
-```bash
-git clone https://github.com/ensera-ai/taisce-java
-cd taisce-java
-mvn -B install
-```
-
-That installs version `0.1.0` of three modules:
+The modules are on Maven Central, in the group `ai.ensera.taisce`. You need Java 21 or newer.
 
 | Module | What it is |
 |---|---|
-| `ai.taisce:taisce-client` | The client, built on the JDK's HTTP client and Jackson. Comes in with either adapter. |
-| `ai.taisce:taisce-langchain4j` | `TaisceChatModel`, for LangChain4j. |
-| `ai.taisce:taisce-spring-ai` | `TaisceMemoryAdvisor`, for Spring AI. |
+| `ai.ensera.taisce:taisce-client` | The client, built on the JDK's HTTP client and Jackson. Comes in with either adapter. |
+| `ai.ensera.taisce:taisce-langchain4j` | `TaisceChatModel`, for LangChain4j. |
+| `ai.ensera.taisce:taisce-spring-ai` | `TaisceMemoryAdvisor`, for Spring AI. |
 
-You pick the framework version. The adapter was built against LangChain4j 1.20.0 and Spring AI
-2.0.1. With Gradle, add `mavenLocal()` so it finds the adapter you just installed.
+You pick the framework version: each adapter declares its framework as `provided`, so the version
+your application brings is the one that runs. The adapter was built against LangChain4j 1.20.0 and
+Spring AI 2.0.1.
 
 For LangChain4j (the example below also uses LangChain4j's OpenAI-compatible model):
 
 ```xml
 <dependencies>
   <dependency>
-    <groupId>ai.taisce</groupId>
+    <groupId>ai.ensera.taisce</groupId>
     <artifactId>taisce-langchain4j</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1</version>
   </dependency>
   <dependency>
     <groupId>dev.langchain4j</groupId>
@@ -52,12 +44,11 @@ For LangChain4j (the example below also uses LangChain4j's OpenAI-compatible mod
 ```
 ```kotlin
 repositories {
-    mavenLocal()
     mavenCentral()
 }
 
 dependencies {
-    implementation("ai.taisce:taisce-langchain4j:0.1.0")
+    implementation("ai.ensera.taisce:taisce-langchain4j:0.1.1")
     implementation("dev.langchain4j:langchain4j:1.20.0")
     implementation("dev.langchain4j:langchain4j-open-ai:1.20.0")
 }
@@ -68,9 +59,9 @@ For Spring AI, next to the Spring AI model starter you already use:
 ```xml
 <dependencies>
   <dependency>
-    <groupId>ai.taisce</groupId>
+    <groupId>ai.ensera.taisce</groupId>
     <artifactId>taisce-spring-ai</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1</version>
   </dependency>
   <dependency>
     <groupId>org.springframework.ai</groupId>
@@ -81,22 +72,22 @@ For Spring AI, next to the Spring AI model starter you already use:
 ```
 ```kotlin
 repositories {
-    mavenLocal()
     mavenCentral()
 }
 
 dependencies {
-    implementation("ai.taisce:taisce-spring-ai:0.1.0")
+    implementation("ai.ensera.taisce:taisce-spring-ai:0.1.1")
     implementation("org.springframework.ai:spring-ai-client-chat:2.0.1")
 }
 ```
 
 ## Start Taisce
 
-From the service repository (the [quickstart](quickstart.md) walks through it, including the
-model Taisce needs to form facts):
+In an empty directory, from the published images (the [quickstart](quickstart.md) walks through it,
+including the model Taisce needs to form facts):
 
 ```bash
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.1/compose.yaml
 docker compose up -d
 export TAISCE_API=http://localhost:8080
 export TAISCE_TOKEN=$(docker compose logs --no-log-prefix bootstrap | awk '/^token:/ {print $2}')
@@ -116,8 +107,8 @@ This command-line agent remembers across runs. Each run is a new process with an
 so anything it knows about an earlier run came from Taisce.
 
 ```java
-import ai.taisce.client.TaisceClient;
-import ai.taisce.langchain4j.TaisceChatModel;
+import ai.ensera.taisce.client.TaisceClient;
+import ai.ensera.taisce.langchain4j.TaisceChatModel;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -180,8 +171,8 @@ Spring AI model starter. Build the Taisce advisor for each request, because it c
 the chat memory is shared.
 
 ```java
-import ai.taisce.client.TaisceClient;
-import ai.taisce.springai.TaisceMemoryAdvisor;
+import ai.ensera.taisce.client.TaisceClient;
+import ai.ensera.taisce.springai.TaisceMemoryAdvisor;
 import java.util.Map;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
@@ -346,7 +337,8 @@ SessionStore.Saved saved = sessions.save(sessionId, "alice",
 
 ## Testing
 
-The adapter's own tests need no deployment:
+The adapter's own tests need no deployment. Run them from a checkout of
+[taisce-java](https://github.com/ensera-ai/taisce-java):
 
 ```bash
 mvn test
@@ -363,7 +355,6 @@ scripts/conformance.sh spring-ai
 
 ## Known limits
 
-- **Not on Maven Central yet.** Install from source.
 - **No streaming.** LangChain4j's `StreamingChatModel` isn't wrapped. Don't use the Spring AI advisor
   with `.stream()`: the turn is silently not saved. (Read from the code; not run.)
 - **No Spring Boot starter.** You create the client and the advisor yourself.

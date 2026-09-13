@@ -9,18 +9,17 @@ answers, it saves the turn. [Adapters](adapters.md) explains what every adapter 
 
 ## Install
 
-The packages aren't on PyPI yet, so install them from source. You need Python 3.10 or newer; the
-adapter is tested on 3.12.
+The packages are on PyPI. You need Python 3.10 or newer; the adapter is tested on 3.12.
 
 ```bash
-git clone https://github.com/ensera-ai/taisce-python
-cd taisce-python
 python -m venv .venv
 . .venv/bin/activate
 
-pip install -e ./client -e ./agent-framework   # for Microsoft Agent Framework
-pip install -e ./client -e ./langgraph         # for LangGraph
+pip install taisce-agent-framework   # for Microsoft Agent Framework
+pip install taisce-langgraph         # for LangGraph
 ```
+
+Either adapter brings in `taisce`, the client.
 
 | Package | Import | What it is |
 |---|---|---|
@@ -32,10 +31,11 @@ Add your model's chat client the way you normally would. The adapter never talks
 
 ## Start Taisce
 
-From the service repository (the [quickstart](quickstart.md) walks through it, including the
-model Taisce needs to form facts):
+In an empty directory, from the published images (the [quickstart](quickstart.md) walks through it,
+including the model Taisce needs to form facts):
 
 ```bash
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.1/compose.yaml
 docker compose up -d
 export TAISCE_API=http://localhost:8080
 export TAISCE_TOKEN=$(docker compose logs --no-log-prefix bootstrap | awk '/^token:/ {print $2}')
@@ -312,7 +312,8 @@ LangGraph has no session store: your checkpointer keeps the conversation, outsid
 
 ## Testing
 
-The adapter's own tests need no deployment:
+The adapter's own tests need no deployment. Run them from a checkout of
+[taisce-python](https://github.com/ensera-ai/taisce-python):
 
 ```bash
 pip install -e ./client -e ./agent-framework -e ./langgraph pytest pytest-asyncio
@@ -330,7 +331,6 @@ run through a shell:
 
 ## Known limits
 
-- **Not on PyPI yet.** Install from source.
 - **Async only.** There's no sync API, and a LangGraph agent must run with `ainvoke()` or
   `astream()`.
 - **The same words in the same conversation are one turn.** Two identical exchanges with the same
