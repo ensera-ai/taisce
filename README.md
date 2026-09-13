@@ -67,6 +67,10 @@ each one, and ends by erasing Alice.
 
 ## Documentation
 
+The documents below are published, with search and the generated reference, at
+[taisce.dev](https://taisce.dev/). Taisce's page on its maintainer's
+site is [ensera.ai/#taisce](https://ensera.ai/#taisce).
+
 - [Introduction](docs/introduction.md): what Taisce is and where to start.
 - [How it works](docs/start/how-it-works.md): memory in plain words, from a turn to an answer.
 - [Quickstart](docs/developers/quickstart.md): running it and saving your first memory.

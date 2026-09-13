@@ -42,11 +42,27 @@ const JOURNEY = [
   },
 ];
 
+// The same six capabilities, in the same order and substance, as Taisce's page on ensera.ai. A change
+// to one of them is a change to both; a reader who meets the two pages should not have to reconcile
+// them.
 const PROPERTIES = [
-  {n: '01', title: 'Answers from things, not text search', text: 'It finds the people and things your question names and follows what is known about them, so answers stay fast as memory grows.', code: 'anchors → facts'},
-  {n: '02', title: 'Knows when something was true', text: 'Every fact has a time. When something changes, the old fact is kept as history instead of being overwritten.', code: 'valid from · known from'},
-  {n: '03', title: 'Shows its evidence', text: 'Every fact points at the exact words in the exact message it came from, so you can always check it.', code: 'evidence.quote'},
-  {n: '04', title: 'Just PostgreSQL', text: 'No vector database, graph engine or queue to run. One database to operate and back up, on your own infrastructure.', code: 'docker compose up'},
+  {n: '01', title: 'Answers from the things a question names', text: 'Recall starts at the people and things your question names and follows the facts around them, instead of searching for similar sentences. It never calls a model, so a slow model delays new memories, not answers.', code: 'anchors → facts'},
+  {n: '02', title: 'Every fact shows its words', text: 'Each fact carries the exact quote it came from and where that quote sits in the stored message. A claim whose words are not there is refused before it is stored.', code: 'quote · byte_start · byte_end'},
+  {n: '03', title: 'Two clocks on every fact', text: 'When something was true, and when Taisce learned it. A new job supersedes the old one without erasing it, so you can ask what was true then, or what was known then.', code: 'as_of · as_known_at'},
+  {n: '04', title: 'Forgetting you can count', text: 'Erasing a person removes everything derived from what they said, then recounts what still matches them in the same transaction. The receipt says what was deleted and what is left.', code: 'deleted · residual · clean'},
+  {n: '05', title: 'Memory reaches the model as data', text: 'Every adapter hands memory over as one user message marked untrusted, never as a system instruction, and one conformance suite holds Python, .NET and Java to it.', code: 'taisce-memory/v1 untrusted'},
+  {n: '06', title: 'Just PostgreSQL, on your infrastructure', text: 'No vector database, graph engine or queue to run: one database to operate, back up and erase from. All of it is Apache-2.0.', code: 'docker compose up'},
+];
+
+// What no agent-memory product surveyed on 2026-09-13 documents (ensera-ai/taisce#30). Properties that
+// other products also have — two clocks, recall without a model, memory handed over as a user message —
+// are capabilities above and deliberately not claimed here, because a difference that is not one is
+// the first thing a reader comparing products checks.
+const DIFFERENT = [
+  {k: 'evidence', title: 'Evidence to the byte, or no fact', text: "A fact is stored only with the quote that supports it and that quote's position in the message. You check an answer by reading the words, not by trusting the extraction.", to: '/docs/08-citation-resolution'},
+  {k: 'erasure', title: 'A receipt that counts what is left', text: 'Erasure returns what it deleted and a recount of what still matches the person, taken in the same transaction. A clean receipt is a count of zero, not a status message.', to: '/docs/examples/forget-a-person'},
+  {k: 'substrate', title: 'Entities and time on one database', text: 'Entity-anchored, two-clock recall with no graph database or vector database beside PostgreSQL, and no licensed tier for either. One place data lives is one place an erasure has to reach.', to: '/docs/postgresql/overview'},
+  {k: 'adapters', title: 'One contract for every adapter', text: 'Python, .NET and Java adapters pass the same live conformance suite: memory enters as untrusted data, a failed recall never stops the turn, a failed save is never silent.', to: '/docs/developers/adapters#the-conformance-suite'},
 ];
 
 const ADAPTERS = [
@@ -72,6 +88,37 @@ function initials(name) {
     .slice(0, 2)
     .map((word) => word[0].toUpperCase())
     .join('');
+}
+
+function Different() {
+  const {siteConfig} = useDocusaurusContext();
+  const repository = siteConfig.customFields.repository;
+  return (
+    <section className={styles.different}>
+      <div className={styles.wrap}>
+        <span className={styles.kickerDark}>what is different</span>
+        <h2 className={styles.h2}>Proof you can run, not a promise.</h2>
+        <p className={styles.sectionPDark}>
+          Recalling entities, keeping time and answering without a model are what good agent memory does. These four are
+          what Taisce adds, and each one is a field in a response or a test you can run yourself.
+        </p>
+        <div className={styles.diffGrid}>
+          {DIFFERENT.map((d) => (
+            <Link key={d.k} to={d.to} className={styles.diffCard}>
+              <span className={styles.diffK}>{d.k}</span>
+              <h3>{d.title}</h3>
+              <p>{d.text}</p>
+              <span className={styles.cardGo}>See it →</span>
+            </Link>
+          ))}
+        </div>
+        <p className={styles.diffNote}>
+          Compared on 2026-09-13 with the agent-memory products whose documentation we could read. The survey, with every
+          source and what it could not confirm, is <a href={`https://github.com/${repository}/issues/30`}>issue #30</a>.
+        </p>
+      </div>
+    </section>
+  );
 }
 
 function Contributors() {
@@ -170,7 +217,7 @@ export default function Home() {
                 <span className={styles.kicker}>why taisce</span>
                 <h2 className={styles.h2}>Memory that shows its work.</h2>
                 <p className={styles.sectionP}>
-                  Four things your agent gets that a pile of stored text can't give it.{' '}
+                  Six things your agent gets that a pile of stored text can't give it.{' '}
                   <Link to="/docs/start/how-it-works">How it works →</Link>
                 </p>
               </div>
@@ -190,6 +237,8 @@ export default function Home() {
           </div>
         </section>
 
+        <Different />
+
         <section className={styles.architecture}>
           <div className={styles.wrap}>
             <div className={styles.archGrid}>
@@ -202,7 +251,7 @@ export default function Home() {
                 </p>
                 <div className={styles.compose}>
                   <code>docker compose up</code>
-                  <span>Starts PostgreSQL and the service, and prints your first API key.</span>
+                  <span>Starts PostgreSQL and the service from published images, and prints your first tokens.</span>
                 </div>
               </div>
               <div className={styles.pipeline}>
