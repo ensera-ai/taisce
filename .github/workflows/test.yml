@@ -1,25 +1,44 @@
 # Copyright 2026 The Taisce Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# The build checks the floor (rule 6). This is the same target a developer runs, against the same
-# substrate image, on every push and pull request: the complete uncached suite with cross-package
-# coverage, the coverage gate, vet and the licence gate. There is no
-# skip-when-absent arm anywhere below: a missing database fails the run rather than passing it empty.
-# The live-inference target is deliberately not here; it costs money and sends text to a provider,
-# which is a command somebody types on purpose (`make test-inference`).
+# The build is the gate a change has to pass, and it is the same target a contributor runs: the
+# complete uncached suite against the project's own PostgreSQL image, cross-package coverage measured
+# against the floor, `go vet`, and the licence gate. `make gate` runs exactly this in a container, so
+# a local green and a build green mean the same thing rather than two different things.
+#
+# There is no skip-when-absent arm anywhere below. A missing database fails the run rather than
+# passing it empty, because a suite that skips its own dependency is a green run that asserted
+# nothing — which is worse than a red one, since nobody looks at it.
+#
+# The live-inference target is deliberately not here. It costs money and sends text to a provider, so
+# it stays a command somebody types on purpose (`make test-inference`).
 name: test
 
-# Run by hand only. The account's included Actions minutes are finite, and on
-# 2026-09-11 they ran out — 1,997 of 2,000 billed minutes, a third of this repository's share spent
-# re-running on main what had just passed on its pull request. The same gate now runs locally, in a
-# Linux container under colima, against a clean clone of the commit: `make gate`. This workflow is
-# kept rather than deleted so it can still be run when the minutes are there.
+# ── WHEN IT RUNS ─────────────────────────────────────────────────────────────────────────────────
+#
+# On every pull request, because a change nothing has checked is a change nobody can review — a
+# description of what its author ran is a claim, and this project does not accept claims as evidence.
+#
+# And on every push to main, which is not the same run repeated. History here is linear and merges
+# squash, so the commit that lands on main is a tree that has never existed before: the change as
+# reviewed, replayed on whatever main had become in the meantime. That tree is what people clone, and
+# it is the one nothing else would ever test.
+#
+# This workflow needs no secrets, so it runs unchanged on a pull request from a fork, which is where
+# most contributions arrive from.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
+# A superseded pull-request run is cancelled: pushing again to a branch means the earlier result is
+# about to be answered by a newer one, and finishing it proves something about a commit nobody will
+# merge. Main is never cancelled, because a cancelled run there leaves the branch everybody clones
+# with no result at all.
 concurrency:
-  group: test-${{ github.ref }}
-  cancel-in-progress: true
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
