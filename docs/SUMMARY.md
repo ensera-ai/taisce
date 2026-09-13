@@ -28,7 +28,6 @@
 - [.NET](developers/dotnet.md)
 - [How adapters work](developers/adapters.md)
 - [HTTP API](developers/http-api.md)
-- [The v1 contract](02-contract.md)
 - [MCP and Claude Code](developers/mcp.md)
 - [Command line](developers/cli.md)
 - [Troubleshooting](developers/troubleshooting.md)
@@ -85,10 +84,12 @@
 <!-- kept in the repository, not on the site
 
      Records for the people building Taisce rather than documentation for the people using it: the
-     decision register, and dated measurement runs that are findings, not benchmarks. A link to one
+     decision register, the generated v1 contract the build checks the API against, and dated
+     measurement runs that are findings, not benchmarks. A link to one
      from a published page goes to the file on GitHub.
 
 - 01-decisions.md
+- 02-contract.md
 - 23-gpu-qualification.md
 - 26-report-quality-qualification.md
 - 27-vector-layout-qualification.md
