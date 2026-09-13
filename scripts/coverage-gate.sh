@@ -23,6 +23,9 @@
 # Raising it after a real improvement means running the suite more than once and taking the smallest
 # result.
 #
+# A change that only deletes well-covered code can fail this gate, deliberately. The remedy is to cover
+# something untested, never to lower the floor; why the alternatives were rejected is D7.
+#
 # The number is computed across packages. `go test -cover` counts only what a package's own tests
 # reach, which understates a codebase exercised end to end — the same suite reports 75.4% that way
 # and 78.9% with -coverpkg=./... . The second is the honest one.
