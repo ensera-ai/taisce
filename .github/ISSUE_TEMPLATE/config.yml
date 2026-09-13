@@ -1,0 +1,10 @@
+# A security problem is never an issue: a public report is a disclosure, and it is a disclosure made
+# before there is a fix to go with it.
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ensera-ai/taisce/security/advisories/new
+    about: Report privately. Do not open an issue.
+  - name: Question about using Taisce
+    url: https://github.com/ensera-ai/taisce/discussions
+    about: Ask here rather than filing an issue, if you are not reporting a defect or proposing work.

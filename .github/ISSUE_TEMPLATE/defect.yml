@@ -1,0 +1,38 @@
+name: Defect
+description: Something does not do what it says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A defect report is most useful when somebody else can make it happen. Everything below is in
+        service of that.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected instead
+      description: Both halves. "It does not work" names no expectation, so nothing can be checked against it.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to make it happen
+      description: >
+        The smallest sequence that produces it — commands, a request, a configuration. If it happens
+        only sometimes, say how often and what else was running.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: What you saw
+      description: Logs, the error, the response body, the query plan. Paste the text rather than describing it.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag, or the commit, and how it is deployed (compose, Helm, from source).
+    validations:
+      required: true
