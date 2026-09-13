@@ -8,7 +8,9 @@
 package helm_test
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -76,5 +78,64 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 	}
 	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "ingress.api.enabled=true").CombinedOutput(); err == nil || !strings.Contains(string(out), "host is required") {
 		t.Errorf("an ingress without a host is refused, got %v\n%s", err, out)
+	}
+}
+
+// TestTheChartAsksForAnImageTheReleasePushed holds the chart and the image to one name per release.
+//
+// The chart names its image by repository and a tag defaulted from its appVersion; the release pushes
+// the image under the tags its workflow lists. v0.3.0 and v0.3.1 published a chart whose appVersion
+// had the release tag's v stripped, so it asked for `taisce:0.3.1` beside an image tagged `v0.3.1`,
+// and every install of it would have failed to pull (#21). Lint cannot see that, and neither can a
+// rendering on its own, because each half is valid; only the pair is wrong.
+//
+// So the chart is packaged the way the release packages it — plain SemVer for the chart version, the
+// release tag verbatim for appVersion — and run through the same check the release runs before it
+// pushes. It is accepted against the tags a release pushes, and refused against a list that lacks the
+// v-prefixed tag, which is the shape of the original defect seen from the other side. The workflow is
+// read too, because a check the workflow stopped calling would pass here and protect nothing.
+func TestTheChartAsksForAnImageTheReleasePushed(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("helm", "package", "taisce", "--version", "9.8.7", "--app-version", "v9.8.7", "-d", dir).CombinedOutput(); err != nil {
+		t.Fatalf("helm package: %v\n%s", err, out)
+	}
+	chart := filepath.Join(dir, "taisce-9.8.7.tgz")
+	check := func(pushed string) (string, error) {
+		out, err := exec.Command("../../scripts/chart-image-check.sh", chart, "ghcr.io/ensera-ai/taisce", pushed).CombinedOutput()
+		return string(out), err
+	}
+	const repo = "ghcr.io/ensera-ai/taisce"
+
+	// What a release pushes: the tag as written, the commit, latest.
+	pushed := repo + ":v9.8.7," + repo + ":0123abc," + repo + ":latest"
+	if out, err := check(pushed); err != nil {
+		t.Fatalf("a chart asking for the tag the release pushed was refused: %v\n%s", err, out)
+	}
+	// A list without the v-prefixed tag: the chart must be refused, naming what it asked for.
+	if out, err := check(repo + ":9.8.7," + repo + ":0123abc," + repo + ":latest"); err == nil || !strings.Contains(out, repo+":v9.8.7, which this release did not push") {
+		t.Fatalf("a chart asking for a tag the release did not push was accepted: %v\n%s", err, out)
+	}
+
+	workflow, err := os.ReadFile("../../.github/workflows/release.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := string(workflow)
+	for _, want := range []string{
+		"${{ env.IMAGE }}:${{ github.ref_name }}",
+		"${{ env.SUBSTRATE }}:${{ github.ref_name }}",
+		`--app-version "$RELEASE_TAG"`,
+		"RELEASE_TAG: ${{ github.ref_name }}",
+		`scripts/chart-image-check.sh "dist/taisce-${SEMVER}.tgz" "$IMAGE" "$PUSHED"`,
+	} {
+		if !strings.Contains(wf, want) {
+			t.Errorf("the release workflow no longer contains %q", want)
+		}
+	}
+	if strings.Contains(wf, `--app-version "$SEMVER"`) {
+		t.Error("appVersion must be the release tag as written, not the stripped chart version")
+	}
+	if strings.Index(wf, "scripts/chart-image-check.sh") > strings.Index(wf, `helm push "dist/taisce-`) {
+		t.Error("the chart image check must run before the chart is pushed, not after")
 	}
 }
