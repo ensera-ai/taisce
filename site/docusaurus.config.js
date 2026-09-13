@@ -102,7 +102,9 @@ module.exports = {
           {type: 'docSidebar', sidebarId: 'guide', position: 'left', label: 'Docs'},
           {type: 'docSidebar', sidebarId: 'reference', position: 'left', label: 'Reference'},
           {href: `https://github.com/${repository}`, position: 'right', label: 'GitHub'},
-          {href: 'https://ensera.ai', position: 'right', label: 'Ensera', className: 'navbar-ensera'},
+          // The product's page on the maintainer's site, rather than the site's front page: a reader
+          // following it from here is looking for Taisce, not for everything Ensera builds.
+          {href: 'https://ensera.ai/#taisce', position: 'right', label: 'Ensera', className: 'navbar-ensera'},
         ],
       },
       footer: {
@@ -140,7 +142,7 @@ module.exports = {
               {label: 'GitHub', href: `https://github.com/${repository}`},
               // The register is kept in the repository rather than published as a page (D8).
               {label: 'Decisions', href: `https://github.com/${repository}/blob/main/docs/01-decisions.md`},
-              {label: 'Ensera', href: 'https://ensera.ai'},
+              {label: 'Taisce on ensera.ai', href: 'https://ensera.ai/#taisce'},
               {label: 'Contributors', to: '/#contributors'},
             ],
           },

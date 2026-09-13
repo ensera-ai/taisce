@@ -107,6 +107,29 @@
 .card code { justify-self: start; padding: 3px 8px; border: 1px solid rgba(95, 184, 255, 0.3); border-radius: 8px; background: rgba(95, 184, 255, 0.06); color: #bfe3ff; font: 500 11px var(--ts-mono); }
 .cardGo { margin-top: 6px; font: 600 12px var(--ts-mono); color: var(--ts-lime); }
 
+/* ── Different ────────────────────────────────────────────────────────────────────────────────── */
+
+.different { padding: 88px 0; background: #031015; border-top: 1px solid rgba(143, 227, 192, 0.22); }
+.diffGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 38px; }
+.diffCard {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 22px;
+  border-radius: 20px;
+  border: 1px solid rgba(143, 227, 192, 0.24);
+  background: #071821;
+  color: #fff !important;
+  text-decoration: none !important;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.diffCard:hover { border-color: var(--ts-lime); transform: translateY(-2px); }
+.diffK { font: 500 11px var(--ts-mono); color: var(--ts-mint); }
+.diffCard h3 { margin: 0; font: 700 19px / 1.25 var(--ts-display); letter-spacing: -0.02em; color: #fff; }
+.diffCard p { margin: 0; color: rgba(255, 255, 255, 0.64); font-size: 13.5px; line-height: 1.6; }
+.diffNote { margin: 24px 0 0; max-width: 72ch; font-size: 12.5px; line-height: 1.6; color: rgba(255, 255, 255, 0.5); }
+.diffNote a { color: var(--ts-mint); }
+
 /* ── Deeper ───────────────────────────────────────────────────────────────────────────────────── */
 
 .deeper { padding: 88px 0 72px; background: #edf6f5; color: var(--ts-ink); }
@@ -156,10 +179,10 @@
 @media (max-width: 996px) {
   .heroGrid, .proofGrid, .archGrid { grid-template-columns: 1fr; gap: 36px; }
   .cards { grid-template-columns: 1fr 1fr; }
-  .deeperGrid { grid-template-columns: 1fr 1fr; }
+  .deeperGrid, .diffGrid { grid-template-columns: 1fr 1fr; }
   .feature, .pipeRow { grid-template-columns: 42px 1fr; }
   .feature code, .pipeRow code { grid-column: 2; text-align: left; }
 }
 @media (max-width: 600px) {
-  .cards, .deeperGrid { grid-template-columns: 1fr; }
+  .cards, .deeperGrid, .diffGrid { grid-template-columns: 1fr; }
 }

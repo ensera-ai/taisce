@@ -45,5 +45,5 @@ coding agent such as Claude Code.
 | fix a first run that went wrong | [Troubleshooting](developers/troubleshooting.md) |
 | go deeper | [Architecture](architecture/overview.md), [security](architecture/security.md), [deployment](architecture/deployment.md) and [PostgreSQL](postgresql/overview.md) |
 
-Taisce is licensed under Apache-2.0 and built by [Ensera](https://ensera.ai). Contributions are
+Taisce is licensed under Apache-2.0 and built by [Ensera](https://ensera.ai/#taisce). Contributions are
 welcome under the [contributor agreement](cla/individual.md).
