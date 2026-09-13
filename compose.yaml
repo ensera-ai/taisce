@@ -4,6 +4,26 @@
 # credential and serves memory. What it does NOT do is provide a model: see the `model` note below,
 # because extraction is the one thing that cannot be shipped.
 #
+# ── THIS FILE PULLS. IT DOES NOT BUILD ───────────────────────────────────────────────────────────
+#
+# Every image here is one a release published, signed and attested, so this file is the only thing
+# an evaluator needs — no checkout, no toolchain, no compile. Both images carry linux/amd64 and
+# linux/arm64.
+#
+# The version is pinned rather than `latest`. A getting-started file that silently follows a moving
+# tag breaks under people who changed nothing, and the failure looks like their fault. Override it
+# deliberately:
+#
+#     TAISCE_VERSION=v0.4.0 docker compose up -d
+#
+# A CONTRIBUTOR BUILDING THEIR WORKING TREE adds the overlay, which is the only way to get a build:
+#
+#     docker compose -f compose.yaml -f compose.build.yaml up -d --build
+#
+# Two files rather than `image:` and `build:` together, because Compose given both will build when
+# the image happens to be missing locally — so whether you tested your own code or a published
+# release would depend on what was in the cache. An overlay makes it something you asked for (D4).
+#
 # ── THIS IS ONE MACHINE, AND IT SAYS SO ──────────────────────────────────────────────────────────
 #
 # One host is one failure domain. Nothing here survives losing it, and no arrangement of containers
@@ -26,7 +46,7 @@ name: taisce
 # that drifted between them would be a defect nobody sees until one half is talking to the wrong
 # database.
 x-service: &service
-  build: .
+  image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.1}
   depends_on:
     bootstrap:
       condition: service_completed_successfully
@@ -111,11 +131,13 @@ x-service: &service
   restart: unless-stopped
 
 services:
-  # The substrate. Built here rather than pulled because the schema depends on extensions that are
-  # not in the stock image, and a test that skips when they are absent proves nothing about a system
-  # whose whole design is in its DDL.
+  # The substrate: PostgreSQL with pgvector and btree_gist. Not the stock image, because the schema
+  # depends on extensions the stock image does not carry and a test that skips when they are absent
+  # proves nothing about a system whose whole design is in its DDL. Published rather than built here,
+  # because building it compiles pgvector from source — several minutes, on the machine of somebody
+  # who wanted to try this rather than build it.
   postgres:
-    build: ./deploy/postgres
+    image: ghcr.io/ensera-ai/taisce-postgres:${TAISCE_VERSION:-v0.3.1}
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taisce}
       POSTGRES_DB: taisce
@@ -141,7 +163,7 @@ services:
   # takes locks a serving process must not hold — and because two server replicas starting together
   # would otherwise both try to migrate.
   bootstrap:
-    build: .
+    image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.1}
     command: ["bootstrap", "-project", "${TAISCE_PROJECT:-default}"]
     depends_on:
       postgres:
@@ -212,7 +234,7 @@ services:
   # DDL, and it is bound to loopback by default: an operator reaches it from the host, and nothing
   # else does until the port is deliberately published elsewhere.
   manage:
-    build: .
+    image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.1}
     depends_on:
       bootstrap:
         condition: service_completed_successfully

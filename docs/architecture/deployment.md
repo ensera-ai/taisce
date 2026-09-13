@@ -25,7 +25,9 @@ Every deployment arranges the same four things:
 
 1. **One image.** The service image (`Dockerfile`) is a static binary on a distroless base, running
    as non-root. `TAISCE_ROLE` decides whether a container serves the API, forms the backlog, or
-   serves the management surface.
+   serves the management surface. A release publishes it as
+   `ghcr.io/ensera-ai/taisce:<tag>` for `linux/amd64` and `linux/arm64`, signed with the workflow's
+   own identity and carrying build provenance — see [what a release publishes](#what-a-release-publishes).
 2. **Bootstrap before serving.** `taisce bootstrap` connects with the administrative identity and:
    - creates or reconciles the two serving logins and the `control` namespace
      (`migrate.EstablishPlanes`);
@@ -50,6 +52,15 @@ Every deployment arranges the same four things:
 
 `docker compose up` brings up the database, applies every migration, creates a project, mints
 credentials and serves memory on `:8080`. The file is [`compose.yaml`](../../compose.yaml).
+
+It names published images and never builds, so the file on its own is enough — no checkout, no Go
+toolchain. The version is pinned rather than `latest`, because a getting-started file that follows a
+moving tag breaks under people who changed nothing; override it with `TAISCE_VERSION`. A contributor
+running their own working tree adds [`compose.build.yaml`](../../compose.build.yaml):
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+```
 
 ```mermaid
 flowchart LR
@@ -76,7 +87,7 @@ flowchart LR
 
 | Service | What it runs | Notes |
 |---|---|---|
-| `postgres` | the database image built from [`deploy/postgres`](../../deploy/postgres/Dockerfile): PostgreSQL 18 with pgvector compiled in | not published to the host; data on the `postgres-data` volume |
+| `postgres` | `ghcr.io/ensera-ai/taisce-postgres`, built from [`deploy/postgres`](../../deploy/postgres/Dockerfile): PostgreSQL 18 with pgvector compiled in | not published to the host; data on the `postgres-data` volume |
 | `bootstrap` | `taisce bootstrap -project ${TAISCE_PROJECT:-default}` | with `manage`, the only service given the superuser DSN; `restart: "no"`; the other services wait for it to finish successfully |
 | `api` | `TAISCE_ROLE=api` | published on `${TAISCE_PORT:-8080}`; forms nothing; probed with `taisce probe` |
 | `worker` | `TAISCE_ROLE=worker` | no published port; health listener on loopback only; scale with `docker compose up --scale worker=3` |
@@ -449,9 +460,10 @@ files and configure nothing in a deployment.
 
 ### Compose-only settings
 
-Compose substitutes these itself; the binary never reads them: `TAISCE_PORT` (`8080`),
-`TAISCE_MANAGE_PORT` (`127.0.0.1:8081`), `TAISCE_PROJECT` (`default`), the three pool sizes above,
-`POSTGRES_PASSWORD` and `LITELLM_PORT` (`4000`). `compose.perf.yaml` adds
+Compose substitutes these itself; the binary never reads them: `TAISCE_VERSION` (the release both
+images are pulled at), `TAISCE_PORT` (`8080`), `TAISCE_MANAGE_PORT` (`127.0.0.1:8081`),
+`TAISCE_PROJECT` (`default`), the three pool sizes above, `POSTGRES_PASSWORD` and `LITELLM_PORT`
+(`4000`). `compose.perf.yaml` adds
 `TAISCE_PERF_POSTGRES_PASSWORD` and `TAISCE_PERF_POSTGRES_PORT`.
 
 ## Probes
@@ -466,6 +478,46 @@ and the chart use it.
 
 Neither returns detail or writes to the ledger. [Operational health](../07-operational-health.md) is
 the reference.
+
+## What a release publishes
+
+A tag is the only thing that produces an artefact, and one workflow produces all of them. Everything
+below is built on a GitHub runner, signed with the workflow's own Sigstore identity — there is no
+signing key anywhere to steal — and carries SLSA build provenance, so an artefact that did not come
+from this repository is distinguishable from one that did.
+
+| Artefact | Where |
+|---|---|
+| Service image | `ghcr.io/ensera-ai/taisce:<tag>`, also `:latest` and `:<commit sha>` |
+| Substrate image | `ghcr.io/ensera-ai/taisce-postgres:<tag>`, also `:latest` |
+| Helm chart | `oci://ghcr.io/ensera-ai/charts/taisce`, version `<tag without the v>` |
+| CLI binaries and checksums | the release page |
+
+Both images carry `linux/amd64` and `linux/arm64`, so the architecture is the one you are on rather
+than an emulation of the one the runner had.
+
+**The version tag is what a deployment should name.** `latest` exists for discovery and for anyone
+who has decided they want the moving one; the compose file and the chart pin a version, because an
+instance that changes what it runs without anybody saying so is an outage with no change to point at.
+
+### Checking what you pulled
+
+Verify the signature, naming the workflow that is allowed to have produced it:
+
+```bash
+cosign verify ghcr.io/ensera-ai/taisce:v0.3.1 \
+  --certificate-identity-regexp '^https://github.com/ensera-ai/taisce/\.github/workflows/release\.yml@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+And the provenance — what built it, from which commit:
+
+```bash
+gh attestation verify oci://ghcr.io/ensera-ai/taisce:v0.3.1 --repo ensera-ai/taisce
+```
+
+Neither is a claim about a maintainer whose account and repository are both compromised.
+[`SECURITY.md`](../../SECURITY.md) says so plainly.
 
 ## Where to go next
 
