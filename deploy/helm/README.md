@@ -35,6 +35,21 @@ The database image must provide the `vector` extension; `btree_gist` and `pg_sta
 contrib modules of every build. The default is the operator's image family that bundles pgvector;
 a deployment that builds its own substrate image sets `postgresql.cnpg.image`.
 
+### From a published chart
+
+Each release publishes the chart to `oci://ghcr.io/ensera-ai/charts/taisce`, versioned without the
+tag's `v`; it installs the image published beside it, named by the release tag. Pass the same values
+as above:
+
+```sh
+helm install memory oci://ghcr.io/ensera-ai/charts/taisce --version 0.3.1 -n taisce --create-namespace \
+  --set image.tag=v0.3.1
+```
+
+`--set image.tag` is needed only for charts 0.3.0 and 0.3.1, which ask for their image without the
+`v` and so name a tag that was never pushed ([D5](../../docs/01-decisions.md)). Later charts ask for
+the right tag on their own.
+
 ## Shrinking it, deliberately
 
 ```sh

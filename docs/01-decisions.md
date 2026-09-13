@@ -188,3 +188,42 @@ neither a checkout nor a Go toolchain. Supply chain: what an operator runs is no
 was signed and attested rather than one they compiled from a tree they did not read — which is a
 stronger claim, and only true while the packages are public. It moves no boundary inside the service;
 the images run what they always ran.
+
+## D5 — A release has one name, and the chart asks for its image by it
+
+**Date.** 2026-09-13. **Issue.** [#21](https://github.com/ensera-ai/taisce/issues/21).
+
+**Why it was open.** The chart defaults its image tag to its `appVersion`. The release set
+`appVersion` to the version with the tag's leading `v` stripped, and tagged the image with the `v`
+kept. v0.3.0 and v0.3.1 both published a chart asking for `taisce:0.3.1` beside an image tagged
+`v0.3.1`, so every install of either chart would have failed to pull. Lint passed and the chart
+rendered, because each half was valid on its own.
+
+**Decided.** A release is named by its tag, exactly as written — `v0.3.1` — on the git tag, on the
+service and substrate images, and in the chart's `appVersion`. The only place the `v` is dropped is
+the chart's own version, because Helm requires plain SemVer there, and that version names the chart
+package rather than anything the chart installs. The workflow computes it once, in a `Version` step.
+Before the chart is pushed, `scripts/chart-image-check.sh` renders the packaged chart and refuses it
+unless every reference to the release's image is among the refs the same run pushed.
+
+**Rejected: also pushing the image under `0.3.1`.** Two names for one image are two tags to keep
+immutable, and two spellings for an operator to pin, a scanner to match and a changelog to mention —
+the drift this defect came from, moved into the registry. It would have repaired the charts already
+published, which is its one real advantage, and is not worth a second name on every release after.
+
+**Rejected: prefixing `v` inside the template.** The default tag would then differ from what
+`appVersion` says, and anyone overriding `image.tag` would have to know the template adds a letter to
+the default but not to their value.
+
+**What this gives up.** The charts published as 0.3.0 and 0.3.1 stay wrong; a published chart cannot
+be edited. Installing either needs `--set image.tag=v0.3.1`, which `deploy/helm/README.md` states.
+
+**What the check does not cover.** Images the chart names from other repositories, such as the
+PostgreSQL operator's. This release does not produce them and cannot vouch for them.
+
+**Undo cost.** Low: the `appVersion` is one argument in the workflow, and the check fails loudly if
+the two names are ever split again.
+
+**Impact.** Operations: a chart published from now on installs the image published beside it, and a
+release that would break that fails before anything reaches the registry. It moves no boundary in the
+service.

@@ -84,6 +84,13 @@ jobs:
         with:
           subject-path: dist/*
 
+      # The chart's own version, which Helm requires to be plain SemVer, so the tag's leading v is
+      # dropped here and nowhere else. It names the chart package and nothing the chart installs:
+      # the image and the chart's appVersion both carry the release tag exactly as written (#21, D5).
+      - name: Version
+        id: version
+        run: echo "semver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       # ── The two images a quickstart pulls ────────────────────────────────────────────────────
       #
       # The service and the substrate are published together and tagged together, so `compose.yaml`
@@ -137,12 +144,20 @@ jobs:
           push-to-registry: true
 
       - name: Chart
+        env:
+          SEMVER: ${{ steps.version.outputs.semver }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          # Every ref the Image step pushed, as build-push-action reports them.
+          PUSHED: ${{ fromJSON(steps.image.outputs.metadata)['image.name'] }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          helm package deploy/helm/taisce --version "$tag" --app-version "$tag" -d dist
+          # appVersion is the image tag the chart defaults to, so it is the release tag, v and all.
+          helm package deploy/helm/taisce --version "$SEMVER" --app-version "$RELEASE_TAG" -d dist
+          # Before anything is pushed: the chart must ask for an image this run pushed. A chart that
+          # names a missing tag lints clean and fails on every install.
+          scripts/chart-image-check.sh "dist/taisce-${SEMVER}.tgz" "$IMAGE" "$PUSHED"
           helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
-          helm push "dist/taisce-${tag}.tgz" "$CHART" 2>&1 | tee dist/chart-push.log
+          helm push "dist/taisce-${SEMVER}.tgz" "$CHART" 2>&1 | tee dist/chart-push.log
           digest="$(grep -o 'sha256:[0-9a-f]*' dist/chart-push.log | head -1)"
           cosign sign --yes "ghcr.io/${{ github.repository_owner }}/charts/taisce@${digest}"
 
