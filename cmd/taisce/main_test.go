@@ -345,6 +345,34 @@ func TestACredentialCanBeMintedAndRevokedFromTheCommandLine(t *testing.T) {
 	if err := dispatch(ctx, quiet(), []string{"credential", "revoke", "not-a-uuid"}); err == nil {
 		t.Fatal("revoking an unknown credential succeeded")
 	}
+	// Revoking one that exists. This test has always been named for a revocation it never
+	// performed: it revoked something absent, watched that fail, and never took the path an
+	// operator actually takes. Revocation is how a leaked token is stopped, so the branch that
+	// carries it out is the one that most needs to have been watched running.
+	issued, err := captureStdout(t, func() error {
+		return dispatch(ctx, quiet(), []string{"credential", "issue", "doomed", "-project", "cmd_cred_p1"})
+	})
+	if err != nil {
+		t.Fatalf("issue the credential to revoke: %v", err)
+	}
+	lp, rp := strings.Index(issued, "("), strings.Index(issued, ")")
+	if lp < 0 || rp < lp {
+		t.Fatalf("the issue line names no credential id: %q", issued)
+	}
+	id := issued[lp+1 : rp]
+	live := credentialsGranting(t, "cmd_cred_p1")
+	revoked, err := captureStdout(t, func() error {
+		return dispatch(ctx, quiet(), []string{"credential", "revoke", id})
+	})
+	if err != nil {
+		t.Fatalf("revoke %s: %v", id, err)
+	}
+	if !strings.Contains(revoked, "credential "+id+" revoked") {
+		t.Fatalf("the revocation said %q, which does not name what it revoked", revoked)
+	}
+	if after := credentialsGranting(t, "cmd_cred_p1"); after != live-1 {
+		t.Fatalf("revoking left %d credentials reaching the project, wanted %d", after, live-1)
+	}
 	if err := dispatch(ctx, quiet(), []string{"credential", "nonsense"}); err == nil {
 		t.Fatal("an unknown credential command succeeded")
 	}

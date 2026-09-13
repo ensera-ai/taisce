@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -294,5 +295,62 @@ func TestWorkerHealthPortMustBeDiscoverableByItsProbe(t *testing.T) {
 	t.Setenv(envHealthAddr, "127.0.0.1:0")
 	if _, err := workerHealthAddress(); err == nil {
 		t.Fatal("ephemeral worker health port accepted")
+	}
+}
+
+// TestTheProbeResolvesAWildcardBindToTheLoopbackItCanReach holds the address arithmetic the probe
+// does before it connects to anything.
+//
+// It matters because of how the image is built. The service binds every interface — `:8080` in a
+// container is the only bind a published port can reach — while the probe insists on loopback,
+// since a health check that could be answered from off the host is a health check an attacker can
+// influence. Those two are only compatible because the probe rewrites the wildcard host to
+// loopback. Get that wrong and the container is unhealthy forever with nothing wrong with it, and
+// there is no shell in the image to find out why.
+//
+// The successful case is the one that proves it: a server listening on loopback, configured the way
+// a container configures it, answered. The rest assert only that resolution produced a loopback
+// address it then tried — a connection that fails is a resolution that worked.
+func TestTheProbeResolvesAWildcardBindToTheLoopbackItCanReach(t *testing.T) {
+	ready := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ready.Close()
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(ready.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// What a container does: bind everything, probe the loopback behind it.
+	t.Setenv(envAddr, ":"+port)
+	if err := probeCommand(context.Background(), nil); err != nil {
+		t.Fatalf("a wildcard bind must be probed on loopback: %v", err)
+	}
+	t.Setenv(envAddr, "0.0.0.0:"+port)
+	if err := probeCommand(context.Background(), nil); err != nil {
+		t.Fatalf("an explicit 0.0.0.0 bind is the same bind: %v", err)
+	}
+
+	// The defaults. Nothing need be listening: what is under test is that an unset variable
+	// resolves to this role's own port on loopback rather than being refused as no address.
+	refusedTheAddress := func(err error) bool {
+		return err != nil && (strings.Contains(err.Error(), "invalid local probe address") ||
+			strings.Contains(err.Error(), "requires a loopback listening address"))
+	}
+	for _, c := range []struct {
+		name string
+		env  map[string]string
+		args []string
+	}{
+		{"the api's default port", map[string]string{envAddr: ""}, nil},
+		{"the management default", map[string]string{envManageAddr: ""}, []string{"--manage"}},
+		{"an IPv6 wildcard", map[string]string{envAddr: "[::]:" + port}, nil},
+	} {
+		for k, v := range c.env {
+			t.Setenv(k, v)
+		}
+		if err := probeCommand(context.Background(), c.args); refusedTheAddress(err) {
+			t.Fatalf("%s: the probe refused its own address: %v", c.name, err)
+		}
 	}
 }
