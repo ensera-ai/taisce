@@ -69,7 +69,7 @@ To use a hosted model instead, see [reaching a model](../architecture/deployment
 Fetch the compose file for the release you want, then bring it up:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.1/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.2/compose.yaml
 docker compose up -d
 docker compose ps -a --format '{{.Service}}\t{{.State}}\t{{.Health}}'
 curl -s localhost:8080/ready

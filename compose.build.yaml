@@ -21,7 +21,7 @@
 
 services:
   postgres:
-    image: ghcr.io/ensera-ai/taisce-postgres:${TAISCE_VERSION:-v0.3.1}
+    image: ghcr.io/ensera-ai/taisce-postgres:${TAISCE_VERSION:-v0.3.2}
     build: ./deploy/postgres
 
   bootstrap:
