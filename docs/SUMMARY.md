@@ -26,6 +26,7 @@
 - [.NET](developers/dotnet.md)
 - [How adapters work](developers/adapters.md)
 - [HTTP API](developers/http-api.md)
+- [The v1 contract](02-contract.md)
 - [MCP and Claude Code](developers/mcp.md)
 - [Command line](developers/cli.md)
 - [Troubleshooting](developers/troubleshooting.md)
