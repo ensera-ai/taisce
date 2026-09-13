@@ -368,6 +368,27 @@ func TestANavigationWithoutTheReferenceMarkerOrWithoutAnyFileIsRefused(t *testin
 	}
 }
 
+func TestAnImageUnderTheStaticDirectoryIsServedFromTheSiteRootAndAMissingOneIsRefused(t *testing.T) {
+	opts := Options{Root: repoRoot(t), Repo: "o/r", Ref: "abc"}
+	p := page{Repo: "docs/start/x.md", Stage: "start/x.md", Body: strings.Join([]string{
+		`![the mark](../../site/static/img/favicon.svg "Taisce")`,
+		"[the directory](../../site/static/img/)",
+		"![gone](../../site/static/img/no-such-screenshot.png)",
+	}, "\n\n")}
+	body, broken := rewriteLinks(p, map[string]string{}, opts)
+	// On GitHub the relative path opens the file; on the site the renderer serves it from the root.
+	if !strings.Contains(body, `![the mark](/img/favicon.svg "Taisce")`) {
+		t.Errorf("an image under site/static/ was not rewritten to the path it is served at:\n%s", body)
+	}
+	// A directory there is not something the renderer serves as a file, so it stays a source link.
+	if !strings.Contains(body, "[the directory](https://github.com/o/r/tree/abc/site/static/img)") {
+		t.Errorf("a directory under site/static/ did not become a source link:\n%s", body)
+	}
+	if len(broken) != 1 || !strings.Contains(broken[0], "no-such-screenshot.png names nothing") {
+		t.Errorf("a screenshot that does not exist was not refused: %v", broken)
+	}
+}
+
 func TestTheNavigationBecomesAGuideAndAReferenceSidebar(t *testing.T) {
 	summary := strings.Join([]string{
 		"<!-- a comment -->",

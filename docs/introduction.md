@@ -34,6 +34,17 @@ coding agent such as Claude Code.
 - **Answer without waiting on a model.** Asking never calls a model, so a slow model delays new
   memories, never answers.
 
+## Running it
+
+Whoever runs the instance has the **ops centre**: a console for one instance that shows what it has
+been doing, how it is running and every project it holds, and takes the everyday actions — projects,
+API keys, parked turns and the ledger. It opens only for an operator token and shows no memory, by
+construction. The same operations are on the `taisce` CLI and the management API.
+
+![The ops centre overview](../site/static/img/ops-centre/overview.png)
+
+[Operate an instance](operate/overview.md) walks through all of it.
+
 ## Where to go
 
 | If you want to | Go to |
@@ -42,6 +53,7 @@ coding agent such as Claude Code.
 | understand how memory works, in plain words | [How it works](start/how-it-works.md) |
 | copy a recipe for a real task | [Examples](examples/overview.md) |
 | connect your agent | Guides: [HTTP API](developers/http-api.md), [adapters](developers/adapters.md) for [Python](developers/python.md), [Java](developers/java.md) and [.NET](developers/dotnet.md), [MCP](developers/mcp.md), [the CLI](developers/cli.md) |
+| run the instance: projects, keys, monitoring, the ledger | [Operate an instance](operate/overview.md) |
 | fix a first run that went wrong | [Troubleshooting](developers/troubleshooting.md) |
 | go deeper | [Architecture](architecture/overview.md), [security](architecture/security.md), [deployment](architecture/deployment.md) and [PostgreSQL](postgresql/overview.md) |
 

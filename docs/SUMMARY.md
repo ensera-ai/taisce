@@ -32,6 +32,10 @@
 - [Command line](developers/cli.md)
 - [Troubleshooting](developers/troubleshooting.md)
 
+# Operate
+
+- [Operate an instance](operate/overview.md)
+
 # Features
 
 - [Recall options](12-recall-controls.md)
