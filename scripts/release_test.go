@@ -33,6 +33,22 @@ func TestTheReleaseVerifiesWhatItPublishedBeforeAnnouncingIt(t *testing.T) {
 			t.Errorf("the release workflow no longer contains %q", want)
 		}
 	}
+	// The publish job's own block runs from its key to the next top-level job, or to the end of the
+	// file; the environment has to be inside it, not merely somewhere in the workflow.
+	publish := strings.Index(wf, "\n  publish:\n")
+	if publish < 0 {
+		t.Fatal("the release workflow has no publish job")
+	}
+	block := wf[publish+1:]
+	for i, line := range strings.Split(block, "\n") {
+		if i > 0 && len(line) > 2 && line[:2] == "  " && line[2] != ' ' && line[2] != '#' {
+			block = strings.Join(strings.Split(block, "\n")[:i], "\n")
+			break
+		}
+	}
+	if !strings.Contains(block, "\n    environment: release\n") {
+		t.Error("the publish job must run in the release environment, so nothing reaches a registry without the owner's approval")
+	}
 	verify := strings.Index(wf, "- name: Verify the published artifacts")
 	push := strings.Index(wf, `helm push "dist/taisce-`)
 	page := strings.Index(wf, "- name: Release page")

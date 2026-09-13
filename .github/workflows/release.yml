@@ -37,6 +37,12 @@ jobs:
 
   publish:
     needs: gate
+    # Publishing waits for the owner's approval. The release environment admits only v*.*.* tags and
+    # requires a reviewer, so a pushed tag builds and tests in the gate job but nothing reaches a
+    # registry until somebody approves this job. No secret lives in the environment: the job signs with
+    # its own OIDC identity and pushes with the run's token, so the gate is who may publish, not what
+    # the job can read (#31).
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
