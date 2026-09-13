@@ -13,8 +13,8 @@ their own repositories: `ensera-ai/taisce-python`, `ensera-ai/taisce-java` and
 
 ## Build and test
 
-You need Go (the version in `go.mod`), Docker, and Node.js 20 or later if you want to build the
-documentation site.
+You need Go (the version in `go.mod`), Docker, and Node.js 24, the active LTS, if you want to build
+the documentation site.
 
 ```sh
 make db-up    # build and start the PostgreSQL image on port 55432
