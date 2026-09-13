@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -183,5 +184,53 @@ func TestClippingBelowTwoColumnsDropsTheMarkerRatherThanTheContent(t *testing.T)
 	}
 	if got := clipDisplay("abcdef", 2); got != "ab…" {
 		t.Fatalf("clipping to two columns produced %q, wanted two columns and the marker", got)
+	}
+}
+
+// TestEveryLineOfAPanelEndsInTheSameColumn holds the panel to its own geometry.
+//
+// A panel is a claim that its lines belong together, and the border is how a reader sees that. A
+// right edge that wanders reads as corruption, and on a status screen corruption is the one thing an
+// operator must not have to wonder about. So every line of the panel — top border, rows, bottom
+// border — is the same display width, in both glyph sets and at narrow, ordinary and wide terminals.
+//
+// It also holds the label column. The rows are built with the label padded to twelve cells so the
+// values line up; the text sanitiser used to collapse that padding, and the title's surrounding
+// spaces with it, which made the top border two cells wider than the rows. The minimum-width test
+// above passed on that defect because the widest line was the misdrawn one — which is why this test
+// compares lines to each other rather than to a number.
+func TestEveryLineOfAPanelEndsInTheSameColumn(t *testing.T) {
+	health := pg.OperationalHealth{Pending: 2, PendingLimit: 10, Parked: 1, FormedCount: 3,
+		DatabaseConnections: 2, ClusterConnections: 3, MaxConnections: 100, WorkerResponsive: true}
+	borders := []string{"╭", "│", "╰", "+", "|"}
+	for _, ascii := range []bool{false, true} {
+		for _, width := range []int{40, 70, 120} {
+			rendered := renderHealth(cliTheme{width: width, ascii: ascii}, health, true)
+			var panel []string
+			for _, line := range strings.Split(rendered, "\n") {
+				trimmed := strings.TrimLeft(line, " ")
+				for _, b := range borders {
+					if strings.HasPrefix(trimmed, b) {
+						panel = append(panel, line)
+						break
+					}
+				}
+			}
+			if len(panel) < 3 {
+				t.Fatalf("ascii=%v width=%d: found %d panel lines in %q", ascii, width, len(panel), rendered)
+			}
+			want := displayWidth(panel[0])
+			for _, line := range panel[1:] {
+				if got := displayWidth(line); got != want {
+					t.Fatalf("ascii=%v width=%d: a line is %d cells where the top border is %d:\n%s",
+						ascii, width, got, want, strings.Join(panel, "\n"))
+				}
+			}
+			for _, label := range []string{"formation", "backlog", "work", "PostgreSQL", "inference"} {
+				if !strings.Contains(rendered, fmt.Sprintf("%-12s ", label)) {
+					t.Fatalf("ascii=%v width=%d: the %q label lost its column:\n%s", ascii, width, label, rendered)
+				}
+			}
+		}
 	}
 }
