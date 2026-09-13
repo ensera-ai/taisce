@@ -75,42 +75,42 @@ func TestWorkerDoesNotRequirePassageAPIConfiguration(t *testing.T) {
 // usable provider refuses to start, and a revision with one builds the search. Only the passage half
 // of that was ever exercised; a regression in either of these would have shipped unseen.
 func TestCandidateSearchRequiresTheSameExplicitOptInAsPassageSearch(t *testing.T) {
-	for _, key := range []string{inference.EnvEmbeddingRevision, inference.EnvEndpoint, inference.EnvEmbeddingEndpoint, inference.EnvEmbeddingModel, inference.EnvModel, inference.EnvAllowlist} {
-		t.Setenv(key, "")
-	}
 	schema, _ := pg.NewSchema("candidate_config")
-	type configure func() (any, error)
-	for name, build := range map[string]configure{
-		"entity candidate search": func() (any, error) { r, err := configuredEntityCandidates(nil, schema); return r, err },
-		"report candidate search": func() (any, error) { r, err := configuredReportCandidates(nil, schema); return r, err },
-	} {
-		t.Setenv(inference.EnvEmbeddingRevision, "")
-		t.Setenv(inference.EnvEmbeddingEndpoint, "")
-		t.Setenv(inference.EnvEmbeddingModel, "")
-		t.Setenv(inference.EnvAllowlist, "")
-		if got, err := build(); err != nil || !isNilRetriever(got) {
-			t.Fatalf("%s: with no revision it must be off without error, got %v (%v)", name, got, err)
+	reset := func() {
+		for _, key := range []string{inference.EnvEmbeddingRevision, inference.EnvEndpoint, inference.EnvEmbeddingEndpoint, inference.EnvEmbeddingModel, inference.EnvModel, inference.EnvAllowlist} {
+			t.Setenv(key, "")
 		}
-		t.Setenv(inference.EnvEmbeddingRevision, "v1")
-		if _, err := build(); err == nil || !strings.Contains(err.Error(), "configure "+name) {
-			t.Fatalf("%s: a revision with no provider must refuse to start, naming what it configures, got %v", name, err)
-		}
+	}
+	optIn := func() { t.Setenv(inference.EnvEmbeddingRevision, "v1") }
+	provide := func() {
 		t.Setenv(inference.EnvEmbeddingEndpoint, "http://localhost:11434/v1")
 		t.Setenv(inference.EnvEmbeddingModel, "embedder")
 		t.Setenv(inference.EnvAllowlist, "localhost:11434")
-		if got, err := build(); err != nil || isNilRetriever(got) {
-			t.Fatalf("%s: an embedding-only configuration must build the search, got %v (%v)", name, got, err)
-		}
 	}
-}
 
-// isNilRetriever reports whether a typed retriever pointer carried in an interface is nil.
-func isNilRetriever(v any) bool {
-	switch r := v.(type) {
-	case nil:
-		return true
-	case interface{ IsNil() bool }:
-		return r.IsNil()
+	reset()
+	if r, err := configuredEntityCandidates(nil, schema); err != nil || r != nil {
+		t.Fatalf("entity candidate search with no revision must be off without error, got %v (%v)", r, err)
 	}
-	return fmt.Sprintf("%v", v) == "<nil>"
+	optIn()
+	if _, err := configuredEntityCandidates(nil, schema); err == nil || !strings.Contains(err.Error(), "configure entity candidate search") {
+		t.Fatalf("a revision with no provider must refuse to start entity candidate search, got %v", err)
+	}
+	provide()
+	if r, err := configuredEntityCandidates(nil, schema); err != nil || r == nil {
+		t.Fatalf("an embedding-only configuration must build entity candidate search, got %v (%v)", r, err)
+	}
+
+	reset()
+	if r, err := configuredReportCandidates(nil, schema); err != nil || r != nil {
+		t.Fatalf("report candidate search with no revision must be off without error, got %v (%v)", r, err)
+	}
+	optIn()
+	if _, err := configuredReportCandidates(nil, schema); err == nil || !strings.Contains(err.Error(), "configure report candidate search") {
+		t.Fatalf("a revision with no provider must refuse to start report candidate search, got %v", err)
+	}
+	provide()
+	if r, err := configuredReportCandidates(nil, schema); err != nil || r == nil {
+		t.Fatalf("an embedding-only configuration must build report candidate search, got %v (%v)", r, err)
+	}
 }
