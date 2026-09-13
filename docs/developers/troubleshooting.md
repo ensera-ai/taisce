@@ -113,7 +113,9 @@ saved a turn.
 2. **Is the model failing?** The worker logs `"msg":"formation pass"` lines with `"errored":1`.
    Each failure is retried after a longer wait. After six tries the turn is parked (next section).
    Common causes:
-   - Ollama is listening only on loopback. Start it with `OLLAMA_HOST=0.0.0.0 ollama serve`.
+   - A container can't reach Ollama. Run the check in
+     [set up your machine](../start/your-machine.md#check-that-a-container-reaches-the-model); on
+     Linux the usual cause is Ollama listening on loopback only.
    - The model hasn't been pulled. Run `ollama pull qwen3.6:35b-a3b-mxfp8`.
    - You sourced a file from [deploy/inference/](../../deploy/inference/) before running compose.
      Those files say `localhost`, which inside a container means the container itself. Unset those
