@@ -13,19 +13,23 @@ rebuilds and fact recovery show an elapsed-time spinner on stderr while they run
 still goes to stdout. The spinner redraws ten times a second and clears its line when the command
 succeeds, fails or you press Ctrl-C.
 
-Here is `taisce health` on a narrow or ASCII terminal. A wide terminal draws the same thing with
-Unicode lines:
+Here is `taisce health` on a narrow or ASCII terminal, as the renderer draws it. A wide terminal draws
+the same thing with Unicode lines:
 
 ```text
   TAISCE  instance healthy
-  + memory path -----------------------------------+
-  | formation    responsive                        |
-  | backlog      ###............... 2/10            |
-  | PostgreSQL   2 instance · 3 cluster · 100 max  |
-  | inference    configured                        |
-  +------------------------------------------------+
+  + memory path -------------------------------------+
+  | formation    responsive                          |
+  | backlog      ###............... 2/10             |
+  | work         0 parked · 0 formed · 0 failed      |
+  | PostgreSQL   2 instance · 3 cluster · 100 max    |
+  | inference    configured                          |
+  +--------------------------------------------------+
+
+  inspect  taisce formation parked --project <name>
 ```
 
+- **work** counts turns parked for an operator, turns formed, and formation attempts that failed.
 - **PostgreSQL** shows connections to this database, connections to the whole server, and
   `max_connections`.
 - **inference: configured** means an embedding model is configured. It does not mean a model call
@@ -51,6 +55,8 @@ Exit codes and JSON field names are the same in every mode.
 
 ## What it never shows
 
-Before anything is drawn, labels are stripped of control characters and clipped to the display
-width. The panels only show totals and operation details. They never show credentials, stored
+Before anything is drawn, labels are stripped of control characters (Unicode category Cc), which
+stops escape sequences from acting on the terminal, and clipped to the display width. Spacing is kept
+as written, so columns line up. Format characters such as direction overrides and zero-width spaces
+are not removed yet ([#19](https://github.com/ensera-ai/taisce/issues/19)). The panels only show totals and operation details. They never show credentials, stored
 memory, model responses, or raw database or provider errors.

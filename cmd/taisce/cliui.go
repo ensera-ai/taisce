@@ -59,6 +59,15 @@ func paint(enabled bool, code, value string) string {
 	return "\x1b[" + code + "m" + value + "\x1b[0m"
 }
 
+// cleanTerminal makes a value safe to draw: invalid UTF-8 becomes a replacement character, a line
+// break or tab becomes one space so a value cannot start a new line inside a panel, and every other
+// control character is removed so an escape sequence in a name cannot repaint the screen.
+//
+// It does NOT normalise whitespace. It once collapsed runs of spaces and trimmed both ends, and every
+// caller that measures width runs text through here — so a label padded to line up a column lost its
+// padding, and a title's surrounding spaces stopped being counted, which drew the top border two
+// cells wider than the rows beneath it (#18). Spacing a caller wrote is layout, not a hazard; the
+// hazard is control characters, and that is all this removes.
 func cleanTerminal(value string) string {
 	var b strings.Builder
 	for _, r := range strings.ToValidUTF8(value, "�") {
@@ -68,7 +77,7 @@ func cleanTerminal(value string) string {
 			b.WriteRune(r)
 		}
 	}
-	return strings.Join(strings.Fields(b.String()), " ")
+	return b.String()
 }
 
 func runeWidth(r rune) int {
