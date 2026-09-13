@@ -48,9 +48,6 @@ func renderTooling(opts Options) (page, error) {
 	for _, s := range scripts {
 		name := filepath.Base(s)
 		rel := "scripts/" + name
-		if isPrivate(opts.private, rel) {
-			continue
-		}
 		var doc string
 		switch {
 		case strings.HasSuffix(name, "_test.go"):

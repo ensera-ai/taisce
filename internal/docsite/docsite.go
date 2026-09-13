@@ -16,13 +16,6 @@
 // parsed from their text. The SQL says what was asked for; the catalog says what PostgreSQL made of
 // it after sixty-odd migrations altered one another, and that is what a reader needs.
 //
-// # The site is the public version
-//
-// The site shows what the public repository will have, and nothing more. scripts/private-paths.txt
-// names what never leaves the development repository: this package leaves those paths off the site,
-// refuses a link into one, and refuses a written document that cites something only the development
-// repository can open (public.go).
-//
 // # What this package is allowed to decide
 //
 // Page layout, link resolution, the navigation, and what the build refuses. It does not decide what
@@ -35,8 +28,7 @@
 //
 //   - A package with no doc comment, because that comment is where a package says what it may
 //     decide and what it must not.
-//   - A link that names nothing in the public tree, including a link into a private document.
-//   - A written document that cites private material.
+//   - A link that names nothing, because a reader who follows one stops trusting the rest.
 //   - A document in docs/ that the navigation does not list, because a page nobody can reach looks
 //     published and is not.
 //
@@ -72,9 +64,6 @@ type Options struct {
 	DSN string
 	// Repo and Ref are where source links point: "owner/name" and a commit or branch.
 	Repo, Ref string
-
-	// private holds the paths read from scripts/private-paths.txt.
-	private map[string]bool
 }
 
 // Report counts what the build covered, so a caller can say it rather than claim it.
@@ -98,27 +87,13 @@ func Build(ctx context.Context, opts Options) (Report, error) {
 	if err := opts.validate(); err != nil {
 		return report, err
 	}
-	private, err := privatePaths(opts.Root)
-	if err != nil {
-		return report, err
-	}
-	opts.private = private
-
-	docs, summary, err := stageDocuments(opts.Root, private)
+	docs, summary, err := stageDocuments(opts.Root)
 	if err != nil {
 		return report, err
 	}
 	report.Documents = len(docs)
-	var cited []string
-	for _, d := range append(docs, page{Repo: "docs/SUMMARY.md", Body: summary}) {
-		cited = append(cited, citesPrivate(d)...)
-	}
-	if len(cited) > 0 {
-		return report, fmt.Errorf("docsite: %d line(s) cite something only the development repository can open:\n  %s",
-			len(cited), strings.Join(cited, "\n  "))
-	}
 
-	packages, err := loadPackages(opts.Root, private)
+	packages, err := loadPackages(opts.Root)
 	if err != nil {
 		return report, err
 	}
@@ -211,10 +186,10 @@ func (o Options) validate() error {
 	return nil
 }
 
-// stageDocuments reads every public markdown file under docs/ and returns the navigation file
+// stageDocuments reads every markdown file under docs/ and returns the navigation file
 // separately. The repository README is not a page: it is the repository's front door on GitHub, and
 // the site has its own.
-func stageDocuments(root string, private map[string]bool) ([]page, string, error) {
+func stageDocuments(root string) ([]page, string, error) {
 	var pages []page
 	var summary string
 	base := filepath.Join(root, "docs")
@@ -224,12 +199,6 @@ func stageDocuments(root string, private map[string]bool) ([]page, string, error
 		}
 		rel, _ := filepath.Rel(base, p)
 		rel = filepath.ToSlash(rel)
-		if isPrivate(private, "docs/"+rel) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
 		if d.IsDir() || !strings.HasSuffix(p, ".md") {
 			return nil
 		}
@@ -270,8 +239,8 @@ func checkListed(summary string, docs []page) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("docsite: %d document(s) are not in docs/SUMMARY.md, so the site would not show them; list them, or add them to %s if they are private:\n  %s",
-			len(missing), privateList, strings.Join(missing, "\n  "))
+		return fmt.Errorf("docsite: %d document(s) are not in docs/SUMMARY.md, so the site would not show them; list them there:\n  %s",
+			len(missing), strings.Join(missing, "\n  "))
 	}
 	return nil
 }

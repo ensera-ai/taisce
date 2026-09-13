@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The documentation site. The build refuses a link or an anchor that names nothing, a document the
-# navigation does not reach, a page that cites private material, and a package with no doc comment.
+# navigation does not reach, and a package with no doc comment.
 # The schema reference is read from a database the migrations have just built, so the job starts the
 # same substrate the tests use.
 #
