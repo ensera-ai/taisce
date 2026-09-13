@@ -13,15 +13,17 @@
 const {themes} = require('prism-react-renderer');
 
 // Source links and the repository button point at the repository and commit the site was built from.
+// The site is served at the root of its own domain; SITE_BASE_URL exists for a fork publishing under a
+// path, such as <owner>.github.io/<repository>/.
 const repository = process.env.SITE_REPO || 'ensera-ai/taisce';
-const baseUrl = process.env.SITE_BASE_URL || '/taisce/';
+const baseUrl = process.env.SITE_BASE_URL || '/';
 
 /** @type {import('@docusaurus/types').Config} */
 module.exports = {
   title: 'Taisce',
   tagline: 'Open-source memory for AI agents, on PostgreSQL.',
   favicon: 'img/favicon.svg',
-  url: 'https://ensera-ai.github.io',
+  url: process.env.SITE_URL || 'https://taisce.dev',
   baseUrl,
   organizationName: 'ensera-ai',
   projectName: 'taisce',
