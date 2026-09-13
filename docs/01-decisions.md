@@ -188,3 +188,44 @@ neither a checkout nor a Go toolchain. Supply chain: what an operator runs is no
 was signed and attested rather than one they compiled from a tree they did not read — which is a
 stronger claim, and only true while the packages are public. It moves no boundary inside the service;
 the images run what they always ran.
+
+## D5 — A release tags its image with the version the chart asks for
+
+**Date.** 2026-09-13. **Issue.** [#21](https://github.com/ensera-ai/taisce/issues/21).
+
+**Why it was open.** The chart defaults its image tag to its `appVersion`, which the release set to
+the version without its leading `v`. The same release tagged the image with the `v`. v0.3.0 and
+v0.3.1 both published a chart asking for `taisce:0.3.1` beside an image tagged `v0.3.1`, so every
+install of either chart would have failed to pull. Lint passed and the chart rendered, because each
+half was valid on its own.
+
+**Decided.** The release computes the version without its `v` once, and both the image tags and the
+chart read that one value. The service and substrate images are pushed under both `vX.Y.Z` and
+`X.Y.Z`, and the chart keeps `appVersion` without the `v`. Before the chart is pushed,
+`scripts/chart-image-check.sh` renders the packaged chart and refuses it unless every reference to the
+release's image is among the refs the same run pushed.
+
+**Why the image side changes rather than the chart.** `X.Y.Z` is the form Helm's `appVersion`
+carries and the form most people type after an image name, so the image gains a tag and the chart
+stays conventional. It is also the only direction that repairs what is already published: a chart
+cannot be changed once people have pulled it, but `0.3.1` can be added to the existing image digest.
+That moves no tag and rebuilds nothing, so the published chart starts working without a new chart.
+
+**Rejected: prefixing `v` inside the template.** It would couple the chart to a git-tag habit, and
+anyone overriding `image.tag` would have to know the chart adds a letter. It also leaves the published
+charts broken for good.
+
+**Rejected: an `appVersion` carrying the `v`.** Tools that read `appVersion` as a version would show
+and compare `v0.3.2`, and the published charts would stay broken.
+
+**Rejected: republishing 0.3.1 with a corrected chart.** Anyone who already pulled it keeps the broken
+one, and it would replace a signed artefact under a version that already has a meaning.
+
+**What the check does not cover.** Images the chart names from other repositories, such as the
+PostgreSQL operator's. This release does not produce them and cannot vouch for them.
+
+**Undo cost.** Low. Dropping the extra tag is one line of the workflow. Tags already pushed are not
+removed, which is the point.
+
+**Impact.** Operations: a published chart installs the image published beside it, and a release that
+would break that fails before anything reaches the registry. It moves no boundary in the service.

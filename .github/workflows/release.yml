@@ -84,6 +84,13 @@ jobs:
         with:
           subject-path: dist/*
 
+      # The version without its leading v, computed once. Image tags and the chart both read this one
+      # output, because they were once derived separately — the chart stripped the v and the images
+      # kept it — and the published chart asked for a tag nobody pushed (#21, D5).
+      - name: Version
+        id: version
+        run: echo "semver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       # ── The two images a quickstart pulls ────────────────────────────────────────────────────
       #
       # The service and the substrate are published together and tagged together, so `compose.yaml`
@@ -106,6 +113,7 @@ jobs:
           build-args: VERSION=${{ github.ref_name }}
           tags: |
             ${{ env.IMAGE }}:${{ github.ref_name }}
+            ${{ env.IMAGE }}:${{ steps.version.outputs.semver }}
             ${{ env.IMAGE }}:${{ github.sha }}
             ${{ env.IMAGE }}:latest
       - name: Sign the image
@@ -127,6 +135,7 @@ jobs:
           sbom: true
           tags: |
             ${{ env.SUBSTRATE }}:${{ github.ref_name }}
+            ${{ env.SUBSTRATE }}:${{ steps.version.outputs.semver }}
             ${{ env.SUBSTRATE }}:latest
       - name: Sign the substrate image
         run: cosign sign --yes "${SUBSTRATE}@${{ steps.substrate.outputs.digest }}"
@@ -137,12 +146,18 @@ jobs:
           push-to-registry: true
 
       - name: Chart
+        env:
+          SEMVER: ${{ steps.version.outputs.semver }}
+          # Every ref the Image step pushed, as build-push-action reports them.
+          PUSHED: ${{ fromJSON(steps.image.outputs.metadata)['image.name'] }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          helm package deploy/helm/taisce --version "$tag" --app-version "$tag" -d dist
+          helm package deploy/helm/taisce --version "$SEMVER" --app-version "$SEMVER" -d dist
+          # Before anything is pushed: the chart must ask for an image this run pushed. A chart that
+          # names a missing tag lints clean and fails on every install.
+          scripts/chart-image-check.sh "dist/taisce-${SEMVER}.tgz" "$IMAGE" "$PUSHED"
           helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
-          helm push "dist/taisce-${tag}.tgz" "$CHART" 2>&1 | tee dist/chart-push.log
+          helm push "dist/taisce-${SEMVER}.tgz" "$CHART" 2>&1 | tee dist/chart-push.log
           digest="$(grep -o 'sha256:[0-9a-f]*' dist/chart-push.log | head -1)"
           cosign sign --yes "ghcr.io/${{ github.repository_owner }}/charts/taisce@${digest}"
 

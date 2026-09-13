@@ -8,7 +8,9 @@
 package helm_test
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -76,5 +78,59 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 	}
 	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "ingress.api.enabled=true").CombinedOutput(); err == nil || !strings.Contains(string(out), "host is required") {
 		t.Errorf("an ingress without a host is refused, got %v\n%s", err, out)
+	}
+}
+
+// TestTheChartAsksForAnImageTheReleasePushed holds the chart and the image to one convention.
+//
+// The chart names its image by repository and a tag defaulted from its appVersion; the release pushes
+// the image under the tags its workflow lists. v0.3.0 and v0.3.1 published a chart asking for
+// `taisce:0.3.1` beside an image tagged only `v0.3.1`, and every install of that chart would have
+// failed to pull (#21). Lint cannot see that, and neither can a rendering on its own, because each
+// half is valid; only the pair is wrong.
+//
+// So the chart is packaged the way the release packages it and run through the same check the
+// release runs before it pushes: refused against the tag list v0.3.1 actually pushed, accepted
+// against the list the workflow now pushes. The workflow is read too, because a check that the
+// workflow stopped calling would pass here and protect nothing.
+func TestTheChartAsksForAnImageTheReleasePushed(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("helm", "package", "taisce", "--version", "9.8.7", "--app-version", "9.8.7", "-d", dir).CombinedOutput(); err != nil {
+		t.Fatalf("helm package: %v\n%s", err, out)
+	}
+	chart := filepath.Join(dir, "taisce-9.8.7.tgz")
+	check := func(pushed string) (string, error) {
+		out, err := exec.Command("../../scripts/chart-image-check.sh", chart, "ghcr.io/ensera-ai/taisce", pushed).CombinedOutput()
+		return string(out), err
+	}
+	const repo = "ghcr.io/ensera-ai/taisce"
+
+	// What v0.3.1 pushed: the tag with its v, the commit, latest.
+	old := repo + ":v9.8.7," + repo + ":0123abc," + repo + ":latest"
+	if out, err := check(old); err == nil || !strings.Contains(out, repo+":9.8.7, which this release did not push") {
+		t.Fatalf("a chart asking for a tag the release did not push was accepted: %v\n%s", err, out)
+	}
+	// What the workflow pushes now: the same, plus the tag without the v.
+	current := repo + ":v9.8.7," + repo + ":9.8.7," + repo + ":0123abc," + repo + ":latest"
+	if out, err := check(current); err != nil {
+		t.Fatalf("a chart asking for a pushed tag was refused: %v\n%s", err, out)
+	}
+
+	workflow, err := os.ReadFile("../../.github/workflows/release.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"${{ env.IMAGE }}:${{ steps.version.outputs.semver }}",
+		"${{ env.SUBSTRATE }}:${{ steps.version.outputs.semver }}",
+		`--app-version "$SEMVER"`,
+		`scripts/chart-image-check.sh "dist/taisce-${SEMVER}.tgz" "$IMAGE" "$PUSHED"`,
+	} {
+		if !strings.Contains(string(workflow), want) {
+			t.Errorf("the release workflow no longer contains %q", want)
+		}
+	}
+	if strings.Index(string(workflow), "scripts/chart-image-check.sh") > strings.Index(string(workflow), `helm push "dist/taisce-`) {
+		t.Error("the chart image check must run before the chart is pushed, not after")
 	}
 }
