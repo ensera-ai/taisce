@@ -1,0 +1,40 @@
+name: Work
+description: Something to build, change, or find out.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Work starts with a problem, not a solution. If you already know what to build, the problem is
+        still the thing to write down first — it is what tells a reviewer whether the solution fits.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem is this solving, and for whom
+      description: Who hits it, how often, and what it costs them today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: What changes, and where. Enough that somebody could disagree with it specifically.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What else you considered, and why not
+      description: >
+        Including doing nothing. A proposal with no rejected alternative gets reopened by the next
+        person who has only heard the winning argument — and they are usually right to.
+    validations:
+      required: true
+  - type: textarea
+    id: proof
+    attributes:
+      label: What would show it worked
+      description: >
+        The test that would hold it, the number that would move, or the plan that would change. If a
+        claim here is about speed, say how it would be measured and on what hardware.
+    validations:
+      required: true

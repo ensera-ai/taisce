@@ -82,6 +82,7 @@
 
 # Project
 
+- [Decisions](01-decisions.md)
 - [Individual contributor agreement](cla/individual.md)
 - [Corporate contributor agreement](cla/corporate.md)
 
