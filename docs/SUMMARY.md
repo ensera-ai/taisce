@@ -1,8 +1,9 @@
 <!-- Copyright 2026 The Taisce Authors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-<!-- The documentation site's navigation. Every published document in docs/ is listed here, and the
-     build refuses one that is not. The generated reference is spliced in at the marker. -->
+<!-- The documentation site's navigation. Every document in docs/ is either listed here, and so on the
+     site, or named in the kept list below, and the build refuses one that is neither. The generated
+     reference is spliced in at the marker. -->
 
 # Summary
 
@@ -74,18 +75,26 @@
   - [Concurrency](postgresql/concurrency.md)
   - [Indexing and plans](postgresql/indexing-and-plans.md)
   - [Running in production](21-production-postgresql.md)
-- [Measurements](28-anchor-query-plans.md)
-  - [GPU qualification, 2026-09-09](23-gpu-qualification.md)
-  - [Report quality, 2026-09-09](26-report-quality-qualification.md)
-  - [Vector layout, 2026-09-10](27-vector-layout-qualification.md)
-  - [Vocabulary coverage, 2026-09-10](31-vocabulary-coverage-ap-news.md)
-  - [Extraction models, 2026-09-11](36-extraction-models.md)
 
 # Project
 
-- [Decisions](01-decisions.md)
 - [Individual contributor agreement](cla/individual.md)
 - [Corporate contributor agreement](cla/corporate.md)
+
+<!-- kept in the repository, not on the site
+
+     Records for the people building Taisce rather than documentation for the people using it: the
+     decision register, and dated measurement runs that are findings, not benchmarks. A link to one
+     from a published page goes to the file on GitHub.
+
+- 01-decisions.md
+- 23-gpu-qualification.md
+- 26-report-quality-qualification.md
+- 27-vector-layout-qualification.md
+- 28-anchor-query-plans.md
+- 31-vocabulary-coverage-ap-news.md
+- 36-extraction-models.md
+-->
 
 # Reference
 

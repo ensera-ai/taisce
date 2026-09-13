@@ -138,6 +138,8 @@ module.exports = {
             title: 'Project',
             items: [
               {label: 'GitHub', href: `https://github.com/${repository}`},
+              // The register is kept in the repository rather than published as a page (D8).
+              {label: 'Decisions', href: `https://github.com/${repository}/blob/main/docs/01-decisions.md`},
               {label: 'Ensera', href: 'https://ensera.ai'},
               {label: 'Contributors', to: '/#contributors'},
             ],

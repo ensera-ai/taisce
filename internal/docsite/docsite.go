@@ -29,8 +29,11 @@
 //   - A package with no doc comment, because that comment is where a package says what it may
 //     decide and what it must not.
 //   - A link that names nothing, because a reader who follows one stops trusting the rest.
-//   - A document in docs/ that the navigation does not list, because a page nobody can reach looks
-//     published and is not.
+//   - A document in docs/ that the navigation neither lists nor keeps in the repository, because a
+//     page nobody can reach looks published and is not, and a record written for contributors should
+//     not reach the site by being forgotten.
+//   - A document both listed and kept, or a kept name that is no document, because either means the
+//     navigation no longer says what the site shows.
 //
 // The renderer then refuses a link or an anchor that names nothing on the rendered site. A build that
 // published with any of these would be a site that looks complete and is not.
@@ -88,6 +91,12 @@ func Build(ctx context.Context, opts Options) (Report, error) {
 		return report, err
 	}
 	docs, summary, err := stageDocuments(opts.Root)
+	if err != nil {
+		return report, err
+	}
+	// A kept document is not staged, so a link to it from a published page resolves to its source on
+	// GitHub, the way a link to any other file in the repository does.
+	docs, err = publishedDocuments(summary, docs)
 	if err != nil {
 		return report, err
 	}
@@ -230,7 +239,7 @@ func spliceSummary(summary, nav string) (string, error) {
 	return strings.Replace(summary, summaryMarker, strings.TrimRight(nav, "\n"), 1), nil
 }
 
-// checkListed refuses a written document the navigation does not reach.
+// checkListed refuses a published document the navigation does not reach.
 func checkListed(summary string, docs []page) error {
 	var missing []string
 	for _, d := range docs {
@@ -239,10 +248,75 @@ func checkListed(summary string, docs []page) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("docsite: %d document(s) are not in docs/SUMMARY.md, so the site would not show them; list them there:\n  %s",
+		return fmt.Errorf("docsite: %d document(s) are not in docs/SUMMARY.md, so the site would not show them; list them there, or name them in its kept list:\n  %s",
 			len(missing), strings.Join(missing, "\n  "))
 	}
 	return nil
+}
+
+// keptMarker opens the comment in docs/SUMMARY.md naming the documents that stay in the repository:
+// records for the people building Taisce, such as the decision register and dated measurement runs,
+// rather than documentation for the people using it. The list is a comment so that GitHub, where the
+// same file reads as a table of contents, shows nothing for it.
+//
+// A list rather than a directory: the register's path is the one the project's rules and code
+// comments cite, and moving files to change what a website shows would break every one of those.
+const keptMarker = "<!-- kept in the repository, not on the site"
+
+var keptEntry = regexp.MustCompile(`^-\s+(\S+\.md)$`)
+
+// publishedDocuments removes the kept documents from docs. A document is on the site or kept, never
+// both and never neither; checkListed refuses neither, and this refuses both, together with a kept
+// name that is no document, because a list naming nothing is how a moved record goes unnoticed. It
+// reads the navigation as written, before links are resolved, since a link to a kept document is
+// rewritten to its source and would no longer read as listed.
+func publishedDocuments(summary string, docs []page) ([]page, error) {
+	kept, err := keptDocuments(summary)
+	if err != nil {
+		return nil, err
+	}
+	var published []page
+	var problems []string
+	found := map[string]bool{}
+	for _, d := range docs {
+		if !kept[d.Stage] {
+			published = append(published, d)
+			continue
+		}
+		found[d.Stage] = true
+		if strings.Contains(summary, "]("+d.Stage+")") {
+			problems = append(problems, d.Repo+" is both listed and kept")
+		}
+	}
+	for name := range kept {
+		if !found[name] {
+			problems = append(problems, "docs/"+name+" is kept but is not a document")
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return nil, fmt.Errorf("docsite: the kept list in docs/SUMMARY.md disagrees with docs/:\n  %s", strings.Join(problems, "\n  "))
+	}
+	return published, nil
+}
+
+// keptDocuments reads the kept comment: one "- name.md" line per document, up to the comment's close.
+func keptDocuments(summary string) (map[string]bool, error) {
+	kept := map[string]bool{}
+	start := strings.Index(summary, keptMarker)
+	if start < 0 {
+		return kept, nil
+	}
+	block, _, closed := strings.Cut(summary[start+len(keptMarker):], "-->")
+	if !closed {
+		return nil, errors.New("docsite: the kept list in docs/SUMMARY.md is never closed with -->")
+	}
+	for _, line := range strings.Split(block, "\n") {
+		if m := keptEntry.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+			kept[m[1]] = true
+		}
+	}
+	return kept, nil
 }
 
 var (

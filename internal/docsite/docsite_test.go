@@ -298,6 +298,66 @@ func TestADocumentTheNavigationDoesNotReachIsRefused(t *testing.T) {
 	}
 }
 
+func TestADocumentKeptInTheRepositoryIsNotPublishedAndALinkToItGoesToItsSource(t *testing.T) {
+	summary := "- [A](a.md)\n" + keptMarker + "\n\n     Records for contributors.\n\n- b.md\n-->\n" + summaryMarker + "\n"
+	root := fixture(t, map[string]string{"SUMMARY.md": summary, "a.md": "# A\n\n[the run](b.md#results)\n", "b.md": "# B\n"})
+
+	docs, staged, err := stageDocuments(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := publishedDocuments(staged, docs)
+	if err != nil {
+		t.Fatalf("a consistent kept list was refused: %v", err)
+	}
+	if len(published) != 1 || published[0].Stage != "a.md" {
+		t.Fatalf("published %+v, want only a.md", published)
+	}
+	if err := checkListed(summary, published); err != nil {
+		t.Errorf("a kept document was demanded in the navigation: %v", err)
+	}
+	if err := resolveLinks(published, Options{Root: root, Repo: "o/r", Ref: "m"}, nil); err != nil {
+		t.Fatalf("a link to a kept document was refused: %v", err)
+	}
+	if !strings.Contains(published[0].Body, "[the run](https://github.com/o/r/blob/m/docs/b.md#results)") {
+		t.Errorf("a link to a kept document does not go to its source:\n%s", published[0].Body)
+	}
+	bars, err := sidebars(summary)
+	if err != nil || strings.Contains(string(bars), `"b"`) {
+		t.Errorf("a kept document reached the sidebar: %v\n%s", err, bars)
+	}
+
+	// The whole build accepts it too, getting as far as the database this fixture does not have.
+	if err := buildFixture(t, root); err == nil || strings.Contains(err.Error(), "SUMMARY.md") {
+		t.Errorf("got %v, want the build to pass the navigation and stop only at the database", err)
+	}
+	// No kept list at all is an empty one.
+	if kept, err := keptDocuments(navigation); err != nil || len(kept) != 0 {
+		t.Errorf("a navigation without a kept list read as %v, %v", kept, err)
+	}
+}
+
+func TestAKeptListThatContradictsTheNavigationOrNamesNothingIsRefused(t *testing.T) {
+	contradicting := "- [A](a.md)\n- [B](b.md)\n" + keptMarker + "\n- b.md\n- gone.md\n-->\n" + summaryMarker + "\n"
+	root := fixture(t, map[string]string{"SUMMARY.md": contradicting, "a.md": "# A\n", "b.md": "# B\n"})
+	err := buildFixture(t, root)
+	if err == nil {
+		t.Fatal("a document both listed and kept, and a kept name that is no document, were accepted")
+	}
+	for _, want := range []string{"docs/b.md is both listed and kept", "docs/gone.md is kept but is not a document"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%v", want, err)
+		}
+	}
+
+	// The reference marker closes a comment of its own, so an unclosed list is one written after it.
+	unclosed := "- [A](a.md)\n" + summaryMarker + "\n" + keptMarker + "\n- b.md\n"
+	root = fixture(t, map[string]string{"SUMMARY.md": unclosed, "a.md": "# A\n", "b.md": "# B\n"})
+	if err := buildFixture(t, root); err == nil || !strings.Contains(err.Error(), "never closed") {
+		t.Errorf("got %v, want a refusal of a kept list with no end", err)
+	}
+}
+
 func TestANavigationWithoutTheReferenceMarkerOrWithoutAnyFileIsRefused(t *testing.T) {
 	if _, err := spliceSummary("- [A](a.md)\n", "- [Code](x.md)\n"); err == nil {
 		t.Error("a navigation with nowhere to put the reference was accepted")
