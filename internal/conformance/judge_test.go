@@ -176,3 +176,46 @@ func TestTheRunnersOwnReadsRetryAnAdmissionRefusalAndStopWhenTheContextEnds(t *t
 		t.Fatal("a refusal that outlasts the context ends with the context's error")
 	}
 }
+
+// TestTheJudgeHoldsGroupsRetriesAndKeysToTheirRules watches the refusals the first judge test does not
+// reach: how an adapter groups what it observes, and how it retries.
+//
+// These are the rules that most often pass by accident. An adapter that observes nothing trivially has
+// no wrong group ordinals, and one that is never retried trivially reuses its key — so each rule is
+// given a report that breaks it, and the ordinary case where ordinals are omitted is shown to pass,
+// because an omitted ordinal is a standalone message and must not be read as a violation.
+func TestTheJudgeHoldsGroupsRetriesAndKeysToTheirRules(t *testing.T) {
+	observed := func(bodies ...string) []Recorded {
+		var out []Recorded
+		for _, b := range bodies {
+			out = append(out, Recorded{Method: "POST", Path: "/v1/observations", Body: []byte(b)})
+		}
+		return out
+	}
+	for _, c := range []struct {
+		name     string
+		expect   Expect
+		recorded []Recorded
+		want     string
+	}{
+		{"groups with nothing observed", Expect{ObservedGroups: []int{0, 1}}, nil, "nothing was sent to observe"},
+		{"groups from a body that does not parse", Expect{ObservedGroups: []int{0, 1}}, observed(`nope`), "did not parse"},
+		{"two messages claimed as one unit", Expect{ObservedGroups: []int{0, 1}},
+			observed(`{"messages":[{"role":"user","group_ordinal":0},{"role":"assistant","group_ordinal":0}]}`), "observed group ordinals"},
+		{"too few observe calls", Expect{ObserveCalls: ptr(2)}, observed(`{}`), "called 1 time(s); expected 2"},
+		{"keys from a body that does not parse", Expect{ObserveKeysEqual: ptr(true)}, observed(`nope`), "did not parse"},
+		{"a retry under a new key", Expect{ObserveKeysEqual: ptr(true)},
+			observed(`{"idempotency_key":"k1"}`, `{"idempotency_key":"k2"}`), "different idempotency keys"},
+		{"distinct turns under one key", Expect{ObserveKeysEqual: ptr(false)},
+			observed(`{"idempotency_key":"k1"}`, `{"idempotency_key":"k1"}`), "one idempotency key"},
+	} {
+		failures := judge(c.expect, Report{}, c.recorded, 0)
+		if len(failures) == 0 || !strings.Contains(strings.Join(failures, " "), c.want) {
+			t.Errorf("%s: expected a failure containing %q, got %v", c.name, c.want, failures)
+		}
+	}
+	omitted := observed(`{"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"b"}]}`)
+	if f := judge(Expect{ObservedGroups: []int{0, 1}, ObserveCalls: ptr(1)}, Report{}, omitted, 0); len(f) != 0 {
+		t.Fatalf("omitted ordinals are standalone messages and must pass, got %v", f)
+	}
+}

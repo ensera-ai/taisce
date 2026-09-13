@@ -320,3 +320,25 @@ func TestChildSubstitutionUsesEntityIdentityRatherThanSpeakerDisplayName(t *test
 		t.Fatal("a reference-bearing fact exceeded its budget")
 	}
 }
+
+// TestAReportForAChildThatOwnsNoFactsStandsInForNothing covers the roll-up's last resort.
+//
+// A child report only replaces material that child owns. When the context is over budget and the
+// only reports on offer belong to children with no facts here, substituting one would add a summary
+// while removing nothing — the context would grow. So nothing is substituted, the facts are cut to fit
+// from the end, and the cut is counted, which is what lets the report say it was written from part of
+// its subject.
+func TestAReportForAChildThatOwnsNoFactsStandsInForNothing(t *testing.T) {
+	all := facts("a", 20, 500)
+	c := report.BuildContext([]string{"Marta"}, all, nil,
+		map[string]report.Report{"elsewhere": {Title: "A subject with no facts here", Summary: "It owns nothing in this community."}},
+		1000)
+
+	if c.Substituted != 0 || len(c.Children) != 0 {
+		t.Fatalf("a report whose child owns nothing here was substituted in: %+v", c.Children)
+	}
+	if c.Dropped == 0 || c.Dropped+len(c.Facts) != len(all) {
+		t.Fatalf("an over-budget context must drop facts and count every one: %d dropped, %d kept, %d given",
+			c.Dropped, len(c.Facts), len(all))
+	}
+}

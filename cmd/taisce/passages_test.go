@@ -65,3 +65,52 @@ func TestWorkerDoesNotRequirePassageAPIConfiguration(t *testing.T) {
 		t.Fatal("worker did not stop")
 	}
 }
+
+// TestCandidateSearchRequiresTheSameExplicitOptInAsPassageSearch holds entity and report candidate
+// search to the rule passage search already follows.
+//
+// All three turn the embedding revision into read-path inference, and all three have the same two
+// failure modes: running inference the operator did not ask for, and quietly disabling a capability
+// the operator did ask for. So an unset revision is no search and no error, a revision without a
+// usable provider refuses to start, and a revision with one builds the search. Only the passage half
+// of that was ever exercised; a regression in either of these would have shipped unseen.
+func TestCandidateSearchRequiresTheSameExplicitOptInAsPassageSearch(t *testing.T) {
+	for _, key := range []string{inference.EnvEmbeddingRevision, inference.EnvEndpoint, inference.EnvEmbeddingEndpoint, inference.EnvEmbeddingModel, inference.EnvModel, inference.EnvAllowlist} {
+		t.Setenv(key, "")
+	}
+	schema, _ := pg.NewSchema("candidate_config")
+	type configure func() (any, error)
+	for name, build := range map[string]configure{
+		"entity candidate search": func() (any, error) { r, err := configuredEntityCandidates(nil, schema); return r, err },
+		"report candidate search": func() (any, error) { r, err := configuredReportCandidates(nil, schema); return r, err },
+	} {
+		t.Setenv(inference.EnvEmbeddingRevision, "")
+		t.Setenv(inference.EnvEmbeddingEndpoint, "")
+		t.Setenv(inference.EnvEmbeddingModel, "")
+		t.Setenv(inference.EnvAllowlist, "")
+		if got, err := build(); err != nil || !isNilRetriever(got) {
+			t.Fatalf("%s: with no revision it must be off without error, got %v (%v)", name, got, err)
+		}
+		t.Setenv(inference.EnvEmbeddingRevision, "v1")
+		if _, err := build(); err == nil || !strings.Contains(err.Error(), "configure "+name) {
+			t.Fatalf("%s: a revision with no provider must refuse to start, naming what it configures, got %v", name, err)
+		}
+		t.Setenv(inference.EnvEmbeddingEndpoint, "http://localhost:11434/v1")
+		t.Setenv(inference.EnvEmbeddingModel, "embedder")
+		t.Setenv(inference.EnvAllowlist, "localhost:11434")
+		if got, err := build(); err != nil || isNilRetriever(got) {
+			t.Fatalf("%s: an embedding-only configuration must build the search, got %v (%v)", name, got, err)
+		}
+	}
+}
+
+// isNilRetriever reports whether a typed retriever pointer carried in an interface is nil.
+func isNilRetriever(v any) bool {
+	switch r := v.(type) {
+	case nil:
+		return true
+	case interface{ IsNil() bool }:
+		return r.IsNil()
+	}
+	return fmt.Sprintf("%v", v) == "<nil>"
+}
