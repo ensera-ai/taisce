@@ -11,9 +11,9 @@ don't need to read any code.
 flowchart LR
     agent["Your agent"] -->|"1. sends a turn"| stored[("Stored turns")]
     stored -->|"2. a worker reads it"| worker["The model proposes facts, Taisce checks each one"]
-    worker -->|"3. only checked facts"| graph[("Facts connecting people, companies and places")]
+    worker -->|"3. only checked facts"| facts[("Facts connecting people, companies and places")]
     agent -->|"4. asks a question"| recall["Recall"]
-    graph --> recall
+    facts --> recall
     recall -->|"facts, each with its quote"| agent
 ```
 
