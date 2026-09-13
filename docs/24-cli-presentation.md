@@ -56,7 +56,12 @@ Exit codes and JSON field names are the same in every mode.
 ## What it never shows
 
 Before anything is drawn, labels are stripped of control characters (Unicode category Cc), which
-stops escape sequences from acting on the terminal, and clipped to the display width. Spacing is kept
-as written, so columns line up. Format characters such as direction overrides and zero-width spaces
-are not removed yet ([#19](https://github.com/ensera-ai/taisce/issues/19)). The panels only show totals and operation details. They never show credentials, stored
+stops escape sequences from acting on the terminal, and of format characters (category Cf): direction
+overrides and isolates, which reorder what follows them, and zero-width characters, which make two
+different names print the same. Line and paragraph separators become a space. Labels are then clipped
+to the display width. Spacing is kept as written, so columns line up.
+
+Today nothing but the operator can put such a character in front of this view: every value it draws is
+a constant, an identifier, a status the schema limits to three words, or a project name held to
+lowercase letters, digits and underscores. The stripping is there for whatever value is added next. The panels only show totals and operation details. They never show credentials, stored
 memory, model responses, or raw database or provider errors.

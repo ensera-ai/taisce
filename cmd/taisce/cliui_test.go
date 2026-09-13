@@ -234,3 +234,45 @@ func TestEveryLineOfAPanelEndsInTheSameColumn(t *testing.T) {
 		}
 	}
 }
+
+// TestTheTerminalSanitiserRemovesWhatActsOnALineWithoutBeingSeen holds the sanitiser to its job for
+// the characters that are not control characters and still change what an operator reads.
+//
+// A direction override reorders the rest of its line; a zero-width character makes `acme` and
+// `ac​me` print the same; a byte-order mark is invisible and still counted as a cell. Each is category
+// Cf, which a check for control characters alone lets through — that is what #19 measured. Line and
+// paragraph separators start a new line in some terminals, so they become a space like a line break.
+//
+// Width is checked alongside removal because the two failures travel together: a character that
+// survives sanitising also throws a panel's border out by a cell.
+func TestTheTerminalSanitiserRemovesWhatActsOnALineWithoutBeingSeen(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		r    rune
+	}{
+		{"right-to-left override", 0x202E},
+		{"left-to-right isolate", 0x2066},
+		{"pop directional isolate", 0x2069},
+		{"zero width space", 0x200B},
+		{"zero width joiner", 0x200D},
+		{"byte order mark", 0xFEFF},
+	} {
+		value := "acme" + string(c.r) + "prod"
+		if got := cleanTerminal(value); got != "acmeprod" {
+			t.Errorf("%s: sanitised to %q, want %q", c.name, got, "acmeprod")
+		}
+		if got := displayWidth(value); got != 8 {
+			t.Errorf("%s: measured %d cells, want 8", c.name, got)
+		}
+	}
+	for _, r := range []rune{0x2028, 0x2029} {
+		if got := cleanTerminal("one" + string(r) + "two"); got != "one two" {
+			t.Errorf("U+%04X: sanitised to %q, want a space where the line would have broken", r, got)
+		}
+	}
+	// What must survive: wide runes, combining marks, and the spacing a caller wrote.
+	kept := "A" + string(rune(0x754C)) + "e" + string(rune(0x0301)) + "   end"
+	if got := cleanTerminal(kept); got != kept {
+		t.Errorf("ordinary text was changed: %q became %q", kept, got)
+	}
+}
