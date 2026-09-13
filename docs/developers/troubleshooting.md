@@ -81,7 +81,7 @@ still work. It just can't form anything new.
 
 | `reason` starts with | Fix |
 |---|---|
-| `TAISCE_INFERENCE_ENDPOINT is "host.docker.internal:11434", which TAISCE_INFERENCE_ALLOWLIST does not list (http://host.docker.internal:11434)` | You wrote a URL. Write just `host.docker.internal:11434` |
+| `TAISCE_INFERENCE_ENDPOINT is "api.deepseek.com", which TAISCE_INFERENCE_ALLOWLIST does not list (https://api.deepseek.com)` | You wrote a URL. Write just `api.deepseek.com` |
 | `... which TAISCE_INFERENCE_ALLOWLIST does not list` | The port is on one side and not the other. Make them match |
 | `TAISCE_INFERENCE_ALLOWLIST is empty, so no endpoint may receive message content` | Set the allowlist |
 | `... is not https, and only a loopback address may be plaintext` | Use `https`, or a local address: `localhost`, `127.0.0.1`, `::1` or `host.docker.internal` |
@@ -91,13 +91,13 @@ still work. It just can't form anything new.
 **Fix.** List hosts exactly as the endpoint has them, separated by commas:
 
 ```bash
-export TAISCE_INFERENCE_ALLOWLIST=host.docker.internal:11434
+sed -i.bak 's/^TAISCE_INFERENCE_ALLOWLIST=.*/TAISCE_INFERENCE_ALLOWLIST=api.deepseek.com/' .env && rm .env.bak
 docker compose up -d
 docker compose logs --no-log-prefix worker | grep -c 'MEMORY WILL NOT FORM'   # should print 0
 ```
 
-Export the variables in the same shell that runs `docker compose up -d`. Compose recreates the
-containers whose settings changed. The [deployment guide](../architecture/deployment.md) has the
+Compose reads `.env` from the directory you run it in, and recreates the containers whose settings
+changed. The [deployment guide](../architecture/deployment.md) has the
 full rules.
 
 ### `formed` stays `null`
@@ -113,15 +113,15 @@ saved a turn.
 2. **Is the model failing?** The worker logs `"msg":"formation pass"` lines with `"errored":1`.
    Each failure is retried after a longer wait. After six tries the turn is parked (next section).
    Common causes:
-   - A container can't reach Ollama. Run the check in
-     [set up your machine](../start/your-machine.md#check-that-a-container-reaches-the-model); on
-     Linux the usual cause is Ollama listening on loopback only.
-   - The model hasn't been pulled, or it is the build for another platform. Pull the one
-     `TAISCE_INFERENCE_EXTRACTOR_MODEL` names: `qwen3.6:35b-a3b-mxfp8` runs only on Apple silicon, and
-     `qwen3.6:35b-a3b-q8_0` is the build for Linux and Windows.
+   - A container can't reach the model's host. Run the check in
+     [set up your machine](../start/your-machine.md#check-that-a-container-reaches-the-model).
+   - The key is wrong. `curl -sS https://api.deepseek.com/models -H "Authorization: Bearer <key>"`
+     answers `401` for a key DeepSeek does not accept.
+   - The model name is one the endpoint doesn't serve. `TAISCE_INFERENCE_EXTRACTOR_MODEL` must be in
+     that same `/models` list.
    - You sourced a file from [deploy/inference/](../../deploy/inference/) before running compose.
-     Those files say `localhost`, which inside a container means the container itself. Unset those
-     variables and let compose use its own defaults.
+     Those are for tools on the host, and the demo ones say `localhost`, which inside a container
+     means the container itself. Unset those variables and let `.env` and compose's defaults decide.
 3. **Is it just slow?** A large model on a laptop takes a while per message, and nothing is logged
    while it works. A turn that runs past `TAISCE_FORMATION_TURN_BUDGET` (default `5m`) fails that
    attempt. Wait, or raise the budget for document-sized turns.
@@ -292,7 +292,7 @@ services:
   api:
     environment:
       TAISCE_INFERENCE_EMBEDDING_REVISION: weights-v1
-      TAISCE_INFERENCE_EMBEDDING_MODEL: qwen3-embedding:4b-q8_0
+      TAISCE_INFERENCE_EMBEDDING_MODEL: qwen/qwen3-embedding-4b
 ```
 
 The revision must match the one you used with `embeddings start`. Once it's set, a broken embedding

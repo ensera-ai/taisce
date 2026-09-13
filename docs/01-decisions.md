@@ -416,3 +416,65 @@ Ollama build is named because a reader needs a tag that runs, and it is marked a
 documentation states and the allowlist enforces. Operations: a first run needs API keys rather than a
 local model.
 
+## D11 — Compose defaults to DeepSeek and asks for its key, and the documentation names no local model runner
+
+**Date.** 2026-09-13. **Issue.** [#63](https://github.com/ensera-ai/taisce/issues/63), which supersedes
+[#58](https://github.com/ensera-ai/taisce/issues/58). **Supersedes** D10's rejection of DeepSeek as
+compose's default endpoint.
+
+**Why it was open.**
+- **The default did not run everywhere.** `compose.yaml` defaulted to a model on the host, under a tag
+  that runs only on Apple silicon (#58). Fixing the tag would still have left a first run depending on
+  a 38 GB model most machines serve slowly.
+- **The owner decided the direction:** a hosted default, and documentation that describes one way to
+  start rather than two.
+
+**Decided.**
+- **Compose defaults generation to DeepSeek.** The endpoint is `https://api.deepseek.com/v1`, the model
+  is `deepseek-flash`, and the allowlist is `api.deepseek.com`.
+- **The key has no default.** `${TAISCE_INFERENCE_API_KEY:?…}` makes Compose refuse to run the file,
+  and name the variable, until it is set. The documentation keeps the key in `.env`.
+- **The published documentation and the README describe two ways to run a model.** DeepSeek, with
+  OpenRouter's `qwen/qwen3-embedding-4b` for semantic search; and, for conversation text that must
+  stay on the operator's infrastructure, Qwen served with vLLM.
+- **`make test-inference` defaults to the `deepseek` profile.** Every profile embeds through
+  OpenRouter, and the profile for a model on the host is removed.
+
+**D10's objections, and why they no longer hold.**
+- **"A default that needs a key fails for everyone without one."** It still fails, but loudly and at
+  the first command, naming the variable. The alternative, a default that starts and never forms, fails
+  silently.
+- **"A default that sends text to a third party is consent given by omission."** Nothing is sent until
+  an operator supplies a key, and supplying a DeepSeek key is the act of choosing DeepSeek. The
+  allowlist still bounds every host.
+
+**Rejected: a Linux-capable local tag as the default.** It fixes #58's symptom and keeps a first run
+that most machines finish slowly, and the tag has not been through the corpus.
+
+**Rejected: a default endpoint with an optional key.** An instance without a key would start, store
+turns and form none. That is the failure `MEMORY WILL NOT FORM` exists to shout about, and a refusal
+before anything starts is clearer.
+
+**Rejected: a wrapper script that prompts for the key.** It would be a second way to start the stack,
+and Compose itself would still need the key on every later command that reads the file.
+
+**Rejected: OpenRouter as the default extractor.** Its shared pool answered `429` minutes apart
+throughout a corpus run (`deploy/inference/openrouter.env`), which a formation worker would hit
+continuously.
+
+**Rejected: keeping the local-runner pages as a secondary path.** Owner's decision: two first-run paths
+double what a reader has to choose between and what has to be kept true on three platforms.
+Self-hosting remains documented through vLLM.
+
+**What this does not change.**
+- **The binary's own defaults.** With no endpoint it forms nothing and says so.
+- **The Helm chart,** whose endpoint is whatever the operator sets.
+- **Measurement records** that ran a local model; they describe what was run.
+
+**Undo cost.** Low: the defaults in `compose.yaml` and `.env.example`, one profile file, and the pages
+that describe them. A deployment that set its own variables is unaffected either way.
+
+**Impact.** Security: by default, conversation text leaves the operator's infrastructure for DeepSeek
+once a key is supplied, and the allowlist bounds where it goes. Cost: formation spends provider tokens
+per stored turn. Operations: every Compose command that reads the file needs the key, which is why it lives in `.env`.
+

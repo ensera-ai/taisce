@@ -7,7 +7,8 @@ Taisce is open-source memory for AI agents. Your agent tells it what people said
 questions and gets back facts, each with the exact words it came from.
 
 It is one Go service on PostgreSQL, and you run it yourself: on your laptop with
-`docker compose up`, or in your own cluster. Your data stays on your infrastructure.
+`docker compose up`, or in your own cluster. The memory store stays on your infrastructure. The model
+that reads conversations is DeepSeek's hosted API by default, or one you serve yourself.
 
 ## Who it is for
 

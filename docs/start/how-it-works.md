@@ -178,8 +178,8 @@ kept.
   projects.
 - **The model never writes memory directly.** It proposes; Taisce checks and records. Whatever
   arrives from a model is treated as untrusted text.
-- **A hosted model sees the conversation.** With a model on your own machine, nothing leaves it.
-  With a hosted provider, message text is sent there. Taisce sends it only to the hosts you list in
+- **A hosted model sees the conversation.** With a hosted provider, which is the default, message
+  text is sent there. With a model you serve yourself, nothing leaves your infrastructure. Taisce sends it only to the hosts you list in
   `TAISCE_INFERENCE_ALLOWLIST`, and an empty list sends nothing.
 
 ## Where to go next

@@ -66,7 +66,7 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 flowchart LR
     client(["agent or adapter"])
     operator(["operator on the host"])
-    ollama(["model on the host, port 11434"])
+    model(["model provider: DeepSeek by default"])
     subgraph host["One host: one failure domain"]
         pg[("postgres")]
         boot["bootstrap: runs once, exits"]
@@ -79,8 +79,8 @@ flowchart LR
     api -->|"taisce_data and taisce_control"| pg
     worker -->|"taisce_data and taisce_control"| pg
     manage -->|"administrative"| pg
-    worker -->|"generation, allowlisted"| ollama
-    litellm -.->|"when enabled"| ollama
+    worker -->|"generation over https, allowlisted"| model
+    litellm -.->|"when enabled"| model
     client -->|"published port 8080"| api
     operator -->|"host loopback 8081"| manage
 ```
@@ -166,14 +166,12 @@ the arrangements this project recommends, in order:
 |---|---|---|---|
 | **Hosted (preferred)** | DeepSeek `deepseek-flash`, at `https://api.deepseek.com/v1` | OpenRouter `qwen/qwen3-embedding-4b`, at `https://openrouter.ai/api/v1` | Most deployments: nothing to run. Conversation text goes to DeepSeek, and text for embedding goes to OpenRouter |
 | **Qwen on your own GPUs (vLLM)** | `Qwen/Qwen3.8-27B`, BF16, thinking off | `Qwen/Qwen3-Embedding-4B`, BF16 | Production where conversation text must not leave your infrastructure |
-| **Qwen on one machine (Ollama)** | `qwen3.6:35b-a3b-mxfp8` on Apple silicon; `qwen3.6:35b-a3b-q8_0` on Linux or Windows | `qwen3-embedding:4b-q8_0` | Development, or a small single-host deployment |
 
 **What has been measured, and what has not:**
 
-- **Extraction.** `deepseek-flash`, `Qwen/Qwen3.8-27B` on vLLM 0.29.0 (one RTX PRO 6000, thinking off)
-  and `qwen3.6:35b-a3b-mxfp8` on Ollama each passed all 19 cases of the extraction corpus, three
-  attempts each ([extraction models, 2026-09-11](../36-extraction-models.md)). The `q8_0` build has
-  not been through the corpus ([#58](https://github.com/ensera-ai/taisce/issues/58)).
+- **Extraction.** `deepseek-flash`, and `Qwen/Qwen3.8-27B` on vLLM 0.29.0 (one RTX PRO 6000, thinking
+  off), each passed all 19 cases of the extraction corpus, three attempts each
+  ([extraction models, 2026-09-11](../36-extraction-models.md)).
 - **Embedding.** `Qwen/Qwen3-Embedding-4B` on vLLM 0.28.0 served the GPU qualification runs, whose
   deployed checks passed, report search included ([GPU qualification](../23-gpu-qualification.md),
   [report quality](../26-report-quality-qualification.md)). OpenRouter's `qwen/qwen3-embedding-4b`
@@ -216,12 +214,24 @@ server. That is the arrangement that was run, not a sizing rule for yours.
 
 ### What compose ships by default
 
-Compose points generation at a model on your own machine, reached from the container as
-`http://host.docker.internal:11434/v1`, with an allowlist of `host.docker.internal:11434`. That
-default needs no signup and sends nothing off the machine. Its default model name is the Apple silicon
-build; on Linux or Windows set `TAISCE_INFERENCE_EXTRACTOR_MODEL=qwen3.6:35b-a3b-q8_0`
-([#58](https://github.com/ensera-ai/taisce/issues/58)). The quickstart sets DeepSeek's variables
-instead, the preferred way to start.
+`compose.yaml` points generation at DeepSeek: endpoint `https://api.deepseek.com/v1`, model
+`deepseek-flash`, allowlist `api.deepseek.com`. It has no default key, because no key can ship in an
+open repository. Until `TAISCE_INFERENCE_API_KEY` has a value, Compose refuses to run the file and
+prints, after where in the file it looked:
+
+```text
+required variable TAISCE_INFERENCE_API_KEY is missing a value: set it to your DeepSeek API key from https://platform.deepseek.com/api_keys, in .env beside compose.yaml
+```
+
+- **Not only `up`.** Compose fills in variables across the whole file whenever it reads it, so
+  `config`, and `down` when the project name comes from the file, refuse too. Keep the key in `.env`
+  beside the file, which Compose reads on every command.
+- **The key is where text starts to leave.** An instance started without one would store turns and
+  never form them; the refusal names the one thing missing instead. Once the key is set, each stored
+  turn goes to DeepSeek to be read, and only to the hosts on the allowlist. To keep conversation text
+  on your own infrastructure, set the three variables to a model you serve.
+- **The `v0.3.2` compose file predates this default.** The quickstart and the README set all four
+  variables, so they work with that file and with this one.
 
 LiteLLM ships as an opt-in profile (`--profile gateway`, configured by
 [`deploy/litellm/config.yaml`](../../deploy/litellm/config.yaml)). It is not the default hop. A
@@ -238,15 +248,14 @@ in a committed file is a key in the repository, so you export it separately.
 
 | Profile | Generation | Embedding | For |
 |---|---|---|---|
-| [`local.env`](../../deploy/inference/local.env) | Ollama on this machine | the same Ollama | the default for host tools; nothing leaves the machine |
-| [`deepseek.env`](../../deploy/inference/deepseek.env) | DeepSeek | Ollama on this machine | development runs against the preferred hosted extractor |
-| [`openrouter.env`](../../deploy/inference/openrouter.env) | a model on OpenRouter | Ollama on this machine | trying another hosted extractor; conversation text leaves your infrastructure |
-| [`demo-qwen3.6.env`](../../deploy/inference/demo-qwen3.6.env), [`demo-qwen3.8.env`](../../deploy/inference/demo-qwen3.8.env) | vLLM on a rented GPU, through a tunnel | Ollama on this machine | demos and measurement runs |
+| [`deepseek.env`](../../deploy/inference/deepseek.env) | DeepSeek | OpenRouter | the default for `make test-inference`; conversation text goes to both providers |
+| [`openrouter.env`](../../deploy/inference/openrouter.env) | a model on OpenRouter | OpenRouter | trying another hosted extractor; its shared pool throttles a formation worker |
+| [`demo-qwen3.6.env`](../../deploy/inference/demo-qwen3.6.env), [`demo-qwen3.8.env`](../../deploy/inference/demo-qwen3.8.env) | vLLM on a rented GPU, through a tunnel | OpenRouter | demos and measurement runs |
 | [`gpu.env`](../../deploy/inference/gpu.env) | a host you rented | your choice | measurement runs; the endpoint and allowlist are deliberately empty and must be filled in per run |
 
-The profiles use `localhost` because they are for tools running on the host, such as test targets
-and scripts. Compose has its own container-side defaults. A value you have already exported wins
-over the profile's.
+The demo profiles reach their tunnel on `localhost`, because profiles are for tools running on the
+host, such as test targets and scripts. Compose has its own container-side defaults. A value you have
+already exported wins over the profile's.
 
 Generation and embedding may use different providers. The embedding endpoint and key fall back to
 the generation ones when unset. A key always travels with its own endpoint: a different embedding
@@ -262,10 +271,10 @@ endpoint uses its own key or none, never the generation provider's.
   not being an allowlist.
 - **Exact host match, never a prefix.** Each comma-separated entry must equal the endpoint URL's
   host exactly as written: the hostname, plus `:port` only when the URL names a port. So
-  `http://host.docker.internal:11434/v1` needs `host.docker.internal:11434`, and
-  `https://models.example/v1` needs `models.example`. `models.example:443` does not match it,
-  because the URL has no port. A prefix match would accept `https://models.example.attacker.test`
-  for an entry of `models.example`.
+  `https://api.deepseek.com/v1` needs `api.deepseek.com`, and `http://localhost:8000/v1` needs
+  `localhost:8000`. `api.deepseek.com:443` does not match the first, because the URL has no port. A
+  prefix match would accept `https://api.deepseek.com.attacker.test` for an entry of
+  `api.deepseek.com`.
 - **Every endpoint is checked.** The generation endpoint, and a different embedding endpoint, are
   both checked against the same list. The second inherits nothing from the first.
 - **TLS off the machine.** Plain `http` is accepted only for `localhost`, `127.0.0.1`, `::1` and

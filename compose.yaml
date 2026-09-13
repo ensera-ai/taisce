@@ -68,41 +68,38 @@ x-service: &service
 
     # ── The model ──────────────────────────────────────────────────────────────────────────────
     #
-    # Extraction is the one thing that cannot be shipped: no key can be baked into an open
-    # repository, and a hosted provider means the first five minutes contain a signup.
+    # Extraction needs a model, and the default is DeepSeek's hosted API: nothing to download or
+    # serve, and measured to hold the extraction contract, 19 of 19 corpus cases
+    # (docs/36-extraction-models.md).
     #
-    # So the default points at Ollama on the host, through `host.docker.internal` (mapped for every
-    # Docker by `extra_hosts` below). Whether Ollama must listen beyond loopback depends on the
-    # machine: under Colima a container reaches the Mac's loopback, and on plain Linux Docker it
-    # reaches the bridge address and not loopback. docs/start/your-machine.md has each system and a
-    # check that runs from inside a container:
+    # No key can ship in an open repository, so there is no default one: compose refuses `up`, and
+    # any other command that reads this file, until TAISCE_INFERENCE_API_KEY has a value. That is
+    # deliberate. An instance started without a key would store turns and never form them, which
+    # looks like a memory that does not work; a refusal names the one thing missing. Put the key in
+    # `.env` beside this file, which compose reads on every command.
     #
-    #     ollama pull qwen3.6:35b-a3b-mxfp8
-    #
-    # Without a model the instance still starts. It stores turns, serves recall of whatever is
-    # already formed, and erases — and it says loudly at startup that memory will not form, because
-    # a system that silently stores and never extracts looks like a memory that does not work.
-    TAISCE_INFERENCE_ENDPOINT: ${TAISCE_INFERENCE_ENDPOINT:-http://host.docker.internal:11434/v1}
-    TAISCE_INFERENCE_EXTRACTOR_MODEL: ${TAISCE_INFERENCE_EXTRACTOR_MODEL:-qwen3.6:35b-a3b-mxfp8}
-    TAISCE_INFERENCE_API_KEY: ${TAISCE_INFERENCE_API_KEY:-}
+    # Supplying the key is also the step at which conversation text starts leaving this machine: each
+    # stored turn is sent to DeepSeek to be read, and only to the hosts on the allowlist below. To keep
+    # it on your own infrastructure, point these at a model you serve (docs/architecture/deployment.md,
+    # Choosing a model) and change the allowlist with them.
+    TAISCE_INFERENCE_ENDPOINT: ${TAISCE_INFERENCE_ENDPOINT:-https://api.deepseek.com/v1}
+    TAISCE_INFERENCE_EXTRACTOR_MODEL: ${TAISCE_INFERENCE_EXTRACTOR_MODEL:-deepseek-flash}
+    TAISCE_INFERENCE_API_KEY: ${TAISCE_INFERENCE_API_KEY:?set it to your DeepSeek API key from https://platform.deepseek.com/api_keys, in .env beside compose.yaml}
 
     # ── Two providers, if that is what suits ───────────────────────────────────────────────────
     #
     # Generation and embedding are different jobs. Extraction is slow, is the expensive part, runs on
     # a background pass where nobody is waiting, and is where a better model shows. Embedding is a
-    # cheap forward pass over short text and is the one most worth keeping on the operator's own
-    # hardware.
+    # cheap forward pass over short text, and a different provider can suit it.
     #
     # So these may point somewhere else, and both fall back to the endpoint above when unset — one
-    # provider is the ordinary case and should need one variable. A hosted extractor with a local
-    # embedder looks like:
+    # provider is the ordinary case and should need one variable. DeepSeek serves no embedding model,
+    # so semantic search beside the default extractor looks like:
     #
-    #     TAISCE_INFERENCE_ENDPOINT=https://openrouter.ai/api/v1
-    #     TAISCE_INFERENCE_EXTRACTOR_MODEL=<a model that provider serves>
-    #     TAISCE_INFERENCE_API_KEY=<their key>
-    #     TAISCE_INFERENCE_EMBEDDING_ENDPOINT=http://host.docker.internal:11434/v1
-    #     TAISCE_INFERENCE_EMBEDDING_MODEL=qwen3-embedding:4b-q8_0
-    #     TAISCE_INFERENCE_ALLOWLIST=openrouter.ai,host.docker.internal:11434
+    #     TAISCE_INFERENCE_EMBEDDING_ENDPOINT=https://openrouter.ai/api/v1
+    #     TAISCE_INFERENCE_EMBEDDING_MODEL=qwen/qwen3-embedding-4b
+    #     TAISCE_INFERENCE_EMBEDDING_API_KEY=<their key>
+    #     TAISCE_INFERENCE_ALLOWLIST=api.deepseek.com,openrouter.ai
     #
     # Note the allowlist names BOTH. Every host that receives somebody's words is listed, and a second
     # endpoint does not inherit the first one's permission — see below.
@@ -124,10 +121,10 @@ x-service: &service
     #
     # A hosted provider means somebody's words leave this machine. That is the operator's decision to
     # make and this list is where they make it — deliberately, by writing the host down.
-    TAISCE_INFERENCE_ALLOWLIST: ${TAISCE_INFERENCE_ALLOWLIST:-host.docker.internal:11434}
+    TAISCE_INFERENCE_ALLOWLIST: ${TAISCE_INFERENCE_ALLOWLIST:-api.deepseek.com}
   extra_hosts:
-    # Colima and Docker Desktop resolve this already; declaring it makes the file work on plain
-    # Linux Docker too, where it otherwise does not exist.
+    # For a model served on this host, reached as `host.docker.internal`. Colima and Docker Desktop
+    # resolve the name already; declaring it makes it work on plain Linux Docker too.
     - "host.docker.internal:host-gateway"
   restart: unless-stopped
 
@@ -279,6 +276,9 @@ services:
     command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
     volumes:
       - ./deploy/litellm:/etc/litellm:ro
+    environment:
+      # The default route is the model the service reaches directly, with the same key.
+      DEEPSEEK_API_KEY: ${TAISCE_INFERENCE_API_KEY:-}
     ports:
       - "${LITELLM_PORT:-4000}:4000"
     restart: unless-stopped
