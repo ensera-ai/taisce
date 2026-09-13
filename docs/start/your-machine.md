@@ -3,14 +3,15 @@
 
 # Set up your machine
 
-Taisce runs in containers. The model that reads conversations runs in Ollama, on your machine and
-outside those containers. So every machine needs the same things, and differs only in how you get
+Taisce runs in containers. So every machine needs the same things, and differs only in how you get
 them:
 
 1. **Docker with the Compose plugin**, so `docker compose version` answers.
-2. **Ollama, reachable from inside a container** at `http://host.docker.internal:11434`. The compose
-   file maps that name to your machine, and Taisce's worker calls the model through it.
-3. **`jq`** to read JSON, and **`uuidgen`** to make idempotency keys.
+2. **`jq`** to read JSON, and **`uuidgen`** to make idempotency keys.
+3. **Ollama, reachable from inside a container** at `http://host.docker.internal:11434`, **only if you
+   run the model on your own machine.** The compose file maps that name to your machine, and Taisce's
+   worker calls the model through it. With DeepSeek's hosted API, which the
+   [quickstart](../developers/quickstart.md) prefers, skip the Ollama steps and the check below.
 
 Follow the section for your system, then run [the check](#check-that-a-container-reaches-the-model).
 It is the same on every system, and it tests the one thing that differs between them: whether a
@@ -178,8 +179,12 @@ empty and the command prints nothing after the version, but it doesn't fail eith
 
 ```text
 Docker Compose version …
-qwen3.6:35b-a3b-mxfp8
+qwen3.6:35b-a3b-q8_0
 ```
+
+The model's tag depends on the platform: the quickstart's
+[step 1](../developers/quickstart.md#ollama-everything-stays-on-your-machine) names the build for
+Apple silicon and the one for Linux and Windows.
 
 The second command starts a throwaway container and asks Ollama for its models from inside it. That
 is the path Taisce's worker takes; `--add-host` does for this container what the compose file does

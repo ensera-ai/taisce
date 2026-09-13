@@ -12,23 +12,26 @@ all of it is Apache-2.0.
 
 ## Run it
 
-You need Docker with the Compose plugin and [Ollama](https://ollama.com), which runs the model that
-reads conversations on your own machine and has to be reachable from inside a container.
-[Set up your machine](docs/start/your-machine.md) covers Linux, macOS with Colima and Windows with
+You need Docker with the Compose plugin and a model to read conversations. The preferred way is
+DeepSeek's hosted API. To keep every word on your own infrastructure, run a Qwen model on Ollama or
+vLLM instead: the [quickstart](docs/developers/quickstart.md) shows both, and
+[set up your machine](docs/start/your-machine.md) covers Linux, macOS with Colima and Windows with
 WSL2.
 
-Then, in an empty directory. You do not need a checkout — the compose file names published images
-and pulls them:
+In an empty directory, with your DeepSeek key exported as `DEEPSEEK_API_KEY`. You do not need a
+checkout — the compose file names published images and pulls them:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.2/compose.yaml
-ollama pull qwen3.6:35b-a3b-mxfp8
+export TAISCE_INFERENCE_ENDPOINT=https://api.deepseek.com/v1 TAISCE_INFERENCE_EXTRACTOR_MODEL=deepseek-flash
+export TAISCE_INFERENCE_API_KEY=$DEEPSEEK_API_KEY TAISCE_INFERENCE_ALLOWLIST=api.deepseek.com
 docker compose up -d
 export TOKEN=$(docker compose logs --no-log-prefix bootstrap | awk '/^token:/ {print $2}')
 ```
 
 That starts PostgreSQL, sets up the database, creates a project called `default`, and serves the
-API on `localhost:8080`. The last line saves the project token that setup printed once.
+API on `localhost:8080`. The last line saves the project token that setup printed once. Each turn you
+save is sent to DeepSeek to be read; only the hosts on the allowlist ever receive text.
 
 ## Try it
 
