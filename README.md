@@ -23,7 +23,7 @@ Then, in a second terminal, in an empty directory. You do not need a checkout â€
 names published images and pulls them:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.1/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.3.2/compose.yaml
 ollama pull qwen3.6:35b-a3b-mxfp8
 docker compose up -d
 export TOKEN=$(docker compose logs --no-log-prefix bootstrap | awk '/^token:/ {print $2}')

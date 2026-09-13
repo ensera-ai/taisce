@@ -42,13 +42,11 @@ tag's `v`; it installs the image published beside it, named by the release tag. 
 as above:
 
 ```sh
-helm install memory oci://ghcr.io/ensera-ai/charts/taisce --version 0.3.1 -n taisce --create-namespace \
-  --set image.tag=v0.3.1
+helm install memory oci://ghcr.io/ensera-ai/charts/taisce --version 0.3.2 -n taisce --create-namespace
 ```
 
-`--set image.tag` is needed only for charts 0.3.0 and 0.3.1, which ask for their image without the
-`v` and so name a tag that was never pushed ([D5](../../docs/01-decisions.md)). Later charts ask for
-the right tag on their own.
+Charts 0.3.0 and 0.3.1 ask for their image without the `v` and so name a tag that was never pushed
+([D5](../../docs/01-decisions.md)); installing either needs `--set image.tag=v0.3.1`.
 
 ## Shrinking it, deliberately
 

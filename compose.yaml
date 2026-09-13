@@ -46,7 +46,7 @@ name: taisce
 # that drifted between them would be a defect nobody sees until one half is talking to the wrong
 # database.
 x-service: &service
-  image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.1}
+  image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.2}
   depends_on:
     bootstrap:
       condition: service_completed_successfully
@@ -137,7 +137,7 @@ services:
   # because building it compiles pgvector from source — several minutes, on the machine of somebody
   # who wanted to try this rather than build it.
   postgres:
-    image: ghcr.io/ensera-ai/taisce-postgres:${TAISCE_VERSION:-v0.3.1}
+    image: ghcr.io/ensera-ai/taisce-postgres:${TAISCE_VERSION:-v0.3.2}
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taisce}
       POSTGRES_DB: taisce
@@ -163,7 +163,7 @@ services:
   # takes locks a serving process must not hold — and because two server replicas starting together
   # would otherwise both try to migrate.
   bootstrap:
-    image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.1}
+    image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.2}
     command: ["bootstrap", "-project", "${TAISCE_PROJECT:-default}"]
     depends_on:
       postgres:
@@ -234,7 +234,7 @@ services:
   # DDL, and it is bound to loopback by default: an operator reaches it from the host, and nothing
   # else does until the port is deliberately published elsewhere.
   manage:
-    image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.1}
+    image: ghcr.io/ensera-ai/taisce:${TAISCE_VERSION:-v0.3.2}
     depends_on:
       bootstrap:
         condition: service_completed_successfully
