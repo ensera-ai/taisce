@@ -59,21 +59,36 @@ func paint(enabled bool, code, value string) string {
 	return "\x1b[" + code + "m" + value + "\x1b[0m"
 }
 
-// cleanTerminal makes a value safe to draw: invalid UTF-8 becomes a replacement character, a line
-// break or tab becomes one space so a value cannot start a new line inside a panel, and every other
-// control character is removed so an escape sequence in a name cannot repaint the screen.
+// cleanTerminal makes a value safe to draw: invalid UTF-8 becomes a replacement character; a line
+// break, tab, line separator or paragraph separator becomes one space, so a value cannot start a new
+// line inside a panel; and every control character (category Cc) and format character (category Cf)
+// is removed.
+//
+// Control characters are removed because an escape sequence in a name would repaint the screen.
+// Format characters are removed because they act on how a line looks without being visible: a
+// direction override reorders what follows it, so an operator reads something other than the value,
+// and a zero-width character makes two different names print identically. They also break width
+// arithmetic — counted as a cell, they draw a panel's border off by one. Removing the zero-width
+// joiner splits a joined emoji into its parts, which is the price of that and is accepted.
+//
+// Who could put such a character here, read from the code at the time of writing: nobody but the
+// operator. Every value the renderer draws is a constant, a UUID, a rebuild status the schema limits
+// to three words, or a project name the provisioner holds to `^[a-z][a-z0-9_]{0,62}$`. This is
+// defence for the value somebody adds next, not a hole anyone can reach today (#19).
 //
 // It does NOT normalise whitespace. It once collapsed runs of spaces and trimmed both ends, and every
 // caller that measures width runs text through here — so a label padded to line up a column lost its
 // padding, and a title's surrounding spaces stopped being counted, which drew the top border two
-// cells wider than the rows beneath it (#18). Spacing a caller wrote is layout, not a hazard; the
-// hazard is control characters, and that is all this removes.
+// cells wider than the rows beneath it (#18). Spacing a caller wrote is layout, not a hazard.
 func cleanTerminal(value string) string {
 	var b strings.Builder
-	for _, r := range strings.ToValidUTF8(value, "�") {
-		if r == '\n' || r == '\r' || r == '\t' {
+	for _, r := range strings.ToValidUTF8(value, "\uFFFD") {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t' || r == 0x2028 || r == 0x2029:
 			b.WriteByte(' ')
-		} else if !unicode.IsControl(r) {
+		case unicode.IsControl(r) || unicode.Is(unicode.Cf, r):
+			// Removed: see above.
+		default:
 			b.WriteRune(r)
 		}
 	}
@@ -81,7 +96,7 @@ func cleanTerminal(value string) string {
 }
 
 func runeWidth(r rune) int {
-	if unicode.Is(unicode.Mn, r) || unicode.IsControl(r) {
+	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Cf, r) || unicode.IsControl(r) {
 		return 0
 	}
 	switch width.LookupRune(r).Kind() {
