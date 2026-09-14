@@ -131,6 +131,7 @@ module.exports = {
           {
             title: 'Go deeper',
             items: [
+              {label: 'Operate an instance', to: '/docs/operate/overview'},
               {label: 'Architecture', to: '/docs/architecture/overview'},
               {label: 'PostgreSQL', to: '/docs/postgresql/overview'},
               {label: 'Code reference', to: '/docs/reference/code/overview'},
