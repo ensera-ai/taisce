@@ -227,10 +227,21 @@ func (p *Portal) issue(r *http.Request, _ credential.Grant) (string, string, err
 func (p *Portal) revoke(r *http.Request, _ credential.Grant) (string, string, error) {
 	name := strings.TrimSpace(r.PostFormValue("project"))
 	id := strings.TrimSpace(r.PostFormValue("id"))
-	if !validUUID(id) {
+	if !validProjectName(name) || !validUUID(id) {
 		return name, "", errInvalidPortalTarget
 	}
-	return name, "the credential is revoked; every client holding it stops now", p.m.credentials.Revoke(r.Context(), id)
+	// The form sits on one project's page, so it revokes only that project's keys. Otherwise a post
+	// from one project's page could revoke another project's key, recorded on the ledger under the
+	// wrong project, or an operator key, including the one signed in (#52). The management API and the
+	// CLI revoke across the instance, because their caller names a key, not a page.
+	err := p.m.credentials.RevokeInProject(r.Context(), id, name)
+	if errors.Is(err, credential.ErrUnknown) {
+		return name, "", errInvalidPortalTarget
+	}
+	if err != nil {
+		return name, "", err
+	}
+	return name, "the credential is revoked; every client holding it stops now", nil
 }
 
 func (p *Portal) seal(r *http.Request, _ credential.Grant) (string, string, error) {

@@ -242,9 +242,9 @@ effect at once: every client holding the token is refused on its next request.
 - **CLI:** `taisce credential revoke <credential id>`
 - **API:** `POST /manage/v1/credentials/revoke` with `{"id": "<credential id>"}`
 
-The ops centre's form revokes the identifier it is given without checking that it belongs to the
-project whose page it is on ([#52](https://github.com/ensera-ai/taisce/issues/52)). Copy the identifier
-from the row you mean.
+The ops centre's form revokes only keys of the project whose page it is on. A key of another project,
+an operator key or an identifier that names nothing is refused, and nothing is revoked. To revoke an
+operator key, or any key by identifier alone, use the CLI or the API.
 
 [Credentials](../10-project-credentials.md) covers what each kind allows in detail.
 
@@ -427,12 +427,6 @@ These are deliberate, and each holds on all three surfaces:
 
 These are open, and this guide describes the behaviour they will change:
 
-- [#51](https://github.com/ensera-ai/taisce/issues/51): the ops centre issues a key for a project that
-  is suspended or does not exist.
-- [#52](https://github.com/ensera-ai/taisce/issues/52): the ops centre revokes any key identifier,
-  whichever project's page the form is on.
-- [#53](https://github.com/ensera-ai/taisce/issues/53): a forged ops-centre form is recorded on the
-  ledger as `formation.status`.
 - [#54](https://github.com/ensera-ai/taisce/issues/54): *Turns stored* counts messages, not turns.
 - [#55](https://github.com/ensera-ai/taisce/issues/55): *Seal to here* says it sealed when there was
   nothing to seal, and the chart takes only a lower-case `"on"`.
