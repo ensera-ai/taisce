@@ -45,9 +45,12 @@ sudo usermod -aG docker "$USER"
 ### jq and uuidgen
 
 ```bash
-sudo apt-get install jq uuid-runtime   # Ubuntu, Debian
-sudo dnf install jq util-linux          # Fedora, RHEL
+sudo apt-get update && sudo apt-get install jq uuid-runtime   # Ubuntu, Debian
+sudo dnf install jq util-linux                                # Fedora, RHEL
 ```
+
+A fresh Ubuntu or Debian has no package lists, so `apt-get install` alone answers "Unable to locate
+package" until `apt-get update` has run.
 
 ## macOS with Colima
 
@@ -81,7 +84,7 @@ page changes.
 ## Windows with WSL2
 
 Every command in the quickstart is a Linux shell command. On Windows, run them in a Linux distribution
-under WSL2, not in PowerShell.
+under WSL2, not in PowerShell. WSL needs Windows 10 version 2004 (build 19041) or later, or Windows 11.
 
 In PowerShell, as administrator:
 
@@ -89,18 +92,19 @@ In PowerShell, as administrator:
 wsl --install
 ```
 
-Restart when asked. This installs Ubuntu. Open **Ubuntu** from the Start menu and work in your Linux
-home directory (`cd ~`), not under `/mnt/c`: Linux reaches files on the Windows drive much more
-slowly. Inside Ubuntu:
+Restart when asked. This installs Ubuntu. Open **Ubuntu** from the Start menu; the first time, it asks
+you to create a Linux user name and password. Work in your Linux home directory (`cd ~`), not under
+`/mnt/c`: Linux reaches files on the Windows drive much more slowly. Inside Ubuntu:
 
 ```bash
-sudo apt-get install jq uuid-runtime
+sudo apt-get update && sudo apt-get install jq uuid-runtime
 ```
 
 Then choose where Docker runs. Use one or the other: Docker Desktop requires that Docker Engine is
 not also installed inside the distribution.
 
-- **With Docker Desktop.** Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+- **With Docker Desktop.** Its WSL 2 backend needs WSL 2.1.5 or later, so run `wsl --update` in
+  PowerShell first. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
   with the WSL 2 based engine. Under **Settings → Resources → WSL integration**, check that Ubuntu is
   on. `docker` inside Ubuntu then talks to Docker Desktop.
 - **With Docker Engine inside Ubuntu.** Follow the [Linux](#linux) section inside Ubuntu.
@@ -147,5 +151,5 @@ repository setup, the commands above and the check, which printed `401`, then th
 
 Both machines were arm64. The amd64 packages and images were not run on Linux.
 
-The Windows section follows Docker's and Microsoft's documentation as read on 2026-09-13, and has not
+The Windows section follows Docker's and Microsoft's documentation as read on 2026-09-14, and has not
 been run on Windows yet. [#84](https://github.com/ensera-ai/taisce/issues/84) tracks running it.
