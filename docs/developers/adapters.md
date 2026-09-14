@@ -127,7 +127,7 @@ and `darwin-arm64`. Run the built-in reference adapter first: if it passes, the 
 suite are fine, and any failure after that is your adapter's.
 
 ```bash
-V=v0.3.2 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
+V=v0.4.0 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
 curl -fsSLO https://github.com/ensera-ai/taisce/releases/download/$V/taisce-$V-$PLATFORM
 curl -fsSLO https://github.com/ensera-ai/taisce/releases/download/$V/taisce-$V-checksums.txt
 shasum -a 256 -c --ignore-missing taisce-$V-checksums.txt
