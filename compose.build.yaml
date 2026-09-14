@@ -16,15 +16,30 @@
 # rather than about what was asked for — and the wrong answer is the silent one. Here, a build is
 # something you named on the command line.
 #
-# `image:` is repeated so the built result lands on the same tag the base file names; without it
-# Compose would invent a project-scoped name and the two files would disagree about what is running.
+# ── WHY THE BUILD HAS ITS OWN TAG ────────────────────────────────────────────────────────────────
+#
+# The local image cache is one namespace for every Compose install on the machine. A build written to
+# the release tag the base file names would replace that release for all of them: the next install
+# recreated in any other directory would run this working tree while `docker compose ps`, `docker
+# image ls` and the container's image name all said release. So every service is tagged `taisce:dev`
+# or `taisce-postgres:dev`, names with no registry host, which no release pushes and no registry
+# serves, and `pull_policy: build` makes Compose build them rather than look them up. Leaving this
+# overlay off runs the release again, because the base file still names it.
+#
+# Not a project-scoped name, which is Compose's default: it changes with the directory, so one build
+# has a different name in every checkout. The cost of a fixed tag is that two checkouts on one machine
+# share it and the last one built is what both run; both are working-tree builds, which is the
+# distinction the tag exists to keep.
 
 services:
   postgres:
-    image: ghcr.io/ensera-ai/taisce-postgres:${TAISCE_VERSION:-v0.5.1}
+    image: taisce-postgres:dev
+    pull_policy: build
     build: ./deploy/postgres
 
   bootstrap:
+    image: taisce:dev
+    pull_policy: build
     build: &service-build
       context: .
       args:
@@ -33,10 +48,16 @@ services:
         VERSION: ${TAISCE_VERSION:-dev}
 
   api:
+    image: taisce:dev
+    pull_policy: build
     build: *service-build
 
   worker:
+    image: taisce:dev
+    pull_policy: build
     build: *service-build
 
   manage:
+    image: taisce:dev
+    pull_policy: build
     build: *service-build

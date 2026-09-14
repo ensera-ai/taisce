@@ -529,3 +529,49 @@ on their next `up`.
 one-time step for anyone who created an install with a v0.3.0–v0.4.0 file in a directory not called
 `taisce`.
 
+
+## D13 — A working-tree build is tagged as a local build, never as a release
+
+**Date.** 2026-09-14. **Issue.** [#95](https://github.com/ensera-ai/taisce/issues/95). **Refines** D4,
+which put the build in a second file and did not say what the build is called.
+
+**Why it was open.** `compose.build.yaml` tagged its build with the release tag `compose.yaml` names,
+so that the two files would agree about what is running. The local image cache is shared by every
+Compose install on a machine, so that agreement replaced the release for all of them: an install in
+another directory, recreated afterwards, ran the working tree under the release's name, and only the
+binary's own version line said otherwise. D4 rejected `image:` beside `build:` because it made "am I
+running my change or a release?" a question about cache state. The shared tag reintroduced exactly
+that question, across directories instead of within one.
+
+**Decided.**
+- Every service in the overlay is tagged `taisce:dev` or `taisce-postgres:dev`, with
+  `pull_policy: build`. A name with no registry host is one no release pushes and no registry serves,
+  so a build cannot replace a release, and Compose builds it rather than looking it up.
+- `deploy/composebuild_test.go` refuses an overlay that leaves a published service untagged, tags it
+  with a name a registry could serve, or lets Compose pull it.
+
+**Rejected: the release tag, which is what the overlay did.** The argument for it was that the base
+file and the overlay would name the same image. They then name the same image for every install on
+the machine, which is the defect.
+
+**Rejected: letting Compose name the build.** Compose's default is a project-scoped name, which would
+not collide with a release. It also changes with the directory, so one build has a different name in
+every checkout, and nothing in the file tells a reader what to look for in `docker image ls`.
+
+**Rejected: a tag per commit or per build.** It would keep every build apart, but Compose cannot
+compute it from the file, so every run would need a wrapper or an exported variable before the command
+D4 settled on works. Two checkouts sharing `:dev` is the smaller cost, since both are working-tree
+builds.
+
+**What this does not cover.**
+- Two checkouts on one machine share the `:dev` tags, so the last build is what both run.
+- The binary's version still comes from `TAISCE_VERSION` when it is set, so a build run with
+  `TAISCE_VERSION=v0.5.1` reports that version while tagged `:dev`.
+- A machine that already holds a build under a release tag keeps it until `docker compose pull`
+  replaces it. This prevents the next one and repairs none.
+
+**Undo cost.** Low: two lines per service in one overlay file, and a test. No release artefact and no
+data depend on the local tag.
+
+**Impact.** Operations: an install started from a release keeps running that release whatever is built
+on the same machine, and `docker image ls` shows builds and releases under different names.
