@@ -315,7 +315,11 @@ func (p *Portal) signed(next func(http.ResponseWriter, *http.Request, credential
 //
 // Everything else is deliberately the same: the operator credential is re-resolved here as it is for
 // a read, so a revoked operator cannot act with a live browser session any more than they can look.
-func (p *Portal) acting(next func(http.ResponseWriter, *http.Request, credential.Grant, string)) http.HandlerFunc {
+//
+// operation is the ledger's name for the action behind this route, so a request refused here is
+// recorded as an attempt at that action. The refusal happens before the action runs, and this is the
+// only place that knows which action was attempted.
+func (p *Portal) acting(operation string, next func(http.ResponseWriter, *http.Request, credential.Grant, string)) http.HandlerFunc {
 	return p.signed(func(w http.ResponseWriter, r *http.Request, grant credential.Grant) {
 		cookie, err := r.Cookie(portalCookie)
 		if err != nil {
@@ -323,7 +327,7 @@ func (p *Portal) acting(next func(http.ResponseWriter, *http.Request, credential
 			return
 		}
 		if err := r.ParseForm(); err != nil {
-			p.refuse(w, r, grant, "the form could not be read")
+			p.refuse(w, r, grant, operation, "the form could not be read")
 			return
 		}
 		p.mu.Lock()
@@ -334,7 +338,7 @@ func (p *Portal) acting(next func(http.ResponseWriter, *http.Request, credential
 		if !ok || subtle.ConstantTimeCompare([]byte(session.guard), []byte(r.PostFormValue("guard"))) != 1 {
 			// No detail. A request that did not come from this page is told that it did not work,
 			// not which half of the check it failed.
-			p.refuse(w, r, grant, "this request did not come from the portal; sign in again")
+			p.refuse(w, r, grant, operation, "this request did not come from the portal; sign in again")
 			return
 		}
 		next(w, r, grant, cookie.Value)
@@ -345,8 +349,12 @@ func (p *Portal) acting(next func(http.ResponseWriter, *http.Request, credential
 //
 // A refused action is on the ledger for the same reason a refused operation is: the record answers
 // "who tried", and an attempt that is turned away is exactly the kind somebody asks about later.
-func (p *Portal) refuse(w http.ResponseWriter, r *http.Request, grant credential.Grant, detail string) {
-	p.m.record(r, domain.AuditFormationStatus, grant, "", domain.OutcomeRefused, 0)
+//   - **The operation is the action attempted.** A request that fails the guard may be a cross-site
+//     attempt, and recorded under an unrelated name it is the one row nobody finds (#53).
+//   - **No project is recorded.** Nothing in a request that failed the guard is the operator's own
+//     claim, so its form fields stay out of a permanent, sealed record.
+func (p *Portal) refuse(w http.ResponseWriter, r *http.Request, grant credential.Grant, operation, detail string) {
+	p.m.record(r, operation, grant, "", domain.OutcomeRefused, 0)
 	p.render(w, http.StatusBadRequest, portalPage{Title: "Refused", Operator: grant.Name,
 		Outcome: &portalOutcome{Action: "the request", Detail: detail}})
 }

@@ -73,7 +73,7 @@ var portalActions = []portalAction{
 func (p *Portal) mountActions(mux *http.ServeMux) {
 	for _, action := range portalActions {
 		action := action
-		mux.HandleFunc("POST "+PortalPrefix+action.path, p.acting(
+		mux.HandleFunc("POST "+PortalPrefix+action.path, p.acting(action.name,
 			func(w http.ResponseWriter, r *http.Request, grant credential.Grant, session string) {
 				p.perform(w, r, grant, session, action)
 			}))

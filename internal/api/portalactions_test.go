@@ -139,6 +139,60 @@ func TestThePortalRefusesAnActionThatDidNotComeFromThePortal(t *testing.T) {
 	}
 }
 
+// ── #53 ──────────────────────────────────────────────────────────────────────────────────────
+//
+// A request that did not come from the page is refused before its action runs, and the ledger names
+// the action it attempted. The ledger answers "who tried what". A cross-site attempt recorded under
+// an unrelated read, as it once was under formation.status, is the one row nobody finds.
+//
+// Walked over every action, and forged both ways the guard check refuses: no guard, and a wrong one.
+func TestARequestThatDidNotComeFromThePortalIsRecordedUnderTheActionItAttempted(t *testing.T) {
+	a := signedInPortal(t, "portal_forged_ledger")
+	ctx := context.Background()
+	_, guard := a.page(t, "/portal/")
+	refused := func(operation string) int {
+		t.Helper()
+		var n int
+		if err := a.pool.QueryRow(ctx, a.schema.SQL(
+			`SELECT count(*) FROM {schema}.audit_entry WHERE principal_kind='operator' AND operation=$1 AND outcome='refused'`),
+			operation).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	actions := map[string]string{
+		"/portal/actions/create":  domain.AuditProjectCreate,
+		"/portal/actions/suspend": domain.AuditProjectSuspend,
+		"/portal/actions/resume":  domain.AuditProjectResume,
+		"/portal/actions/unpark":  domain.AuditFormationUnpark,
+		"/portal/actions/issue":   domain.AuditCredentialIssue,
+		"/portal/actions/revoke":  domain.AuditCredentialRevoke,
+		"/portal/actions/seal":    domain.AuditAuditSeal,
+	}
+	if len(actions) != api.PortalActionCount() {
+		t.Fatalf("%d actions are forged and the portal declares %d; an action nobody forges is one whose "+
+			"refusal nobody has watched recorded", len(actions), api.PortalActionCount())
+	}
+	for path, operation := range actions {
+		for how, form := range map[string]url.Values{
+			"no guard":    {"project": {"p1"}},
+			"wrong guard": {"project": {"p1"}, "guard": {strings.Repeat("0", len(guard))}},
+		} {
+			before := refused(operation)
+			if status := a.act(t, path, form); status != http.StatusBadRequest {
+				t.Fatalf("%s with %s answered %d, want 400", path, how, status)
+			}
+			if got := refused(operation) - before; got != 1 {
+				t.Fatalf("%s with %s left %d refused %s rows, want 1", path, how, got, operation)
+			}
+		}
+	}
+	if n := refused(domain.AuditFormationStatus); n != 0 {
+		t.Fatalf("%d refusals were recorded as a formation status read", n)
+	}
+}
+
 // Every action is a management operation that already had a ledger name, and every one of them
 // records the operator as principal. Walked as a set rather than checked one at a time, so an
 // action added later without a row fails here rather than in production.
