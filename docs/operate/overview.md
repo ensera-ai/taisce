@@ -214,8 +214,8 @@ No adapter reads an environment variable of its own. Issuing for a suspended pro
 The ops centre has an **Issue** form on each project's page, but it **never shows the token**: a
 token rendered into a page ends up in screenshots, scroll buffers and printer queues. A key issued
 there cannot be handed to anybody, so issue from the CLI or the API when an application needs one.
-The form also skips the check that the project exists and is active
-([#51](https://github.com/ensera-ai/taisce/issues/51)).
+Like the CLI and the API, the form refuses a project that does not exist or is suspended, and
+nothing is issued.
 
 ### See who holds what
 

@@ -388,20 +388,12 @@ func (m *ManagementServer) issueCredential(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, codeInvalidCredential, "a credential needs a name, a project, and access read_only or read_write")
 		return
 	}
-	// The project is in the memory schema and the credential in the registry; this is the one
-	// place both are visible, so the reference is checked here, and a suspended project mints no
-	// credential: it would authenticate and reach nothing until somebody resumed the project.
-	if _, err := m.stores.Projects.Active(r.Context(), req.Project); err != nil {
-		if errors.Is(err, pg.ErrNoSuchProject) {
-			m.record(r, domain.AuditCredentialIssue, grant, req.Project, domain.OutcomeRefused, 0)
-			writeError(w, http.StatusNotFound, codeNotFound, "no such active project")
-			return
-		}
-		m.log.Error("check project", "error", err, "project", req.Project)
-		writeError(w, http.StatusInternalServerError, codeInternal, "the credential could not be issued")
+	token, issued, err := m.issueProjectCredential(r.Context(), req.Name, req.Project, access)
+	if errors.Is(err, pg.ErrNoSuchProject) {
+		m.record(r, domain.AuditCredentialIssue, grant, req.Project, domain.OutcomeRefused, 0)
+		writeError(w, http.StatusNotFound, codeNotFound, "no such active project")
 		return
 	}
-	token, issued, err := m.credentials.IssueWithAccess(r.Context(), req.Name, req.Project, access)
 	if err != nil {
 		m.log.Error("issue credential", "error", err, "project", req.Project)
 		writeError(w, http.StatusInternalServerError, codeInternal, "the credential could not be issued")
@@ -409,6 +401,27 @@ func (m *ManagementServer) issueCredential(w http.ResponseWriter, r *http.Reques
 	}
 	m.record(r, domain.AuditCredentialIssue, grant, req.Project, domain.OutcomeAllowed, 1)
 	writeJSON(w, http.StatusCreated, credentialIssued{ID: issued.CredentialID, Name: issued.Name, Project: issued.Project, Access: string(issued.Access), Token: token})
+}
+
+// issueProjectCredential is the only way a project credential is minted, whichever surface the
+// operator came through. The API and the portal are two ways to reach one set of powers, and a check
+// each caller had to remember is how the portal came to mint credentials the API refused (#51).
+//
+// The project lives in the memory schema and the credential in the registry. The management server is
+// the one place that sees both, so the reference is checked here rather than by a constraint.
+//   - **Suspended:** a suspended project mints no credential. It would authenticate and reach nothing
+//     until somebody resumed the project.
+//   - **Missing:** a name no project uses mints none either. That credential would wait for a project
+//     of that name and reach it the moment one was created, which is access nobody meant to grant.
+//
+// What this does not cover: a project suspended between the check and the insert. The credential then
+// exists for a suspended project, and authentication refuses it until the project is resumed, like
+// every other credential of a suspended project.
+func (m *ManagementServer) issueProjectCredential(ctx context.Context, name, project string, access credential.Access) (string, credential.Grant, error) {
+	if _, err := m.stores.Projects.Active(ctx, project); err != nil {
+		return "", credential.Grant{}, err
+	}
+	return m.credentials.IssueWithAccess(ctx, name, project, access)
 }
 
 func (m *ManagementServer) listCredentials(w http.ResponseWriter, r *http.Request, grant credential.Grant) {
