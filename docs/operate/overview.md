@@ -30,6 +30,13 @@ The manage process listens on `127.0.0.1:8081` by default: loopback only, on the
 
 ## Get an operator token
 
+**Run Compose commands where the install lives.** Every `docker compose` command in this guide runs in
+the directory that holds `compose.yaml` and its `.env`. Compose reads the whole file on every command,
+`logs` included, and refuses all of them until `TAISCE_INFERENCE_API_KEY` has a value, so a command
+run anywhere else fails with an error about the model key even when you asked for a log. Docker
+itself does not read the file, so `docker logs <directory>-bootstrap-1 2>&1` shows the same output
+from anywhere, where `<directory>` is the name of the directory the install was started in.
+
 `bootstrap`, which Compose runs on the first start, mints the first operator token and prints it once:
 
 ```bash
