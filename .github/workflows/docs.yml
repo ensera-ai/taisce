@@ -61,7 +61,9 @@ jobs:
       # Source links point at the repository and commit the site was built from.
       - name: Build the site
         run: make site SITE_REPO="${{ github.repository }}" SITE_REF="${{ github.sha }}"
-      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+      # v4.0.0 rather than v3: v3 calls actions/upload-artifact by tag, and this repository refuses any
+      # action, nested ones included, that is not pinned to a full commit SHA.
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
         with:
           path: site/build
       - name: Stop the substrate
