@@ -27,9 +27,11 @@ func TestTheLedgerIsCountedByWindowBucketOperationAndProject(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// This window.
+	// This window. Two turns, of three messages and two, and a replay of the second, which wrote
+	// nothing and is recorded with magnitude 0: turns stored is 2, not 5 messages and not 3 rows (#54).
 	at("observe", "p1", "allowed", 3, since.Add(30*time.Minute))
 	at("observe", "p1", "allowed", 2, since.Add(5*time.Hour+time.Minute))
+	at("observe", "p1", "allowed", 0, since.Add(5*time.Hour+time.Minute+time.Second))
 	at("recall", "p1", "allowed", 4, since.Add(5*time.Hour+2*time.Minute))
 	at("erase", "p2", "allowed", 9, since.Add(12*time.Hour))
 	at("project.list", "", "allowed", 2, since.Add(12*time.Hour))
@@ -49,13 +51,13 @@ func TestTheLedgerIsCountedByWindowBucketOperationAndProject(t *testing.T) {
 	if a.Bucket != time.Hour || !a.HasPrevious || len(a.Series) != 24 {
 		t.Fatalf("a day in 24 buckets is 24 hours with a day before it: %v %v %d", a.Bucket, a.HasPrevious, len(a.Series))
 	}
-	if want := (pg.ActivityTotals{Operations: 7, Refused: 1, TurnsStored: 5, Recalls: 2, Erasures: 1, ErasedRows: 9}); a.Current != want {
+	if want := (pg.ActivityTotals{Operations: 8, Refused: 1, TurnsStored: 2, Recalls: 2, Erasures: 1, ErasedRows: 9}); a.Current != want {
 		t.Fatalf("this window counted %+v, want %+v", a.Current, want)
 	}
-	if want := (pg.ActivityTotals{Operations: 2, Refused: 1, TurnsStored: 10}); a.Previous != want {
+	if want := (pg.ActivityTotals{Operations: 2, Refused: 1, TurnsStored: 1}); a.Previous != want {
 		t.Fatalf("the window before counted %+v, want %+v", a.Previous, want)
 	}
-	for i, want := range map[int]pg.ActivityBucket{0: {Allowed: 1}, 5: {Allowed: 2}, 12: {Allowed: 2}, 23: {Allowed: 1, Refused: 1}, 3: {}} {
+	for i, want := range map[int]pg.ActivityBucket{0: {Allowed: 1}, 5: {Allowed: 3}, 12: {Allowed: 2}, 23: {Allowed: 1, Refused: 1}, 3: {}} {
 		got := a.Series[i]
 		if got.Allowed != want.Allowed || got.Refused != want.Refused || !got.Start.Equal(since.Add(time.Duration(i)*time.Hour)) {
 			t.Fatalf("bucket %d is %+v, want %+v starting %v", i, got, want, since.Add(time.Duration(i)*time.Hour))
@@ -68,11 +70,11 @@ func TestTheLedgerIsCountedByWindowBucketOperationAndProject(t *testing.T) {
 	if total != a.Current.Operations {
 		t.Fatalf("the buckets hold %d operations and the window %d", total, a.Current.Operations)
 	}
-	if o := a.Operations; len(o) != 5 || o[0].Operation != "observe" || o[0].Allowed != 2 || o[0].Magnitude != 5 ||
+	if o := a.Operations; len(o) != 5 || o[0].Operation != "observe" || o[0].Allowed != 3 || o[0].Magnitude != 5 ||
 		o[1].Operation != "recall" || o[1].Allowed != 1 || o[1].Refused != 1 || o[2].Operation != "context.assemble" {
 		t.Fatalf("operations are not busiest first, then by name: %+v", o)
 	}
-	if p := a.Projects; len(p) != 2 || p[0].Project != "p1" || p[0].Operations != 3 || p[1].Project != "p2" || p[1].Refused != 1 {
+	if p := a.Projects; len(p) != 2 || p[0].Project != "p1" || p[0].Operations != 4 || p[1].Project != "p2" || p[1].Refused != 1 {
 		t.Fatalf("projects are not busiest first without the instance's own operations: %+v", p)
 	}
 
@@ -90,7 +92,7 @@ func TestTheLedgerIsCountedByWindowBucketOperationAndProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if all.HasPrevious || !all.Since.Equal(since.Add(-49*time.Hour)) || all.Current.Operations != 10 || len(all.Series) != 10 {
+	if all.HasPrevious || !all.Since.Equal(since.Add(-49*time.Hour)) || all.Current.Operations != 11 || len(all.Series) != 10 {
 		t.Fatalf("the whole ledger is %+v", all)
 	}
 	// An empty ledger's whole history is the last hour, in one bucket when none are asked for.

@@ -427,6 +427,5 @@ These are deliberate, and each holds on all three surfaces:
 
 These are open, and this guide describes the behaviour they will change:
 
-- [#54](https://github.com/ensera-ai/taisce/issues/54): *Turns stored* counts messages, not turns.
 - [#55](https://github.com/ensera-ai/taisce/issues/55): *Seal to here* says it sealed when there was
   nothing to seal, and the chart takes only a lower-case `"on"`.
