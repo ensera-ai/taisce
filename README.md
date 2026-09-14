@@ -23,7 +23,7 @@ pulls them:
 
 ```bash
 export DEEPSEEK_API_KEY=…   # from platform.deepseek.com
-curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.4.0/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.5.0/compose.yaml
 cat > .env <<EOF
 TAISCE_INFERENCE_API_KEY=$DEEPSEEK_API_KEY
 TAISCE_INFERENCE_ENDPOINT=https://api.deepseek.com/v1
