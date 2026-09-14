@@ -442,3 +442,90 @@ func TestARefusedPortalActionNeverWritesTheCallersTextIntoTheLedger(t *testing.T
 		t.Fatalf("%d refusals and %d refused rows: a refusal must still be on the record", len(hostile), seen)
 	}
 }
+
+// ── #51 ──────────────────────────────────────────────────────────────────────────────────────
+//
+// The portal and the management API are two ways to reach one set of powers, so the portal refuses
+// to issue what the API refuses.
+//   - **A name no project uses:** its credential would wait for a project of that name and reach it
+//     the moment one was created.
+//   - **A suspended project:** its credential would authenticate and reach nothing until somebody
+//     resumed the project.
+//
+// Resuming the project and issuing again is what shows the refusals came from the project's state,
+// not from a form that never works.
+func TestThePortalIssuesNoCredentialForAProjectThatDoesNotExistOrIsSuspended(t *testing.T) {
+	a := signedInPortal(t, "portal_issue_active")
+	ctx := context.Background()
+	projects := pg.NewProjectStore(a.pool, a.schema)
+	_, guard := a.page(t, "/portal/")
+
+	// Counted by label, because the registry is shared by every test that issues a credential.
+	issued := func(label string) int {
+		t.Helper()
+		var n int
+		if err := a.pool.QueryRow(ctx,
+			`SELECT count(*) FROM `+string(migrate.ControlSchema)+`.credential WHERE name=$1`, label).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	ledger := func(outcome string) int {
+		t.Helper()
+		var n int
+		if err := a.pool.QueryRow(ctx, a.schema.SQL(
+			`SELECT count(*) FROM {schema}.audit_entry WHERE principal_kind='operator' AND operation=$1 AND outcome=$2`),
+			domain.AuditCredentialIssue, outcome).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	issue := func(project, label string) string {
+		t.Helper()
+		form := url.Values{"guard": {guard}, "project": {project}, "name": {label}}
+		if status := a.act(t, "/portal/actions/issue", form); status != http.StatusSeeOther {
+			t.Fatalf("issue answered %d", status)
+		}
+		body, _ := a.page(t, "/portal/")
+		return body
+	}
+	suffix := uuid.NewString()[:8]
+	refusedBefore, allowedBefore := ledger("refused"), ledger("allowed")
+
+	nowhere, label := "nowhere_"+suffix, "never_"+suffix
+	if body := issue(nowhere, label); !strings.Contains(body, "Not done.") {
+		t.Fatal("the page did not refuse a project that does not exist")
+	}
+	if n := issued(label); n != 0 {
+		t.Fatalf("a project that does not exist was issued %d credentials", n)
+	}
+
+	if err := projects.Suspend(ctx, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	label = "suspended_" + suffix
+	if body := issue("p1", label); !strings.Contains(body, "Not done.") {
+		t.Fatal("the page did not refuse a suspended project")
+	}
+	if n := issued(label); n != 0 {
+		t.Fatalf("a suspended project was issued %d credentials", n)
+	}
+
+	if err := projects.Resume(ctx, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	label = "resumed_" + suffix
+	if body := issue("p1", label); !strings.Contains(body, "Done.") || strings.Contains(body, "Not done.") {
+		t.Fatal("the page did not issue for the project once it was resumed")
+	}
+	if n := issued(label); n != 1 {
+		t.Fatalf("the resumed project was issued %d credentials, want 1", n)
+	}
+
+	if refused := ledger("refused") - refusedBefore; refused != 2 {
+		t.Fatalf("%d refused credential.issue rows, want 2: a refusal must be on the record", refused)
+	}
+	if allowed := ledger("allowed") - allowedBefore; allowed != 1 {
+		t.Fatalf("%d allowed credential.issue rows, want 1", allowed)
+	}
+}
