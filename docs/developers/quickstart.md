@@ -744,6 +744,9 @@ connects them. If your error callback prints `taisce recall failed` or
 `docker compose down` stops everything. Your data stays in a Docker volume, so
 `docker compose up -d` brings it back, and your token still works.
 
+The install belongs to this directory: Compose names it after the directory, so run these commands
+from here. Starting the quickstart again in another directory gives a second, separate install.
+
 ## Next steps
 
 - [How it works](../start/how-it-works.md): what happened in each step, in plain words.

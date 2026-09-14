@@ -121,6 +121,20 @@ raising `TAISCE_MEMORY_POOL` is how to allow more.
 **One host is one failure domain, and the file says so.** Nothing in it survives losing the machine,
 and no arrangement of containers on one host could. High availability is what the Helm chart is for.
 
+**Each directory is its own stack.** The file names no project, so Compose names it after the
+directory `compose.yaml` is in. The containers and the `postgres-data` volume belong to that project.
+Two directories give two installs that cannot see each other's containers or data, and a
+`docker compose` command acts only on the install in the directory it runs from. To run a second
+install from the same directory, or to reach an install from a directory with another name, set
+`COMPOSE_PROJECT_NAME`. A name fixed in the file would make every copy on a machine one stack. Then
+starting a second copy recreates the first install's containers against its volume, bootstrap fails
+on that volume's password, and `down -v` in either directory deletes the other's data (D12).
+
+Files from v0.3.0 to v0.4.0 did set `name: taisce`, so an install they created is the project
+`taisce` wherever it lives. Updating the file in a directory with another name starts a new, empty
+project; [troubleshooting](../developers/troubleshooting.md#memory-is-empty-after-updating-composeyaml)
+shows how to point the directory back at the old one.
+
 ### What compose does not protect
 
 - **Database connections are unencrypted.** They use `sslmode=disable` and rely on the database
@@ -224,8 +238,8 @@ required variable TAISCE_INFERENCE_API_KEY is missing a value: set it to your De
 ```
 
 - **Not only `up`.** Compose fills in variables across the whole file whenever it reads it, so
-  `config`, and `down` when the project name comes from the file, refuse too. Keep the key in `.env`
-  beside the file, which Compose reads on every command.
+  `config` and `down` refuse too, and an install cannot be stopped from its directory without the
+  key. Keep the key in `.env` beside the file, which Compose reads on every command.
 - **The key is where text starts to leave.** An instance started without one would store turns and
   never form them; the refusal names the one thing missing instead. Once the key is set, each stored
   turn goes to DeepSeek to be read, and only to the hosts on the allowlist. To keep conversation text
@@ -537,7 +551,9 @@ Compose substitutes these itself; the binary never reads them: `TAISCE_VERSION` 
 images are pulled at), `TAISCE_PORT` (`8080`), `TAISCE_MANAGE_PORT` (`127.0.0.1:8081`),
 `TAISCE_PROJECT` (`default`), the three pool sizes above, `POSTGRES_PASSWORD` and `LITELLM_PORT`
 (`4000`). `compose.perf.yaml` adds
-`TAISCE_PERF_POSTGRES_PASSWORD` and `TAISCE_PERF_POSTGRES_PORT`.
+`TAISCE_PERF_POSTGRES_PASSWORD` and `TAISCE_PERF_POSTGRES_PORT`. Compose itself reads
+`COMPOSE_PROJECT_NAME`, which replaces the directory's name as the project, and with it which
+containers and volume every command acts on.
 
 ## Probes
 

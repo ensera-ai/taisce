@@ -37,8 +37,18 @@
 # before the server starts. That separation is what stops a memory query reading a credential, and
 # collapsing these three URLs into one would leave it drawn in the migration and untrue in the
 # process.
-
-name: taisce
+#
+# ── EACH DIRECTORY IS ITS OWN STACK ──────────────────────────────────────────────────────────────
+#
+# This file names no project, so Compose names it after the directory the file is in, and the
+# containers and the `postgres-data` volume belong to that directory. A name fixed here would make every
+# copy of this file on a machine one stack: a quickstart started in a new directory would take over the
+# containers of an install in another, run bootstrap against that install's database with its own
+# passwords and fail, and a `down -v` in either directory would delete the other's data (#73, D12).
+#
+# An install created by a file that did set `name: taisce` keeps its data in `taisce_postgres-data`.
+# To go on using it from a directory with another name, put COMPOSE_PROJECT_NAME=taisce in `.env`
+# beside this file.
 
 # ── What the api and the workers share ───────────────────────────────────────────────────────
 #
