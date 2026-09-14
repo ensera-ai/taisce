@@ -281,9 +281,35 @@ var ErrScopeBusy = errors.New("another worker holds this scope")
 // leave the oldest unformed and pin that number at the bottom while everything above it completed —
 // a scope reported as entirely behind when it is nearly current.
 func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]Report, error) {
+	out, err := w.drain(ctx, schema, scope)
+	return out.reports, err
+}
+
+// drained is what one drain did, including what it could not do.
+//
+// A turn that failed is not an error of the drain: the drain did its job by recording the attempt on
+// the turn. So failures travel beside the error rather than in it. Without them the driver sees a
+// scope that failed every turn exactly as it sees a scope with nothing waiting, and says nothing
+// about either.
+type drained struct {
+	reports []Report
+	failed  int
+	parked  int
+	// status is the HTTP status of the latest failure that carried one, and zero when none did.
+	status int
+}
+
+// httpStatus is satisfied by a model error that knows what the endpoint answered.
+//
+// An interface rather than the inference package's type, so formation does not depend on the adapter
+// that reaches a model, and any adapter whose errors carry a status is reported the same way.
+type httpStatus interface{ HTTPStatus() int }
+
+func (w *Worker) drain(ctx context.Context, schema pg.Schema, scope string) (drained, error) {
+	var out drained
 	conn, err := w.pool.Acquire(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("acquire connection: %w", err)
+		return out, fmt.Errorf("acquire connection: %w", err)
 	}
 	defer conn.Release()
 
@@ -294,10 +320,10 @@ func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]R
 	key := schema.String() + "/" + scope
 	var acquired bool
 	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1)::bigint)`, key).Scan(&acquired); err != nil {
-		return nil, fmt.Errorf("take scope lock: %w", err)
+		return out, fmt.Errorf("take scope lock: %w", err)
 	}
 	if !acquired {
-		return nil, ErrScopeBusy
+		return out, ErrScopeBusy
 	}
 	defer func() {
 		// Released explicitly rather than left to the session ending, because the connection goes
@@ -306,14 +332,13 @@ func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]R
 		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext($1)::bigint)`, key)
 	}()
 
-	var reports []Report
 	for {
 		observation, found, err := w.observations.NextUnformed(ctx, schema, scope, w.policy.RetryAfter)
 		if err != nil {
-			return reports, err
+			return out, err
 		}
 		if !found {
-			return reports, nil
+			return out, nil
 		}
 
 		// A budget per turn, applied here rather than in the extractor. Extraction is a model call
@@ -329,28 +354,33 @@ func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]R
 			// spend a turn's budget on every restart, and a few restarts would park a backlog that
 			// nothing was ever wrong with.
 			if ctx.Err() != nil {
-				return reports, ctx.Err()
+				return out, ctx.Err()
 			}
 			parked, perr := w.recordFailure(ctx, schema, observation, err)
 			w.heartbeat(ctx, conn, 0, 1)
 			if perr != nil {
-				return reports, perr
+				return out, perr
 			}
-			if !parked {
-				// Left in the backlog with its attempt counted and its wait doubled. Moving on to
-				// the next turn rather than returning, because one turn that will not form is not a
-				// reason to stop forming the scope — that was the old behaviour and it froze
-				// everything behind it.
-				continue
+			out.failed++
+			if parked {
+				out.parked++
 			}
+			var status httpStatus
+			if errors.As(err, &status) {
+				out.status = status.HTTPStatus()
+			}
+			// Left in the backlog with its attempt counted and its wait doubled, or parked. Either
+			// way, moving on to the next turn rather than returning, because one turn that will not
+			// form is not a reason to stop forming the scope — that was the old behaviour and it
+			// froze everything behind it.
 			continue
 		}
 
 		if err := w.observations.MarkFormed(ctx, schema, observation.ID); err != nil {
-			return reports, err
+			return out, err
 		}
 		w.heartbeat(ctx, conn, 1, 0)
-		reports = append(reports, report)
+		out.reports = append(out.reports, report)
 	}
 }
 

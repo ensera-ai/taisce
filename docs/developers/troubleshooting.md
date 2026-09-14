@@ -163,13 +163,22 @@ saved a turn.
 1. **Is anything forming at all?** Run `docker compose ps` and look for a running `worker`. The
    `api` container never forms anything; it logs `"msg":"formation is not running in this process"`
    on purpose. Also check for `MEMORY WILL NOT FORM` (above).
-2. **Is the model failing?** The worker logs `"msg":"formation pass"` lines with `"errored":1`.
-   Each failure is retried after a longer wait. After six tries the turn is parked (next section).
-   Common causes:
-   - A container can't reach the model's host. Run the check in
+2. **Is the model failing?** While turns fail, the worker logs one warning per pass:
+
+   ```text
+   {"level":"WARN","msg":"turns did not form","scopes":1,"failed":1,"parked":0,"status":401}
+   ```
+
+   `failed` counts the attempts that failed, `parked` the turns that ran out of attempts, and
+   `status` is what the model's endpoint answered, when it answered at all. The line never includes
+   the provider's message, because a provider can quote back what was said; that reason is kept on
+   the turn. Each failure is retried after a longer wait. After six tries the turn is parked (next
+   section). Common causes:
+   - A container can't reach the model's host, and the warning has no `status`. Run the check in
      [set up your machine](../start/your-machine.md#check-that-a-container-reaches-the-model).
-   - The key is wrong. `curl -sS https://api.deepseek.com/models -H "Authorization: Bearer <key>"`
-     answers `401` for a key DeepSeek does not accept.
+   - The key is wrong, and the warning says `"status":401`.
+     `curl -sS https://api.deepseek.com/models -H "Authorization: Bearer <key>"` answers `401` for a
+     key DeepSeek does not accept.
    - The model name is one the endpoint doesn't serve. `TAISCE_INFERENCE_EXTRACTOR_MODEL` must be in
      that same `/models` list.
    - You sourced a file from [deploy/inference/](../../deploy/inference/) before running compose.

@@ -44,6 +44,22 @@ func NewModel(config Config) *Model {
 	}
 }
 
+// StatusError is an answer from the model endpoint other than 200.
+//
+// Its text is the status and the provider's body, because that is what is kept on a turn that fails
+// and the body is what explains a 429 or a 400. The status is also carried on its own, so a caller can
+// report it where the body must not go: a provider may quote the request back, and the request is
+// what somebody said.
+type StatusError struct {
+	Status int
+	text   string
+}
+
+func (e *StatusError) Error() string { return e.text }
+
+// HTTPStatus is the status the endpoint answered with.
+func (e *StatusError) HTTPStatus() int { return e.Status }
+
 // Propose asks the model what one message asserts.
 //
 // # No retry here
@@ -95,7 +111,8 @@ func (m *Model) Propose(ctx context.Context, message domain.Message, vocabulary 
 		return nil, fmt.Errorf("read model response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("model returned %s: %s", resp.Status, strings.TrimSpace(string(raw)))
+		return nil, &StatusError{Status: resp.StatusCode,
+			text: fmt.Sprintf("model returned %s: %s", resp.Status, strings.TrimSpace(string(raw)))}
 	}
 
 	var decoded chatResponse
