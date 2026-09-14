@@ -163,7 +163,8 @@ curl -sS localhost:8080/v1/freshness -H "Authorization: Bearer $TOKEN"
 ```
 
 The project token opens memory for the `default` project, and `null` means nothing has been written
-yet. The operator token is for running the instance and is refused on memory calls.
+yet. The operator token is for running the instance: it signs in to the ops centre
+([step 9](#9-open-the-ops-centre)) and is refused on memory calls.
 
 **Didn't work?** A `401` means the token is wrong, and the usual cause is picking up the operator
 token by mistake ([every call answers 401](troubleshooting.md#every-call-answers-401-unauthenticated)).
@@ -741,6 +742,27 @@ it and that both runs name the same `alice`: the two runs are separate conversat
 connects them. If your error callback prints `taisce recall failed` or
 `taisce observe failed`, the program can't reach `TAISCE_API` or the token is wrong
 ([every call answers 401](troubleshooting.md#every-call-answers-401-unauthenticated)).
+
+## 9. Open the ops centre
+
+The ops centre is the operator's view of the instance: projects, credentials, formation health,
+parked turns and erasure receipts. It shows counts and reasons, never anything anybody said. It is
+off until you switch it on, so a browser surface is never exposed by accident. In the directory from
+step 2:
+
+```bash
+echo 'TAISCE_PORTAL=on' >> .env
+docker compose up -d
+docker compose logs --no-log-prefix bootstrap | grep 'operator token:'
+```
+
+Open `http://127.0.0.1:8081/portal/` and paste the operator token. Only an operator token signs in:
+the project token from step 3 is refused. The port listens on this machine only.
+
+**Didn't work?** A `404` on `/portal/` means `TAISCE_PORTAL` is not `on` in the `.env` beside
+`compose.yaml`. If the token line is gone, mint another with
+`docker compose exec manage /taisce operator issue <your-name>`.
+[Operate an instance](../operate/overview.md) covers what the ops centre shows and does.
 
 ## When you are done
 
