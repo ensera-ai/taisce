@@ -84,30 +84,29 @@ page changes.
 ## Windows with WSL2
 
 Every command in the quickstart is a Linux shell command. On Windows, run them in a Linux distribution
-under WSL2, not in PowerShell. WSL needs Windows 10 version 2004 (build 19041) or later, or Windows 11.
+under WSL2, not in PowerShell. Microsoft and Docker document the Windows side, so this section points
+to their guides rather than repeating them.
 
-In PowerShell, as administrator:
+1. **Install WSL**, following Microsoft's
+   [Install Linux on Windows with WSL](https://learn.microsoft.com/windows/wsl/install). In PowerShell,
+   as administrator:
 
-```powershell
-wsl --install
-```
+   ```powershell
+   wsl --install
+   ```
 
-Restart when asked. This installs Ubuntu. Open **Ubuntu** from the Start menu; the first time, it asks
-you to create a Linux user name and password. Work in your Linux home directory (`cd ~`), not under
-`/mnt/c`: Linux reaches files on the Windows drive much more slowly. Inside Ubuntu:
+   It installs Ubuntu by default. Work in your Linux home directory (`cd ~`), not under `/mnt/c`.
+2. **Install Docker**, in one of two ways:
+   - **Docker Desktop,** following Docker's
+     [Docker Desktop WSL 2 backend](https://docs.docker.com/desktop/features/wsl/). Bring WSL up to
+     date first, in PowerShell:
 
-```bash
-sudo apt-get update && sudo apt-get install jq uuid-runtime
-```
+     ```powershell
+     wsl --update
+     ```
 
-Then choose where Docker runs. Use one or the other: Docker Desktop requires that Docker Engine is
-not also installed inside the distribution.
-
-- **With Docker Desktop.** Its WSL 2 backend needs WSL 2.1.5 or later, so run `wsl --update` in
-  PowerShell first. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
-  with the WSL 2 based engine. Under **Settings → Resources → WSL integration**, check that Ubuntu is
-  on. `docker` inside Ubuntu then talks to Docker Desktop.
-- **With Docker Engine inside Ubuntu.** Follow the [Linux](#linux) section inside Ubuntu.
+   - **Docker Engine inside Ubuntu,** following the [Linux](#linux) section.
+3. **Install `jq` and `uuidgen` inside Ubuntu,** as in the [Linux](#linux) section.
 
 ## Check that a container reaches the model
 
@@ -151,5 +150,5 @@ repository setup, the commands above and the check, which printed `401`, then th
 
 Both machines were arm64. The amd64 packages and images were not run on Linux.
 
-The Windows section follows Docker's and Microsoft's documentation as read on 2026-09-14, and has not
-been run on Windows yet. [#84](https://github.com/ensera-ai/taisce/issues/84) tracks running it.
+On Windows, setting up WSL and Docker follows Microsoft's and Docker's own guides, linked in that
+section. Everything after that runs inside the Linux distribution, as on Linux.
