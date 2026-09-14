@@ -51,7 +51,12 @@ type portalAction struct {
 	// confirm is the form field whose value must equal the target's identifier before an
 	// irreversible action runs. Empty for anything the operator can simply do again.
 	confirm string
-	run     func(*Portal, *http.Request, credential.Grant) (string, string, error)
+	// recordedByStore is set for an action whose store writes its ledger row in the same transaction
+	// as the change, so the row and the change cannot disagree. perform then records only a refusal
+	// the store never saw. Recording the outcome again would count one operation twice on the
+	// overview and in the breakdown (#57).
+	recordedByStore bool
+	run             func(*Portal, *http.Request, credential.Grant) (string, string, error)
 }
 
 // portalActions is the set, declared as data so a test can walk it — the same reason the memory
@@ -61,7 +66,7 @@ var portalActions = []portalAction{
 	{name: domain.AuditProjectCreate, path: "/actions/create", run: (*Portal).create},
 	{name: domain.AuditProjectSuspend, path: "/actions/suspend", run: (*Portal).suspend},
 	{name: domain.AuditProjectResume, path: "/actions/resume", run: (*Portal).resume},
-	{name: domain.AuditFormationUnpark, path: "/actions/unpark", run: (*Portal).unpark},
+	{name: domain.AuditFormationUnpark, path: "/actions/unpark", recordedByStore: true, run: (*Portal).unpark},
 	{name: domain.AuditCredentialIssue, path: "/actions/issue", run: (*Portal).issue},
 	// Irreversible: the token is gone and every client holding it stops.
 	{name: domain.AuditCredentialRevoke, path: "/actions/revoke", confirm: "id", run: (*Portal).revoke},
@@ -101,8 +106,15 @@ func (p *Portal) perform(w http.ResponseWriter, r *http.Request, grant credentia
 		}
 	}
 	_, detail, err := action.run(p, r, grant)
+	// The store has already written this outcome when it records for itself and it either succeeded
+	// or refused on the record. A refusal before the store was reached, or a store failure that rolled
+	// its transaction back, left no row, so perform writes that one.
+	var onRecord recordedRefusal
+	storeRecorded := action.recordedByStore && (err == nil || errors.As(err, &onRecord))
 	if err != nil {
-		p.m.record(r, action.name, grant, recorded, domain.OutcomeRefused, 0)
+		if !storeRecorded {
+			p.m.record(r, action.name, grant, recorded, domain.OutcomeRefused, 0)
+		}
 		// A target the action cannot act on is the caller's mistake, not the system failing, and an
 		// ERROR for every bad form post would bury the failures that are real. Only a store failure
 		// is logged, and then only the operation and a project that validated — never the posted
@@ -114,7 +126,9 @@ func (p *Portal) perform(w http.ResponseWriter, r *http.Request, grant credentia
 		http.Redirect(w, r, p.back(r), http.StatusSeeOther)
 		return
 	}
-	p.m.record(r, action.name, grant, recorded, domain.OutcomeAllowed, 1)
+	if !storeRecorded {
+		p.m.record(r, action.name, grant, recorded, domain.OutcomeAllowed, 1)
+	}
 	p.remember(session, portalOutcome{Done: true, Action: action.name, Detail: detail})
 	http.Redirect(w, r, p.back(r), http.StatusSeeOther)
 }
@@ -170,8 +184,9 @@ func (p *Portal) unpark(r *http.Request, grant credential.Grant) (string, string
 	if errors.Is(err, pg.ErrFormationTurnNotFound) {
 		// A turn that is not there is the caller naming something that does not exist, not the
 		// system failing — one refusal shape with every other bad target, so an operator guessing
-		// at identifiers learns nothing from which refusal came back.
-		return name, "", errInvalidPortalTarget
+		// at identifiers learns nothing from which refusal came back. The store has already recorded
+		// the refusal, in the transaction that looked for the turn.
+		return name, "", recordedRefusal{errInvalidPortalTarget}
 	}
 	if err != nil {
 		return name, "", err
@@ -231,6 +246,12 @@ func (p *Portal) seal(r *http.Request, _ credential.Grant) (string, string, erro
 // refusal that distinguished "no such project" from "not a project name" would answer a question
 // about what exists to whoever is guessing.
 var errInvalidPortalTarget = errors.New("the form named something this action cannot act on")
+
+// recordedRefusal is a refusal the store has already written to the ledger, so perform does not write
+// it again. It unwraps to the refusal, so every check on what kind of refusal it was still holds.
+type recordedRefusal struct{ error }
+
+func (e recordedRefusal) Unwrap() error { return e.error }
 
 // recordableProject is the posted project name if it is a valid one, and empty otherwise — the only
 // form of a caller-supplied project that may reach the ledger or a log.
