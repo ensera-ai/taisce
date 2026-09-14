@@ -94,6 +94,26 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 // pushes. It is accepted against the tags a release pushes, and refused against a list that lacks the
 // v-prefixed tag, which is the shape of the original defect seen from the other side. The workflow is
 // read too, because a check the workflow stopped calling would pass here and protect nothing.
+// The portal's ingress follows the binary's rule for "on": any case, surrounding space ignored. The
+// binary switches the portal on for "ON", so a chart that refused the ingress for it would disagree
+// with the process it deploys (#55). Anything that is not "on" is still refused.
+func TestThePortalIngressAcceptsOnTheWayTheBinaryDoes(t *testing.T) {
+	for _, value := range []string{"on", "ON", "On", " on "} {
+		out := render(t, "--set-string", "manage.portal="+value, "--set", "ingress.portal.enabled=true",
+			"--set", "ingress.portal.host=ops.example")
+		if !strings.Contains(out, "path: /portal") {
+			t.Errorf("manage.portal=%q switches the portal on, and its ingress was not rendered", value)
+		}
+	}
+	for _, value := range []string{"off", "onn", "yes", ""} {
+		out, err := exec.Command("helm", "template", "t", "taisce", "--set-string", "manage.portal="+value,
+			"--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example").CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "manage.portal") {
+			t.Errorf("manage.portal=%q does not switch the portal on, and its ingress was not refused: %v\n%s", value, err, out)
+		}
+	}
+}
+
 func TestTheChartAsksForAnImageTheReleasePushed(t *testing.T) {
 	dir := t.TempDir()
 	if out, err := exec.Command("helm", "package", "taisce", "--version", "9.8.7", "--app-version", "v9.8.7", "-d", dir).CombinedOutput(); err != nil {

@@ -31,7 +31,8 @@ spec:
                 port: {name: http}
 {{- end }}
 {{- if .Values.ingress.portal.enabled }}
-{{- if ne (toString .Values.manage.portal) "on" }}
+{{- /* The binary turns the portal on for "on" in any case, with surrounding space ignored, so the guard applies the same rule. Stricter here, "ON" would switch the portal on and still be refused its ingress (#55). */}}
+{{- if ne (lower (trim (toString .Values.manage.portal))) "on" }}
 {{- fail "ingress.portal.enabled needs manage.portal set to \"on\"; an ingress to a portal that does not exist exposes the management surface's door instead" }}
 {{- end }}
 ---
