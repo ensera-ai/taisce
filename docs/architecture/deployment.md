@@ -598,17 +598,17 @@ instance that changes what it runs without anybody saying so is an outage with n
 Provenance — built by this repository's release workflow, from the tag you name:
 
 ```bash
-gh attestation verify oci://ghcr.io/ensera-ai/taisce:v0.5.0 \
+gh attestation verify oci://ghcr.io/ensera-ai/taisce:v0.5.1 \
   --repo ensera-ai/taisce \
   --signer-workflow ensera-ai/taisce/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.5.0
+  --source-ref refs/tags/v0.5.1
 ```
 
 Signature — made by that workflow's identity at that tag:
 
 ```bash
-cosign verify ghcr.io/ensera-ai/taisce:v0.5.0 \
-  --certificate-identity https://github.com/ensera-ai/taisce/.github/workflows/release.yml@refs/tags/v0.5.0 \
+cosign verify ghcr.io/ensera-ai/taisce:v0.5.1 \
+  --certificate-identity https://github.com/ensera-ai/taisce/.github/workflows/release.yml@refs/tags/v0.5.1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
