@@ -97,7 +97,7 @@ In the directory that holds `.env`, fetch the compose file for the release you w
 up:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.4.0/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.5.0/compose.yaml
 docker compose up -d
 docker compose ps -a --format '{{.Service}}\t{{.State}}\t{{.Health}}'
 curl -s localhost:8080/ready

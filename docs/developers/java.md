@@ -87,7 +87,7 @@ In an empty directory, from the published images (the [quickstart](quickstart.md
 including the model Taisce needs to form facts):
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.4.0/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.5.0/compose.yaml
 docker compose up -d
 export TAISCE_API=http://localhost:8080
 export TAISCE_TOKEN=$(docker compose logs --no-log-prefix bootstrap | awk '/^token:/ {print $2}')
