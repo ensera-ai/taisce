@@ -56,7 +56,9 @@ credentials and serves memory on `:8080`. The file is [`compose.yaml`](../../com
 It names published images and never builds, so the file on its own is enough — no checkout, no Go
 toolchain. The version is pinned rather than `latest`, because a getting-started file that follows a
 moving tag breaks under people who changed nothing; override it with `TAISCE_VERSION`. A contributor
-running their own working tree adds [`compose.build.yaml`](../../compose.build.yaml):
+running their own working tree adds [`compose.build.yaml`](../../compose.build.yaml), which tags the
+build `taisce:dev` and `taisce-postgres:dev` so that it never replaces a release another install on
+the same machine runs:
 
 ```bash
 docker compose -f compose.yaml -f compose.build.yaml up -d --build

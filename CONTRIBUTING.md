@@ -45,6 +45,12 @@ The two files are separate on purpose. Compose given both an `image:` and a `bui
 the image is missing from the local cache, which would make "am I running my change or a release?" a
 question about cache state. Naming the overlay makes it a question you answered.
 
+The build is tagged `taisce:dev` and `taisce-postgres:dev`, never with a release's tag. The local
+image cache is shared by every install on the machine, so a build written to
+`ghcr.io/ensera-ai/taisce:v0.5.1` would be what any other install runs the next time it is recreated.
+Leave the overlay off and Compose runs the release again. If a machine already holds a build under a
+release tag, `docker compose pull` in that install's directory brings the release back.
+
 Other targets you may need:
 
 - `make gate` runs the same checks a change must pass before it merges (licence headers, the full
