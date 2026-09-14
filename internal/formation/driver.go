@@ -84,6 +84,13 @@ type Pass struct {
 	Errored  int
 	Reports  int
 	Segments int
+	// Failed is how many turn attempts failed this pass, and Parked how many of those turns ran out
+	// of attempts. Neither is Errored: a refused turn is recorded against the turn and retried, which
+	// is the drain doing its job. They are counted so that a model refusing every turn is not a pass
+	// that looks idle. Status is the HTTP status of the latest failure that carried one.
+	Failed int
+	Parked int
+	Status int
 	// Notified is how many notifications landed this pass, and Owed how many were newly written
 	// down. They are counted separately because one is somebody else's endpoint working and the
 	// other is this deployment noticing it had news.
@@ -140,8 +147,13 @@ func (d *Driver) Once(ctx context.Context) (Pass, error) {
 		if ctx.Err() != nil {
 			return pass, ctx.Err()
 		}
-		reports, err := d.worker.Drain(ctx, d.schema, scope)
-		pass.Formed += len(reports)
+		drained, err := d.worker.drain(ctx, d.schema, scope)
+		pass.Formed += len(drained.reports)
+		pass.Failed += drained.failed
+		pass.Parked += drained.parked
+		if drained.status != 0 {
+			pass.Status = drained.status
+		}
 
 		switch {
 		case err == nil:
@@ -156,6 +168,18 @@ func (d *Driver) Once(ctx context.Context) (Pass, error) {
 			pass.Errored++
 			d.log.Error("draining a scope failed", "scope", scope, "error", err)
 		}
+	}
+	if pass.Failed > 0 {
+		// Counts and a status, never the reason. The reason is the provider's response body, which
+		// is not bounded to the provider's own words: an endpoint may quote the request back, and the
+		// request is what somebody said, while this log is read by whoever operates the instance. The
+		// reason stays on the turn. One line a pass rather than one a turn, so a backlog failing
+		// against a rejected key costs a line every interval instead of one per stored turn.
+		attrs := []any{"scopes", pass.Scopes, "failed", pass.Failed, "parked", pass.Parked}
+		if pass.Status != 0 {
+			attrs = append(attrs, "status", pass.Status)
+		}
+		d.log.Warn("turns did not form", attrs...)
 	}
 	// A project with nothing to form can still owe derived work: a report is deleted when the facts
 	// under it change, so an erasure or a correction in a quiet project leaves a hole that the loop

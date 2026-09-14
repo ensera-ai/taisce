@@ -115,7 +115,7 @@ worker     running  healthy
 {"status":"ready"}
 ```
 
-Then check that the worker found a model it is allowed to use:
+Then check that the worker accepted the model settings:
 
 ```bash
 docker compose logs --no-log-prefix worker | grep -c 'MEMORY WILL NOT FORM'
@@ -132,6 +132,9 @@ background.
 **Didn't work?** If port 8080 is taken, run `TAISCE_PORT=18080 docker compose up -d` and use that
 port below. If the count is `1` or more, see
 [memory never forms](troubleshooting.md#the-worker-logs-memory-will-not-form).
+The count checks the settings, not the key. A key the provider refuses shows up once you save a
+memory, as a `turns did not form` warning with `"status":401`
+([`formed` stays `null`](troubleshooting.md#formed-stays-null)).
 If `api` or `worker` keeps restarting, see
 [the serving process exits at start](troubleshooting.md#the-api-or-worker-exits-right-after-starting).
 
