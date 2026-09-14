@@ -253,6 +253,35 @@ func (s *Store) List(ctx context.Context, project string, limit int) ([]Listed, 
 	return out, rows.Err()
 }
 
+// RevokeInProject revokes a credential only if it is a live project credential of project.
+//
+// The scope is part of the UPDATE, not a lookup before it, so there is no moment between checking what
+// a credential belongs to and revoking it. Every credential outside that scope gets ErrUnknown, the
+// same answer as an identifier that names nothing:
+//   - a credential of another project;
+//   - an operator credential;
+//   - a credential already revoked.
+//
+// It serves a surface whose page is one project, where the posted project is the scope the operator is
+// acting in (#52). Revoke stays instance-wide for the CLI and the management API, whose callers name a
+// credential rather than a page.
+func (s *Store) RevokeInProject(ctx context.Context, credentialID, project string) error {
+	if strings.TrimSpace(project) == "" {
+		return ErrUnknown
+	}
+	tag, err := s.registry.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.credential SET revoked_at = $2
+		 WHERE credential_id = $1 AND revoked_at IS NULL AND kind = $3 AND project = $4`, s.schema),
+		credentialID, time.Now().UTC(), string(KindProject), project)
+	if err != nil {
+		return fmt.Errorf("revoke credential: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUnknown
+	}
+	return nil
+}
+
 // Revoke stops a credential resolving, keeping the row so whatever recorded its use can still name
 // it.
 func (s *Store) Revoke(ctx context.Context, credentialID string) error {

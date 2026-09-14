@@ -315,6 +315,86 @@ func TestAnIrreversiblePortalActionIsRefusedWithoutItsTypedConfirmation(t *testi
 	}
 }
 
+// ── #52 ──────────────────────────────────────────────────────────────────────────────────────
+//
+// The Revoke form sits on one project's page, so it revokes only that project's keys. From p1's page:
+//   - another project's key is refused and stays live;
+//   - the signed-in operator's own key is refused, stays live, and the browser stays signed in;
+//   - a key of p1 is revoked, which shows the refusals came from the scope and not from a form that
+//     never works.
+func TestThePortalRevokesOnlyKeysOfTheProjectWhosePageItIs(t *testing.T) {
+	a := signedInPortal(t, "portal_revoke_scope")
+	ctx := context.Background()
+	_, guard := a.page(t, "/portal/")
+	if err := migrate.ProvisionScope(ctx, a.pool, a.schema.String(), "p2"); err != nil {
+		t.Fatal(err)
+	}
+	keys := credential.NewStore(a.pool, string(migrate.ControlSchema))
+	_, ofP2, err := keys.Issue(ctx, "portal-other-project", "p2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ofP1, err := keys.Issue(ctx, "portal-this-project", "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedIn, err := keys.ResolveOperator(ctx, a.operator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revocations := func(outcome string) int {
+		t.Helper()
+		var n int
+		if err := a.pool.QueryRow(ctx, a.schema.SQL(
+			`SELECT count(*) FROM {schema}.audit_entry WHERE principal_kind='operator' AND operation=$1 AND outcome=$2`),
+			domain.AuditCredentialRevoke, outcome).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	revokeFromP1 := func(id string) string {
+		t.Helper()
+		if status := a.act(t, "/portal/actions/revoke", url.Values{"guard": {guard},
+			"project": {"p1"}, "id": {id}, "confirm": {id}}); status != http.StatusSeeOther {
+			t.Fatalf("revoke answered %d", status)
+		}
+		body, _ := a.page(t, "/portal/projects/p1")
+		return body
+	}
+	refusedBefore, allowedBefore := revocations("refused"), revocations("allowed")
+
+	if body := revokeFromP1(ofP2.CredentialID); !strings.Contains(body, "Not done.") {
+		t.Fatal("the page did not refuse another project's key")
+	}
+	if a.revoked(t, ofP2.CredentialID) {
+		t.Fatal("a form on p1's page revoked a key of p2")
+	}
+
+	if body := revokeFromP1(signedIn.CredentialID); !strings.Contains(body, "Not done.") {
+		t.Fatal("the page did not refuse the operator's own key")
+	}
+	if a.revoked(t, signedIn.CredentialID) {
+		t.Fatal("a form on a project's page revoked an operator key")
+	}
+	if _, stillSignedIn := a.page(t, "/portal/"); stillSignedIn == "" {
+		t.Fatal("the browser was signed out by a revoke that was refused")
+	}
+
+	if body := revokeFromP1(ofP1.CredentialID); !strings.Contains(body, "Done.") || strings.Contains(body, "Not done.") {
+		t.Fatal("the page did not revoke a key of the project whose page it is")
+	}
+	if !a.revoked(t, ofP1.CredentialID) {
+		t.Fatal("p1's key was not revoked")
+	}
+
+	if refused := revocations("refused") - refusedBefore; refused != 2 {
+		t.Fatalf("%d refused credential.revoke rows, want 2", refused)
+	}
+	if allowed := revocations("allowed") - allowedBefore; allowed != 1 {
+		t.Fatalf("%d allowed credential.revoke rows, want 1", allowed)
+	}
+}
+
 // The ops centre is not for reading memory. Every panel and every action is about the instance, the
 // projects, the ledger and the keys — and an operator credential cannot reach a person's records at
 // all, which is the boundary that lets somebody run this system without being able to read it.

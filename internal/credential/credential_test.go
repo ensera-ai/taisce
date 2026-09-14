@@ -207,6 +207,58 @@ func TestRevokingAnUnknownOrAlreadyRevokedCredentialIsRefused(t *testing.T) {
 	}
 }
 
+// ── #52 ──────────────────────────────────────────────────────────────────────────────────────
+//
+// RevokeInProject revokes only a live project credential of the project it is given. Everything
+// outside that scope gets the same ErrUnknown as an identifier that names nothing, and stays live;
+// that the refused credentials still resolve is the half of the claim a count of rows would miss.
+func TestRevokingInAProjectTouchesOnlyThatProjectsLiveCredentials(t *testing.T) {
+	ctx := context.Background()
+	s := store(t)
+	suffix := uuid.NewString()[:8]
+	alpha, beta := "alpha_"+suffix, "beta_"+suffix
+
+	tokenBeta, ofBeta, err := s.Issue(ctx, "of-beta", beta)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	tokenOperator, operator, err := s.IssueOperator(ctx, "operator-"+suffix)
+	if err != nil {
+		t.Fatalf("issue operator: %v", err)
+	}
+	tokenAlpha, ofAlpha, err := s.Issue(ctx, "of-alpha", alpha)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+
+	for what, c := range map[string]struct{ id, project string }{
+		"another project's credential":       {ofBeta.CredentialID, alpha},
+		"an operator credential":             {operator.CredentialID, alpha},
+		"an operator credential, no project": {operator.CredentialID, ""},
+		"an identifier that names nothing":   {uuid.NewString(), alpha},
+	} {
+		if err := s.RevokeInProject(ctx, c.id, c.project); !errors.Is(err, credential.ErrUnknown) {
+			t.Fatalf("revoking %s gave %v, want ErrUnknown", what, err)
+		}
+	}
+	if _, err := s.Resolve(ctx, tokenBeta); err != nil {
+		t.Fatalf("another project's credential stopped resolving after a refused revoke: %v", err)
+	}
+	if _, err := s.ResolveOperator(ctx, tokenOperator); err != nil {
+		t.Fatalf("the operator credential stopped resolving after a refused revoke: %v", err)
+	}
+
+	if err := s.RevokeInProject(ctx, ofAlpha.CredentialID, alpha); err != nil {
+		t.Fatalf("revoking the project's own credential: %v", err)
+	}
+	if _, err := s.Resolve(ctx, tokenAlpha); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("a revoked credential resolved: %v", err)
+	}
+	if err := s.RevokeInProject(ctx, ofAlpha.CredentialID, alpha); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("revoking it twice gave %v, want ErrUnknown", err)
+	}
+}
+
 // A credential has to be nameable, because a list of anonymous keys is a list nobody can safely
 // revoke from.
 func TestACredentialWithoutANameIsRefused(t *testing.T) {
