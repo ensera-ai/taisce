@@ -28,7 +28,7 @@ For LangChain4j (the example below also uses LangChain4j's OpenAI-compatible mod
   <dependency>
     <groupId>ai.ensera.taisce</groupId>
     <artifactId>taisce-langchain4j</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
   </dependency>
   <dependency>
     <groupId>dev.langchain4j</groupId>
@@ -48,7 +48,7 @@ repositories {
 }
 
 dependencies {
-    implementation("ai.ensera.taisce:taisce-langchain4j:0.1.1")
+    implementation("ai.ensera.taisce:taisce-langchain4j:0.1.2")
     implementation("dev.langchain4j:langchain4j:1.20.0")
     implementation("dev.langchain4j:langchain4j-open-ai:1.20.0")
 }
@@ -61,7 +61,7 @@ For Spring AI, next to the Spring AI model starter you already use:
   <dependency>
     <groupId>ai.ensera.taisce</groupId>
     <artifactId>taisce-spring-ai</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
   </dependency>
   <dependency>
     <groupId>org.springframework.ai</groupId>
@@ -76,7 +76,7 @@ repositories {
 }
 
 dependencies {
-    implementation("ai.ensera.taisce:taisce-spring-ai:0.1.1")
+    implementation("ai.ensera.taisce:taisce-spring-ai:0.1.2")
     implementation("org.springframework.ai:spring-ai-client-chat:2.0.1")
 }
 ```

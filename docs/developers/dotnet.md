@@ -12,7 +12,7 @@ adds what Taisce knows about the person as one message. After the model answers,
 The packages are on nuget.org. You need the .NET 10 SDK. In your project:
 
 ```bash
-dotnet add package Taisce.AgentFramework --version 0.1.1
+dotnet add package Taisce.AgentFramework --version 0.1.2
 ```
 
 | Package | What it is |
@@ -55,7 +55,7 @@ it into facts, the second conversation asks about it.
 ```bash
 dotnet new console -n MemoryDemo
 cd MemoryDemo
-dotnet add package Taisce.AgentFramework --version 0.1.1
+dotnet add package Taisce.AgentFramework --version 0.1.2
 dotnet add package Microsoft.Extensions.AI.OpenAI --version 10.10.0
 ```
 
