@@ -27,6 +27,14 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin 
 sudo dnf install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin       # Fedora, RHEL
 ```
 
+On Fedora and RHEL, installing Docker does not start it. Enable it, so it also starts after a reboot:
+
+```bash
+sudo systemctl enable --now docker   # Fedora, RHEL
+```
+
+Ubuntu and Debian start Docker when the package is installed.
+
 To run `docker` without `sudo`, add yourself to the `docker` group and log in again. Membership of
 that group is equivalent to root on the machine, so decide it rather than copy it:
 
@@ -121,6 +129,7 @@ HTTPS. Taisce's worker makes the same call with your key.
 | `curl: (6) Could not resolve host` | Containers can't resolve names. | Check the host itself resolves `api.deepseek.com`, then Docker's DNS setting. |
 | `curl: (7) Failed to connect` or `curl: (28)` after 10 seconds | A firewall or proxy blocks outbound HTTPS from containers. | Allow outbound port 443 to `api.deepseek.com`, or configure Docker for your proxy. |
 | `curl: (60) SSL certificate problem` | A proxy inspects TLS with its own certificate. | Ask for the proxy's certificate authority, or an exception for `api.deepseek.com`. |
+| `failed to connect to the docker API at unix:///var/run/docker.sock` | Docker is installed but not running. This is the default on Fedora and RHEL. | `sudo systemctl enable --now docker`, then run the check again. |
 
 `docker: command not found` or `'compose' is not a docker command` means Docker or the Compose
 plugin is missing: go back to your system's Docker steps.
@@ -130,6 +139,13 @@ plugin is missing: go back to your system's Docker steps.
 The macOS steps were run on 2026-09-13 on Apple silicon, with Colima 0.10.3 and Docker Compose 5.5.0,
 and the check printed `401`.
 
-The Linux and Windows sections follow Docker's and Microsoft's documentation as read on that day, and
-have not been run on those systems yet. [#33](https://github.com/ensera-ai/taisce/issues/33) tracks
-running them.
+The Linux steps were run on 2026-09-14 on fresh virtual machines. Each machine ran Docker's own
+repository setup, the commands above and the check, which printed `401`, then the quickstart end to end.
+- **Ubuntu 26.04 LTS:** Docker 29.8.0 and Docker Compose 5.5.1.
+- **Fedora 44:** the same versions. On Fedora the check first failed because Docker was not running,
+  which is why the page now enables it.
+
+Both machines were arm64. The amd64 packages and images were not run on Linux.
+
+The Windows section follows Docker's and Microsoft's documentation as read on 2026-09-13, and has not
+been run on Windows yet. [#84](https://github.com/ensera-ai/taisce/issues/84) tracks running it.
