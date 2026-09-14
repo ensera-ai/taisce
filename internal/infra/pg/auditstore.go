@@ -146,7 +146,11 @@ type ProjectActivity struct {
 // rest are one filter away.
 const activityProjects = 6
 
-func (t *ActivityTotals) add(operation, outcome string, n, magnitude int64) {
+// written is the number of rows with a non-zero magnitude. For observe that is the turns written: an
+// observation's magnitude is its message count, and a replay of an idempotency key is recorded with
+// magnitude 0 because it wrote nothing. Summing magnitude would count messages, and a turn of three
+// messages would show as three turns stored (#54).
+func (t *ActivityTotals) add(operation, outcome string, n, magnitude, written int64) {
 	t.Operations += n
 	if outcome == domain.OutcomeRefused {
 		t.Refused += n
@@ -154,7 +158,7 @@ func (t *ActivityTotals) add(operation, outcome string, n, magnitude int64) {
 	}
 	switch operation {
 	case domain.AuditObserve:
-		t.TurnsStored += magnitude
+		t.TurnsStored += written
 	case domain.AuditRecall, domain.AuditContextAssemble:
 		t.Recalls += n
 	case domain.AuditErase:
@@ -202,7 +206,8 @@ func (s *AuditStore) Activity(ctx context.Context, project string, since, until 
 	}
 
 	rows, err := s.pool.Query(ctx, s.schema.SQL(`
-		SELECT occurred_at >= $2, operation, outcome, count(*), coalesce(sum(magnitude), 0)
+		SELECT occurred_at >= $2, operation, outcome, count(*), coalesce(sum(magnitude), 0),
+		       count(*) FILTER (WHERE magnitude > 0)
 		  FROM {schema}.audit_entry
 		 WHERE occurred_at >= $1 AND occurred_at < $3 AND ($4 = '' OR project = $4)
 		 GROUP BY 1, 2, 3`), from, since, until, project)
@@ -213,16 +218,16 @@ func (s *AuditStore) Activity(ctx context.Context, project string, since, until 
 	for rows.Next() {
 		var current bool
 		var operation, outcome string
-		var n, magnitude int64
-		if err := rows.Scan(&current, &operation, &outcome, &n, &magnitude); err != nil {
+		var n, magnitude, written int64
+		if err := rows.Scan(&current, &operation, &outcome, &n, &magnitude, &written); err != nil {
 			rows.Close()
 			return Activity{}, fmt.Errorf("scan a ledger count: %w", err)
 		}
 		if !current {
-			out.Previous.add(operation, outcome, n, magnitude)
+			out.Previous.add(operation, outcome, n, magnitude, written)
 			continue
 		}
-		out.Current.add(operation, outcome, n, magnitude)
+		out.Current.add(operation, outcome, n, magnitude, written)
 		o := byOperation[operation]
 		if o == nil {
 			o = &OperationActivity{Operation: operation}

@@ -206,6 +206,7 @@ site/node_modules/.package-lock.json: site/package-lock.json
 site: site/node_modules/.package-lock.json
 	go run scripts/docsite.go -dsn "$(TEST_DSN)" -out site/docs -sidebars site/sidebars.generated.json \
 		-repo $(SITE_REPO) -ref $(SITE_REF)
+	cd site && node scripts/check-mermaid.mjs ../docs
 	cd site && SITE_REPO=$(SITE_REPO) npm run build
 
 # Serves the built site on loopback at http://127.0.0.1:3000/taisce/. It serves what `make site`

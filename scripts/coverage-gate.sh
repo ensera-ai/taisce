@@ -56,9 +56,12 @@ if awk -v t="$total" -v f="$floor" 'BEGIN{exit !(t < f)}'; then
   exit 1
 fi
 
-# Raising the floor has to be a deliberate edit, so this says the number rather than writing it.
+# Above the floor, this says where the run landed and what the rule is, and never a number to write.
+# One run's figure is where that run happened to land, and a floor set to it fails the next ordinary
+# run (D7). The previous wording told the reader to raise the floor to exactly that figure, and was
+# followed (#76).
 if awk -v t="$total" -v f="$floor" 'BEGIN{exit !(t > f)}'; then
-  echo "coverage: ${total}%, above the floor of ${floor}% — raise coverage.floor to ${total} to keep it"
+  echo "coverage: ${total}%, above the floor of ${floor}%. The floor moves only when the lowest of several full runs clears a higher value (D7); one run's figure is not that."
 else
   echo "coverage: ${total}%, at the floor"
 fi
