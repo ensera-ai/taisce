@@ -478,3 +478,54 @@ that describe them. A deployment that set its own variables is unaffected either
 once a key is supplied, and the allowlist bounds where it goes. Cost: formation spends provider tokens
 per stored turn. Operations: every Compose command that reads the file needs the key, which is why it lives in `.env`.
 
+## D12 — The compose file names no project, so each directory is its own install
+
+**Date.** 2026-09-14. **Issue.** [#73](https://github.com/ensera-ai/taisce/issues/73).
+
+**Why it was open.** From v0.3.0 to v0.4.0, `compose.yaml` set `name: taisce`, and nothing recorded
+why. The project name decides which containers and which volume every `docker compose` command acts
+on. Fixed in the file, it made every copy of the file on one machine a single install:
+- **A takeover:** `up` in a second directory recreated the first install's containers against the
+  first install's volume.
+- **A misleading failure:** bootstrap failed on that volume's password with SQLSTATE `28P01`, while
+  `postgres` reported healthy, because its health check does not log in.
+- **Data loss:** `down -v` in either directory deleted the other's data. This happened on a
+  development machine, and it destroyed an install's volume.
+
+**Decided.** No shipped compose file sets `name`. Compose then takes the project name from the
+directory holding the file. `COMPOSE_PROJECT_NAME` remains the way to choose one deliberately. The
+measurement overlays and the GPU qualification scripts already pass their own names, and are
+unchanged. `TestNoShippedComposeFileFixesTheProjectName` holds this for all four files.
+
+**Measured on 2026-09-14,** with this file, Docker Compose 5.5.0, Colima on macOS:
+- **Two directories:** different `POSTGRES_PASSWORD` values gave two projects and two volumes. Both
+  bootstraps exited 0, and the first install's containers were unchanged after the second started.
+- **The same directory again:** `up -d` reused its volume. Bootstrap minted no credential, and the
+  first token read what had been stored.
+- **An install made by a file with a fixed name:** the new file in the same directory started a new,
+  empty project. Setting `COMPOSE_PROJECT_NAME` to the old name brought back the original project,
+  its token and its stored turn.
+
+**Rejected: keep the name and document it.** The takeover and the data loss happen before anyone
+reads a troubleshooting page.
+
+**Rejected: keep the name and make bootstrap explain a password mismatch.** A clearer error fixes the
+symptom, not the hazard: the containers are still taken over and the volume is still shared.
+
+**Rejected: a version-specific name, such as `taisce-v0-4`.** Two installs of the same version still
+collide, and every upgrade would start an empty project and look like data loss.
+
+**What this does not change.** An install created by a v0.3.0–v0.4.0 file keeps its data in
+`taisce_postgres-data`. From a directory called `taisce`, which is what a repository checkout is,
+nothing changes. From a directory with another name, the next `up` with a newer file starts an empty
+project instead; `COMPOSE_PROJECT_NAME=taisce` in `.env` points it back, and troubleshooting says so.
+The Helm chart has no equivalent: each Helm release is already named by whoever installs it.
+
+**Undo cost.** Low to put the line back, and a repeat of the same one-time move for anyone who
+upgraded in between: installs made by a file without a name would become the shared project `taisce`
+on their next `up`.
+
+**Impact.** Operations: running two installs on one machine becomes safe by default. The cost is a
+one-time step for anyone who created an install with a v0.3.0–v0.4.0 file in a directory not called
+`taisce`.
+

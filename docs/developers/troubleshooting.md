@@ -17,6 +17,59 @@ The [quickstart](quickstart.md) exports both.
 
 ## Starting up
 
+### Bootstrap exits: "password authentication failed"
+
+**What you see.** `docker compose up` stops and reports that `bootstrap` didn't complete successfully,
+although `postgres` is healthy. The bootstrap log ends like this:
+
+```text
+{"level":"ERROR","msg":"taisce failed","error":"database unreachable: failed to connect to `user=postgres database=taisce`: …: failed SASL auth: FATAL: password authentication failed for user \"postgres\" (SQLSTATE 28P01)"}
+```
+
+**Why.** PostgreSQL takes the `postgres` password from `POSTGRES_PASSWORD` once, when the volume is
+created. After that the variable changes nothing, and the volume keeps asking for the password it
+was created with. `postgres` still shows as healthy because its health check does not log in. So
+either `POSTGRES_PASSWORD` has changed since the volume was made, or this stack is using a volume
+another install made. Compose files from v0.3.0 to v0.4.0 set `name: taisce`, which makes every
+directory on the machine that uses one of them share one project and one volume.
+
+**Fix.** Find out whose volume it is before you delete anything:
+
+```bash
+docker compose ls -a
+docker volume ls --filter label=com.docker.compose.project
+```
+
+- **The volume belongs to another install:** give this one its own project. Put
+  `COMPOSE_PROJECT_NAME=` and a name nothing else uses in `.env` beside `compose.yaml`, then run
+  `docker compose up -d` again.
+- **The volume is this install's:** set `POSTGRES_PASSWORD` back to the value it was created with.
+- **`docker compose down -v` deletes the volume and every memory in it.** Run it only when that data
+  is disposable, and only from the install that owns it.
+
+### Memory is empty after updating `compose.yaml`
+
+**What you see.** You fetched a newer `compose.yaml` and ran `docker compose up -d`. Bootstrap
+printed new tokens, and `/v1/freshness` answers `"stored":null`, as if nothing had ever been saved.
+
+**Why.** Compose files from v0.3.0 to v0.4.0 set `name: taisce`. An install they created is the
+project `taisce`, with its data in the volume `taisce_postgres-data`, whatever its directory is
+called. Newer files take the project name from the directory. In a directory not called `taisce`,
+the same command now starts a new, empty project beside the old one. Nothing was deleted.
+
+**Fix.** Stop the new project, point this directory back at the old one, and start again:
+
+```bash
+docker compose down
+echo 'COMPOSE_PROJECT_NAME=taisce' >> .env
+docker compose up -d
+```
+
+Run `docker compose down` without `-v`, and before you edit `.env`, so that it stops the new, empty
+project. The old tokens work again, and bootstrap mints none, because the project can already be
+reached. The empty project's volume is left behind, named after your directory; remove it with
+`docker volume rm` once you are sure it is the empty one.
+
 ### The api or worker exits right after starting
 
 **What you see.** The container restarts over and over. Its last log line looks like this:
