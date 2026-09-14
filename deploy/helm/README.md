@@ -42,7 +42,7 @@ tag's `v`; it installs the image published beside it, named by the release tag. 
 as above:
 
 ```sh
-helm install memory oci://ghcr.io/ensera-ai/charts/taisce --version 0.3.2 -n taisce --create-namespace
+helm install memory oci://ghcr.io/ensera-ai/charts/taisce --version 0.4.0 -n taisce --create-namespace
 ```
 
 Charts 0.3.0 and 0.3.1 ask for their image without the `v` and so name a tag that was never pushed

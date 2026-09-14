@@ -230,8 +230,8 @@ required variable TAISCE_INFERENCE_API_KEY is missing a value: set it to your De
   never form them; the refusal names the one thing missing instead. Once the key is set, each stored
   turn goes to DeepSeek to be read, and only to the hosts on the allowlist. To keep conversation text
   on your own infrastructure, set the three variables to a model you serve.
-- **The `v0.3.2` compose file predates this default.** The quickstart and the README set all four
-  variables, so they work with that file and with this one.
+- **Compose files before `v0.4.0` predate this default.** They point at a model on the host. The
+  quickstart and the README set all four variables, so the same steps work with an older file too.
 
 LiteLLM ships as an opt-in profile (`--profile gateway`, configured by
 [`deploy/litellm/config.yaml`](../../deploy/litellm/config.yaml)). It is not the default hop. A
@@ -582,17 +582,17 @@ instance that changes what it runs without anybody saying so is an outage with n
 Provenance — built by this repository's release workflow, from the tag you name:
 
 ```bash
-gh attestation verify oci://ghcr.io/ensera-ai/taisce:v0.3.2 \
+gh attestation verify oci://ghcr.io/ensera-ai/taisce:v0.4.0 \
   --repo ensera-ai/taisce \
   --signer-workflow ensera-ai/taisce/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.3.2
+  --source-ref refs/tags/v0.4.0
 ```
 
 Signature — made by that workflow's identity at that tag:
 
 ```bash
-cosign verify ghcr.io/ensera-ai/taisce:v0.3.2 \
-  --certificate-identity https://github.com/ensera-ai/taisce/.github/workflows/release.yml@refs/tags/v0.3.2 \
+cosign verify ghcr.io/ensera-ai/taisce:v0.4.0 \
+  --certificate-identity https://github.com/ensera-ai/taisce/.github/workflows/release.yml@refs/tags/v0.4.0 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
