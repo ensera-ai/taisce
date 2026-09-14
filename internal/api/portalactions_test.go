@@ -395,6 +395,48 @@ func TestThePortalRevokesOnlyKeysOfTheProjectWhosePageItIs(t *testing.T) {
 	}
 }
 
+// ── #55 ──────────────────────────────────────────────────────────────────────────────────────
+//
+// Seal to here says what it did. When every entry is already under a seal, the substrate seals
+// nothing, and the page says there was nothing new rather than that it sealed. When there is
+// something, the page names where the seal ends and how many entries it covers.
+func TestSealingFromThePortalSaysWhatItSealed(t *testing.T) {
+	a := signedInPortal(t, "portal_seal_detail")
+	ctx := context.Background()
+	_, guard := a.page(t, "/portal/")
+	audit := pg.NewAuditStore(a.pool, a.schema)
+	// Seal everything already written, so the portal's seal finds nothing new.
+	for i := 0; ; i++ {
+		s, err := audit.Seal(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Entries == 0 {
+			break
+		}
+		if i > 10 {
+			t.Fatal("the ledger never finished sealing")
+		}
+	}
+	seal := func() string {
+		t.Helper()
+		if status := a.act(t, "/portal/actions/seal", url.Values{"guard": {guard}}); status != http.StatusSeeOther {
+			t.Fatalf("seal answered %d", status)
+		}
+		body, _ := a.page(t, "/portal/")
+		return body
+	}
+
+	if body := seal(); !strings.Contains(body, "nothing new to seal") || strings.Contains(body, "sealed to entry") {
+		t.Fatal("sealing an already sealed ledger did not say there was nothing new")
+	}
+	// The first seal recorded itself on the ledger, so there is now something to seal.
+	body := seal()
+	if !strings.Contains(body, "sealed to entry") || !strings.Contains(body, "this seal covers") {
+		t.Fatal("a seal that covered entries did not say where it ends and how many it covers")
+	}
+}
+
 // The ops centre is not for reading memory. Every panel and every action is about the instance, the
 // projects, the ledger and the keys — and an operator credential cannot reach a person's records at
 // all, which is the boundary that lets somebody run this system without being able to read it.

@@ -5,6 +5,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -245,10 +246,16 @@ func (p *Portal) revoke(r *http.Request, _ credential.Grant) (string, string, er
 }
 
 func (p *Portal) seal(r *http.Request, _ credential.Grant) (string, string, error) {
-	if _, err := p.m.stores.Audit.Seal(r.Context()); err != nil {
+	seal, err := p.m.stores.Audit.Seal(r.Context())
+	if err != nil {
 		return "", "", err
 	}
-	return "", "the ledger is sealed to this point", nil
+	// The substrate seals nothing when every entry is already under a seal, and says so with an empty
+	// seal rather than an error. Reporting "sealed" then would describe work that did not happen (#55).
+	if seal.Entries == 0 {
+		return "", "nothing new to seal; every entry was already under a seal", nil
+	}
+	return "", fmt.Sprintf("the ledger is sealed to entry %d; this seal covers %d entries", seal.To, seal.Entries), nil
 }
 
 // errInvalidPortalTarget is a form naming something this action cannot act on.

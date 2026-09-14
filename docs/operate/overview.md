@@ -423,9 +423,3 @@ These are deliberate, and each holds on all three surfaces:
 - **See why a turn failed**, beyond the fact that it did. The worker's log has the error.
 - **See what the model cost.** Nothing records it.
 
-## Known gaps
-
-These are open, and this guide describes the behaviour they will change:
-
-- [#55](https://github.com/ensera-ai/taisce/issues/55): *Seal to here* says it sealed when there was
-  nothing to seal, and the chart takes only a lower-case `"on"`.
