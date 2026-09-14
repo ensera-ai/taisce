@@ -74,6 +74,17 @@ const ADAPTERS = [
   {lang: 'CLI', seam: 'Projects, keys, health and the audit log', pkg: 'taisce', to: '/docs/developers/cli'},
 ];
 
+// What the ops centre shows, in the order the operator guide covers it. Each line is a claim the guide
+// makes, and each code is the management API route that does the same work from a script.
+const OPERATE = [
+  {k: 'projects', title: 'Projects and keys', text: 'Create projects, suspend and resume them, and see which keys reach each one.', code: 'projects · credentials'},
+  {k: 'health', title: 'How it is running', text: 'What was stored, what has formed, and how far behind learning is, with what each number means.', code: 'formation/status'},
+  {k: 'parked', title: 'Turns that failed', text: 'A turn the model keeps failing on is parked rather than lost. See it, then retry it.', code: 'formation/unpark'},
+  {k: 'refusals', title: 'What extraction refused', text: 'Every claim the checks turned down, counted by the reason it was refused.', code: 'refusals/summary'},
+  {k: 'erasures', title: 'Erasure receipts', text: 'What each erasure deleted and what was left afterwards.', code: 'erasures/list'},
+  {k: 'ledger', title: 'The ledger', text: 'Operator actions, recorded in a ledger you can seal and verify.', code: 'audit/seal · verify'},
+];
+
 const DEEPER = [
   {k: 'examples', title: 'Examples', text: 'Short recipes: remember a preference, answer with evidence, forget a person.', to: '/docs/examples/overview'},
   {k: 'architecture', title: 'How it is built', text: 'Saving, learning, recalling and forgetting, step by step, and how it is secured.', to: '/docs/architecture/overview'},
@@ -116,6 +127,59 @@ function Different() {
           Compared on 2026-09-13 with the agent-memory products whose documentation we could read. The survey, with every
           source and what it could not confirm, is <a href={`https://github.com/${repository}/issues/30`}>issue #30</a>.
         </p>
+      </div>
+    </section>
+  );
+}
+
+function Operate() {
+  const {withBaseUrl} = useBaseUrlUtils();
+  return (
+    <section className={styles.operate}>
+      <div className={styles.wrap}>
+        <div className={styles.opsGrid}>
+          <div>
+            <span className={styles.kickerDark}>for operators</span>
+            <h2 className={styles.h2}>Run it from one screen.</h2>
+            <p className={styles.sectionPDark}>
+              The ops centre is where whoever runs Taisce looks after it. The <code>taisce</code> CLI and the management API do
+              the same work from a terminal or a script.
+            </p>
+            <div className={styles.opsList}>
+              {OPERATE.map((o) => (
+                <div key={o.k} className={styles.opsRow}>
+                  <div>
+                    <h3>{o.title}</h3>
+                    <p>{o.text}</p>
+                  </div>
+                  <code>{o.code}</code>
+                </div>
+              ))}
+            </div>
+            <div className={styles.compose}>
+              <code>TAISCE_PORTAL=on</code>
+              <span>
+                Off until you switch it on. It is served by the management process, which compose publishes on this machine's
+                loopback only, and you sign in with an operator token.
+              </span>
+            </div>
+            <div className={styles.actions}>
+              <Link className={styles.primary} to="/docs/operate/overview">
+                Read the operator guide
+              </Link>
+            </div>
+          </div>
+          <figure className={styles.opsShot}>
+            <img
+              src={withBaseUrl('/img/ops-centre/overview.png')}
+              alt="The Taisce ops centre overview: activity across projects and how the instance is running"
+              width="1440"
+              height="1647"
+              loading="lazy"
+            />
+            <figcaption>The overview, from a deployment seeded through the real API.</figcaption>
+          </figure>
+        </div>
       </div>
     </section>
   );
@@ -290,6 +354,8 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        <Operate />
 
         <section className={styles.deeper}>
           <div className={styles.wrap}>
