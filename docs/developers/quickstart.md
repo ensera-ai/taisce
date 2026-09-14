@@ -407,7 +407,7 @@ Pick the framework you use. Microsoft Agent Framework comes first, in Python and
 
    ```bash
    dotnet new console -n MemoryAgent && cd MemoryAgent
-   dotnet add package Taisce.AgentFramework --version 0.1.1
+   dotnet add package Taisce.AgentFramework --version 0.1.2
    dotnet add package Microsoft.Extensions.AI.OpenAI --version 10.10.0
    ```
 
@@ -543,7 +543,7 @@ You need Java 21 and Maven.
        <dependency>
          <groupId>ai.ensera.taisce</groupId>
          <artifactId>taisce-spring-ai</artifactId>
-         <version>0.1.1</version>
+         <version>0.1.2</version>
        </dependency>
        <dependency>
          <groupId>org.springframework.ai</groupId>
@@ -640,7 +640,7 @@ before the new message is in it.
      <dependency>
        <groupId>ai.ensera.taisce</groupId>
        <artifactId>taisce-langchain4j</artifactId>
-       <version>0.1.1</version>
+       <version>0.1.2</version>
      </dependency>
      <dependency>
        <groupId>dev.langchain4j</groupId>
