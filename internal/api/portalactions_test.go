@@ -315,7 +315,6 @@ func TestAnIrreversiblePortalActionIsRefusedWithoutItsTypedConfirmation(t *testi
 	}
 }
 
-<<<<<<< Updated upstream
 // ── #52 ──────────────────────────────────────────────────────────────────────────────────────
 //
 // The Revoke form sits on one project's page, so it revokes only that project's keys. From p1's page:
@@ -393,7 +392,9 @@ func TestThePortalRevokesOnlyKeysOfTheProjectWhosePageItIs(t *testing.T) {
 	}
 	if allowed := revocations("allowed") - allowedBefore; allowed != 1 {
 		t.Fatalf("%d allowed credential.revoke rows, want 1", allowed)
-=======
+	}
+}
+
 // ── #55 ──────────────────────────────────────────────────────────────────────────────────────
 //
 // Seal to here says what it did. When every entry is already under a seal, the substrate seals
@@ -433,7 +434,6 @@ func TestSealingFromThePortalSaysWhatItSealed(t *testing.T) {
 	body := seal()
 	if !strings.Contains(body, "sealed to entry") || !strings.Contains(body, "this seal covers") {
 		t.Fatal("a seal that covered entries did not say where it ends and how many it covers")
->>>>>>> Stashed changes
 	}
 }
 
