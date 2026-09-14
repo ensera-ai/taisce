@@ -251,9 +251,11 @@ func TestEveryPortalActionRecordsTheOperatorOnTheLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := map[string]domain.AuditEntry{}
+	rows := map[string]int{}
 	for _, entry := range entries {
 		if entry.PrincipalKind == domain.PrincipalOperator && entry.Outcome == domain.OutcomeAllowed {
 			seen[entry.Operation] = entry
+			rows[entry.Operation]++
 		}
 	}
 	for _, action := range actions {
@@ -263,6 +265,11 @@ func TestEveryPortalActionRecordsTheOperatorOnTheLedger(t *testing.T) {
 		}
 		if entry.Principal == "" {
 			t.Fatalf("%s recorded no principal: %+v", action.name, entry)
+		}
+		// One request is one operation, so one row. A second row for the same request is an operation
+		// counted twice on the overview and in the breakdown (#57).
+		if rows[action.name] != 1 {
+			t.Fatalf("%s left %d allowed rows for one request, want 1", action.name, rows[action.name])
 		}
 	}
 }
@@ -445,6 +452,84 @@ func TestRetryingATurnThatIsNotParkedSaysSoRatherThanClaimingSuccess(t *testing.
 	body, _ := a.page(t, "/portal/projects/p1")
 	if !strings.Contains(body, "was not parked") {
 		t.Fatalf("the page claimed a retry that did not happen")
+	}
+}
+
+// ── #57 ──────────────────────────────────────────────────────────────────────────────────────
+//
+// The store writes an unpark's ledger row in the same transaction as the change, so the portal writes
+// none of its own for what the store recorded, and one Retry is one row. Every outcome is counted:
+//   - a parked turn retried: allowed, magnitude 1;
+//   - the same turn retried again, no longer parked: allowed, magnitude 0, because nothing changed;
+//   - a turn the project never held: refused, recorded by the store;
+//   - an identifier that is not one: refused before the store is reached, so the portal records it.
+func TestOneRetryFromThePortalIsOneRowOnTheLedger(t *testing.T) {
+	a := signedInPortal(t, "portal_unpark_rows")
+	ctx := context.Background()
+	_, guard := a.page(t, "/portal/")
+	a.do(t, http.MethodPost, "/v1/observations", map[string]any{"data_subject_id": "subject-1",
+		"messages": []map[string]any{{"role": "user", "content": "I swim before work."}}}, http.StatusCreated, nil)
+	if _, err := a.pool.Exec(ctx, a.schema.SQL(
+		`UPDATE {schema}.observation SET parked_at=now(), formation_attempts=2 WHERE scope='p1' AND formed_at IS NULL`)); err != nil {
+		t.Fatal(err)
+	}
+	var parked string
+	if err := a.pool.QueryRow(ctx, a.schema.SQL(
+		`SELECT observation_id::text FROM {schema}.observation WHERE scope='p1' AND parked_at IS NOT NULL LIMIT 1`)).Scan(&parked); err != nil {
+		t.Fatal(err)
+	}
+
+	type row struct {
+		outcome   string
+		magnitude int
+	}
+	ledger := func() []row {
+		t.Helper()
+		rows, err := a.pool.Query(ctx, a.schema.SQL(
+			`SELECT outcome, magnitude FROM {schema}.audit_entry
+			  WHERE principal_kind='operator' AND operation=$1 ORDER BY entry_id`), domain.AuditFormationUnpark)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []row
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.outcome, &r.magnitude); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, r)
+		}
+		return out
+	}
+	retry := func(observation string) {
+		t.Helper()
+		if status := a.act(t, "/portal/actions/unpark", url.Values{"guard": {guard},
+			"project": {"p1"}, "observation": {observation}}); status != http.StatusSeeOther {
+			t.Fatalf("retry answered %d", status)
+		}
+	}
+
+	steps := []struct {
+		what        string
+		observation string
+		want        row
+	}{
+		{"a parked turn", parked, row{"allowed", 1}},
+		{"the same turn, no longer parked", parked, row{"allowed", 0}},
+		{"a turn the project never held", uuid.NewString(), row{"refused", 0}},
+		{"an identifier that is not one", "not-a-uuid", row{"refused", 0}},
+	}
+	for i, step := range steps {
+		retry(step.observation)
+		got := ledger()
+		if len(got) != i+1 {
+			t.Fatalf("after retrying %s there are %d formation.unpark rows, want %d: one retry is one row",
+				step.what, len(got), i+1)
+		}
+		if got[i] != step.want {
+			t.Fatalf("retrying %s recorded %+v, want %+v", step.what, got[i], step.want)
+		}
 	}
 }
 
