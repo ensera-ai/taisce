@@ -175,9 +175,20 @@ than only in a log.
 - **Whether the adapters agree under load.** One driver at a time, one turn at a time, which is what
   the suite does. Concurrency between adapters was not exercised.
 
-## What is still installed
+## What was installed, and what is left
 
-The release `memory` in namespace `taisce`: three database instances, two API replicas, two
-workers, the management surface, one Secret holding the provider key, and the Secret holding the
-role passwords. Nothing outside that namespace was created or changed. Removing it is `helm
-uninstall memory -n taisce` followed by deleting the namespace, and both steps are needed.
+For the length of this run the release `memory` held a namespace of its own: three database
+instances, two API replicas, two workers, the management surface, one Secret holding the provider
+key, and the Secret holding the role passwords. Nothing outside that namespace was created or
+changed, and nothing cluster-scoped was needed.
+
+It was removed when the runs finished — `helm uninstall`, which kept the Secret holding the role
+passwords as it is annotated to, then deleting the namespace, which took that Secret and the three
+volumes with it. The rest of the cluster was verified unchanged afterwards: the Helm releases that
+were there before still deployed, every other PostgreSQL cluster healthy, the cluster image policies
+untouched, all three nodes ready.
+
+So nothing of this run survives except what is written down. That is the point of writing it down,
+and it is why the figures above name what they measured and on what: a deployment that no longer
+exists cannot be re-read, and a number quoted without its arrangement cannot be checked against
+anything.
