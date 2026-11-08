@@ -113,3 +113,43 @@ func TestAContextIsTheNewestTurnsVerbatimAndSegmentsOverTheRestUnderABudget(t *t
 	})
 	h.do(t, http.MethodPost, "/v1/contexts", map[string]any{"data_subject_id": "subject-1"}, 500, nil)
 }
+
+// A context carries a turn the deployment has not formed yet. This is the operation an adapter's
+// compaction calls to replace the history its framework held, so a short answer is not a stale
+// answer: it is the adapter handing the model nothing and reporting success.
+//
+// Formation is asynchronous by design, which makes the gap the width of the worker backlog — and
+// for a subject mid-conversation that covers exactly the newest turns, the ones the next turn is
+// about. Assembling a context makes no model call, so nothing about formation bears on whether the
+// subject said the words. The watermark in the answer says how far formation is behind; the words
+// are in it either way.
+func TestAContextCarriesATurnTheDeploymentHasNotFormedYet(t *testing.T) {
+	h := newHarness(t, "api_contexts_unformed")
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{"data_subject_id": "subject-9", "messages": []map[string]any{
+		{"role": "user", "content": "my sister's name is Niamh"}, {"role": "assistant", "content": "noted"}}}, 201, nil)
+	var out struct {
+		Segments []map[string]any `json:"segments"`
+		Turns    []struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		} `json:"turns"`
+		Watermark struct {
+			Stored *int64 `json:"stored"`
+			Formed *int64 `json:"formed"`
+		} `json:"watermark"`
+		Characters int  `json:"characters"`
+		Truncated  bool `json:"truncated"`
+	}
+	h.do(t, http.MethodPost, "/v1/contexts", map[string]any{"data_subject_id": "subject-9"}, 200, &out)
+	if len(out.Turns) != 1 || len(out.Turns[0].Messages) != 2 || out.Turns[0].Messages[0].Content != "my sister's name is Niamh" {
+		t.Fatalf("the stored turn must be in the context as it was said, got %+v", out.Turns)
+	}
+	if out.Characters == 0 || out.Truncated || len(out.Segments) != 0 {
+		t.Fatalf("one unformed turn costs characters, is not a cut, and has no summary over it, got %+v", out)
+	}
+	if out.Watermark.Stored == nil || out.Watermark.Formed != nil {
+		t.Fatalf("the watermark must say the scope has stored and formed nothing, got %+v", out.Watermark)
+	}
+}

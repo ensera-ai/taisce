@@ -18,14 +18,25 @@ import (
 // ProjectionSegment is the projection kind a segment registers as.
 const ProjectionSegment = "segment"
 
-// SegmentStore reads a subject's formed history and writes the segments that stand in for it.
+// SegmentStore writes the segments that stand in for a subject's history, and reads that history
+// back for a caller.
 //
-// # What a subject's history is
+// # The two readers, and why they see different turns
 //
-// The subject's own turns, formed and not parked, in log order. A turn that has not formed is not
-// yet memory and may still be parked; a segment written over it would stand in for something the
-// deployment has not admitted. A parked turn is excluded for the same reason the freshness watermark
-// skips it: the driver gave up on it, and it is visible as parked rather than silently summarised.
+// The compaction pass is offered only turns that are formed and not parked. It writes a summary
+// over them and registers it against each one, so what it summarises must be something the
+// deployment has admitted: a turn still inside the formation window may yet park or be erased, and
+// a summary standing in for it would have been written over nothing. That gate is the write path's,
+// and it belongs there.
+//
+// A context is the other reader, and it carries the subject's own words under a budget with no
+// model call. Nothing about formation bears on whether a turn was said, so a context reads every
+// turn stored for the subject and reports, per turn, whether a segment was written from it. The
+// pass's gate does not belong here, and applying it to this read loses words in two ways that are
+// not alike: a turn inside the formation window is missing for as long as the workers are behind,
+// which for an active conversation is the newest turns a caller asked for, and a parked turn is
+// missing forever, because it will never be formed and so never summarised. An answer that is
+// short says so — as the watermark, or as the cut — and is never silently empty.
 type SegmentStore struct {
 	pool   *pgxpool.Pool
 	schema Schema
@@ -58,7 +69,8 @@ func (s *SegmentStore) Subjects(ctx context.Context, scope string, limit int) ([
 	return out, rows.Err()
 }
 
-// Formed reads one subject's formed turns in log order, each with its size in characters.
+// Formed reads the turns of one subject the compaction pass may summarise — formed, not parked — in
+// log order, each with its size in characters. It is the pass's reader; a context uses History.
 func (s *SegmentStore) Formed(ctx context.Context, scope, subject string) ([]compaction.Turn, error) {
 	rows, err := s.pool.Query(ctx, s.schema.SQL(`
 		SELECT o.log_offset, coalesce(sum(length(m.role)+length(m.content)),0)::int
@@ -73,6 +85,53 @@ func (s *SegmentStore) Formed(ctx context.Context, scope, subject string) ([]com
 	for rows.Next() {
 		var t compaction.Turn
 		if err := rows.Scan(&t.Offset, &t.Size); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// History reads every turn stored for one subject in log order, each with its size in characters
+// and whether a segment was written from its words. It is the context's reader: a turn's words are
+// the subject's whether or not the formation pass has reached them, and assembling a context makes
+// no model call, so it needs nothing from formation.
+//
+// Summarised is taken from the registration the segment write made against the turn, which is the
+// same row an erasure of that turn follows to delete the segment. So a turn counts as summarised
+// exactly when a segment would be destroyed by erasing it — the substrate's own answer, rather than
+// a range comparison that would also catch the turns the pass skipped.
+//
+// The registration is matched on the scope and the subject as given, not on the turn's own columns.
+// Written as a correlated reference to o.scope, the subquery cannot be indexed, and the planner
+// answers it by scanning every segment registration in the project — so the cost of one person's
+// context grows with every other person in it. With both as parameters the probe uses
+// `projection_dependency_subject_idx (scope, data_subject_id)`, and the rows it reads are bounded by
+// this subject's own history. On a project holding 45,960 turns across 81 subjects, asking for the
+// 5,000-turn subject reads 9,966 registration rows through that index instead of 50,286 through a
+// sequential scan: 191 buffers against 877. That is a plan, not a timing; no latency is claimed here.
+//
+// A segment registration always carries the subject, because the write copies it from the
+// observation it registers against. If one ever disagreed, the turn would read as unsummarised and
+// be handed over as it was said — the direction that returns words rather than hiding them.
+func (s *SegmentStore) History(ctx context.Context, scope, subject string) ([]compaction.Turn, error) {
+	rows, err := s.pool.Query(ctx, s.schema.SQL(`
+		SELECT o.log_offset, coalesce(sum(length(m.role)+length(m.content)),0)::int,
+		       EXISTS (SELECT 1 FROM {schema}.projection_dependency d
+		                WHERE d.source_observation_id=o.observation_id
+		                  AND d.scope=$1 AND d.data_subject_id=$2 AND d.projection_kind=$4)
+		  FROM {schema}.observation o LEFT JOIN {schema}.turn_message m ON m.observation_id=o.observation_id
+		 WHERE o.scope=$1 AND o.data_subject_id=$2 AND o.kind=$3
+		 GROUP BY o.observation_id, o.log_offset ORDER BY o.log_offset`),
+		scope, subject, KindTurn, ProjectionSegment)
+	if err != nil {
+		return nil, fmt.Errorf("read history: %w", err)
+	}
+	defer rows.Close()
+	var out []compaction.Turn
+	for rows.Next() {
+		var t compaction.Turn
+		if err := rows.Scan(&t.Offset, &t.Size, &t.Summarised); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -114,7 +173,7 @@ func (s *SegmentStore) Material(ctx context.Context, scope, subject string, plan
 		}
 		return m, nil
 	}
-	turns, err := s.turnTexts(ctx, scope, subject, plan.From, plan.To)
+	turns, err := s.turnTexts(ctx, scope, subject, plan.From, plan.To, formedOnly)
 	if err != nil {
 		return compaction.Material{}, err
 	}
@@ -122,11 +181,25 @@ func (s *SegmentStore) Material(ctx context.Context, scope, subject string, plan
 	return m, nil
 }
 
-func (s *SegmentStore) turnTexts(ctx context.Context, scope, subject string, from, to int64) ([]compaction.TurnText, error) {
+// formedOnly and everything are what the two callers of turnTexts pass: the compaction pass reads
+// only what it may summarise, a context reads what the subject said. The gate is a constant, not a
+// caller's string, so the query it builds is fixed at compile time.
+const (
+	formedOnly = true
+	everyTurn  = false
+)
+
+// turnTexts reads the messages of a subject's turns in an offset range, oldest first. See the type
+// comment for why its two callers see different turns.
+func (s *SegmentStore) turnTexts(ctx context.Context, scope, subject string, from, to int64, onlyFormed bool) ([]compaction.TurnText, error) {
+	gate := ""
+	if onlyFormed {
+		gate = ` AND o.formed_at IS NOT NULL AND o.parked_at IS NULL`
+	}
 	rows, err := s.pool.Query(ctx, s.schema.SQL(`
 		SELECT o.log_offset, o.occurred_at, m.role, m.content
 		  FROM {schema}.observation o JOIN {schema}.turn_message m ON m.observation_id=o.observation_id
-		 WHERE o.scope=$1 AND o.data_subject_id=$2 AND o.kind=$5 AND o.formed_at IS NOT NULL AND o.parked_at IS NULL
+		 WHERE o.scope=$1 AND o.data_subject_id=$2 AND o.kind=$5`+gate+`
 		   AND o.log_offset BETWEEN $3 AND $4
 		 ORDER BY o.log_offset, m.ordinal`), scope, subject, from, to, KindTurn)
 	if err != nil {
@@ -204,10 +277,11 @@ type AssembledSegment struct {
 	Summary string
 }
 
-// Context assembles one subject's history under a budget, with no model call: the planner's
-// choice over what the store holds, then the text of what it chose.
+// Context assembles one subject's history under a budget, with no model call: the planner's choice
+// over every turn the subject said, then the text of what it chose. A turn with a summary written
+// from it is handed over as that summary; every other turn is handed over as it was said.
 func (s *SegmentStore) Context(ctx context.Context, scope, subject string, budget int) (Assembled, error) {
-	turns, err := s.Formed(ctx, scope, subject)
+	turns, err := s.History(ctx, scope, subject)
 	if err != nil {
 		return Assembled{}, err
 	}
@@ -228,7 +302,7 @@ func (s *SegmentStore) Context(ctx context.Context, scope, subject string, budge
 		out.Segments = append(out.Segments, AssembledSegment{Segment: seg, Summary: summary})
 	}
 	if len(chosen.Turns) > 0 {
-		texts, err := s.turnTexts(ctx, scope, subject, chosen.Turns[0].Offset, chosen.Turns[len(chosen.Turns)-1].Offset)
+		texts, err := s.turnTexts(ctx, scope, subject, chosen.Turns[0].Offset, chosen.Turns[len(chosen.Turns)-1].Offset, everyTurn)
 		if err != nil {
 			return Assembled{}, err
 		}

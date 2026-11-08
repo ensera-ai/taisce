@@ -141,3 +141,128 @@ func TestASegmentIsRegisteredToEveryTurnItCoversAndErasureReachesIt(t *testing.T
 		}
 	}
 }
+
+// A context is every turn the subject said: the summaries written over the history, the turns no
+// summary was written from, and the ones the formation pass has not reached yet. The compaction
+// pass still sees only what it may summarise.
+//
+// The two losses this holds against are not the same shape. A turn inside the formation window is
+// missing for as long as the workers are behind, which for an active conversation is exactly the
+// newest turns a caller asked for. A parked turn is missing forever: it exhausted its attempts, the
+// watermark moved past it, and it will never be formed and so never summarised — while a segment's
+// range closes across it, because the pass planned over the turns beside it.
+func TestAContextCarriesTheTurnsFormationHasNotReachedAndTheOnesItParked(t *testing.T) {
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_context_unformed")
+	ctx := context.Background()
+	store := pg.NewSegmentStore(pool, schema)
+	observations := pg.NewObservationStore(pool)
+	ids := storeFormed(t, pool, schema, "carol", compaction.Verbatim+compaction.Branch+1)
+
+	// One turn behind the verbatim tail parks. The attempts are set by hand because the worker
+	// counts them as it claims the turn, and this test runs no worker; the park itself goes through
+	// the store, so the row reaches the state the running system puts it in — unformed, parked, and
+	// behind the watermark.
+	parked := int64(3)
+	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.observation SET formed_at=NULL, formation_attempts=6 WHERE observation_id=$1::uuid`), ids[parked]); err != nil {
+		t.Fatal(err)
+	}
+	if err := observations.Park(ctx, schema, ids[parked]); err != nil {
+		t.Fatal(err)
+	}
+	var isParked bool
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT parked_at IS NOT NULL AND formed_at IS NULL FROM {schema}.observation WHERE observation_id=$1::uuid`), ids[parked]).Scan(&isParked); err != nil || !isParked {
+		t.Fatalf("the turn must be parked and unformed, got %v %v", isParked, err)
+	}
+	// And one turn is stored but not yet formed: the window the workers are behind by.
+	if _, err := observations.Append(ctx, schema, domain.Turn{Scope: "p1", DataSubjectID: "carol", OccurredAt: time.Now(),
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "the newest thing carol said"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The pass sees neither, and plans a run that closes across the parked offset.
+	formed, err := store.Formed(ctx, "p1", "carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, turn := range formed {
+		if turn.Offset == parked {
+			t.Fatal("the compaction pass must not be offered a parked turn: a summary would stand in for words it never read")
+		}
+	}
+	if len(formed) != compaction.Verbatim+compaction.Branch {
+		t.Fatalf("the pass sees the formed turns and nothing else, got %d", len(formed))
+	}
+	plan, ok, err := compaction.Next(formed, nil)
+	if err != nil || !ok || !(plan.From <= parked && parked <= plan.To) {
+		t.Fatalf("the test needs a plan whose range closes across the parked turn, got %+v %v %v", plan, ok, err)
+	}
+	if _, err := store.Write(ctx, "p1", "carol", plan, compaction.Summary{Text: "Carol began."}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The history is every turn, and it says which of them a summary was written from.
+	history, err := store.History(ctx, "p1", "carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != compaction.Verbatim+compaction.Branch+2 {
+		t.Fatalf("every stored turn is in the history, got %d", len(history))
+	}
+	summarised := map[int64]bool{}
+	for _, turn := range history {
+		if turn.Size == 0 {
+			t.Fatalf("every turn carries its size, offset %d has none", turn.Offset)
+		}
+		summarised[turn.Offset] = turn.Summarised
+	}
+	if summarised[parked] {
+		t.Fatal("no summary was written from the parked turn, so it must not be marked as summarised")
+	}
+	if !summarised[plan.From] || !summarised[plan.To] {
+		t.Fatalf("the turns the segment was written from must be marked, got %+v", summarised)
+	}
+
+	assembled, err := store.Context(ctx, "p1", "carol", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(assembled.Segments) != 1 || assembled.Segments[0].Summary != "Carol began." {
+		t.Fatalf("the one written summary stands in for what it covered, got %+v", assembled.Segments)
+	}
+	said := map[int64]string{}
+	for _, turn := range assembled.Turns {
+		said[turn.Offset] = turn.Messages[0].Content
+	}
+	if said[parked] != fmt.Sprintf("turn %d of carol", parked) {
+		t.Fatalf("a parked turn's words are the subject's and must come back verbatim, got %q", said[parked])
+	}
+	if said[int64(compaction.Verbatim+compaction.Branch+1)] != "the newest thing carol said" {
+		t.Fatalf("a turn formation has not reached must come back verbatim, got %+v", said)
+	}
+	if assembled.Truncated || assembled.Characters == 0 {
+		t.Fatalf("an ample budget cuts nothing and the cost is counted, got %+v", assembled)
+	}
+	for i := 1; i < len(assembled.Turns); i++ {
+		if assembled.Turns[i].Offset <= assembled.Turns[i-1].Offset {
+			t.Fatal("the turns are oldest first, each in its own place in the log")
+		}
+	}
+
+	// A budget too small to hold them cuts from the oldest end and says so, rather than answering
+	// short in silence: that is the whole difference between a context and an empty one.
+	tight, err := store.Context(ctx, "p1", "carol", 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tight.Truncated || len(tight.Turns) == 0 {
+		t.Fatalf("a tight budget keeps the newest and reports the cut, got %+v", tight)
+	}
+
+	// History is an error when the database cannot answer, never an empty history.
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := store.History(gone, "p1", "carol"); err == nil {
+		t.Fatal("history must fail when the database cannot answer")
+	}
+}

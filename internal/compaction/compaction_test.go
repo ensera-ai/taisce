@@ -19,7 +19,9 @@ func turns(n int) []compaction.Turn {
 }
 
 // rollUp writes every segment the planner asks for, the way the pass does, and counts the writes:
-// that count is the number of model calls a history costs.
+// that count is the number of model calls a history costs. A level-1 write marks the turns it was
+// written from, as the store's registration does, so an assembly over the result answers the same
+// question the database would be asked.
 func rollUp(t *testing.T, history []compaction.Turn) ([]compaction.Segment, int) {
 	t.Helper()
 	var segments []compaction.Segment
@@ -33,6 +35,13 @@ func rollUp(t *testing.T, history []compaction.Turn) ([]compaction.Segment, int)
 			return segments, writes
 		}
 		writes++
+		if plan.Level == 1 {
+			for i := range history {
+				if plan.From <= history[i].Offset && history[i].Offset <= plan.To {
+					history[i].Summarised = true
+				}
+			}
+		}
 		segments = append(segments, compaction.Segment{ID: fmt.Sprintf("s%d", writes), Level: plan.Level, From: plan.From, To: plan.To, Covered: plan.Turns, Size: 200})
 		if writes > 10*len(history) {
 			t.Fatal("the roll-up does not terminate")
@@ -70,14 +79,15 @@ func TestTheRollUpClimbsOneLevelPerFullRun(t *testing.T) {
 // geometric series n/(Branch-1); the measured count is printed as the evidence G9 asks for.
 func TestTenThousandTurnsCostLinearlyManySummaries(t *testing.T) {
 	n := 10000
-	segments, writes := rollUp(t, turns(n))
+	history := turns(n)
+	segments, writes := rollUp(t, history)
 	bound := n / (compaction.Branch - 1)
 	if writes > bound {
 		t.Fatalf("%d turns cost %d summaries; the linear bound is %d", n, writes, bound)
 	}
 	t.Logf("%d turns: %d summaries (%d level-1), bound %d", n, writes, countLevel(segments, 1), bound)
 	// And a context over that history reads a logarithmic number of segments.
-	ctx, err := compaction.Assemble(turns(n), segments, math.MaxInt32)
+	ctx, err := compaction.Assemble(history, segments, math.MaxInt32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,5 +205,74 @@ func TestAHigherLevelGapClosesEarlyAndOverlappingSegmentsAreNeverJoined(t *testi
 	}
 	if _, ok, err := compaction.Next(turns(compaction.Verbatim+2*compaction.Branch), overlapping); ok || err != nil {
 		t.Fatalf("overlapping segments are not consecutive and nothing is written over them, got %v %v", ok, err)
+	}
+}
+
+// A turn no segment was written from is never replaced by one whose range spans it. That is the
+// shape a parked turn leaves: the pass plans over the turns formation admitted, so a range closes
+// across the one it skipped, and choosing a segment by offset alone would hand a caller a summary
+// that never read those words — permanently, because a parked turn is never formed and so never
+// summarised. It comes back as it was said, in its place in the log, and counts against the budget.
+func TestATurnNoSegmentWasWrittenFromIsKeptVerbatimInsideTheRangeThatSpansIt(t *testing.T) {
+	history := turns(compaction.Verbatim + 2*compaction.Branch)
+	// Turn 3 parked: the pass never saw it, so no segment is written from it, but the run of turns
+	// around it still closes and its range spans the offset.
+	skipped := int64(3)
+	segments, _ := rollUp(t, history)
+	for i := range history {
+		if history[i].Offset == skipped {
+			history[i].Summarised = false
+		}
+	}
+	var spanning bool
+	for _, seg := range segments {
+		if seg.From <= skipped && skipped <= seg.To {
+			spanning = true
+		}
+	}
+	if !spanning {
+		t.Fatalf("the test needs a segment whose range spans turn %d, got %+v", skipped, segments)
+	}
+	ctx, err := compaction.Assemble(history, segments, math.MaxInt32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept bool
+	for _, turn := range ctx.Turns {
+		if turn.Offset == skipped {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Fatalf("the turn no segment was written from must come back verbatim, got turns %+v", ctx.Turns)
+	}
+	for i := 1; i < len(ctx.Turns); i++ {
+		if ctx.Turns[i].Offset <= ctx.Turns[i-1].Offset {
+			t.Fatal("turns must be oldest first, the skipped one in its own place")
+		}
+	}
+	// It is paid for: the answer is one turn larger than the same history fully summarised.
+	fully := turns(compaction.Verbatim + 2*compaction.Branch)
+	fullSegments, _ := rollUp(t, fully)
+	complete, err := compaction.Assemble(fully, fullSegments, math.MaxInt32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ctx.Turns) != len(complete.Turns)+1 || ctx.Characters != complete.Characters+history[skipped].Size {
+		t.Fatalf("the kept turn must be in the answer and in its cost: %d turns / %d characters against %d / %d",
+			len(ctx.Turns), ctx.Characters, len(complete.Turns), complete.Characters)
+	}
+	// A budget that cannot hold it cuts it and says so, rather than dropping it in silence.
+	tight, err := compaction.Assemble(history, segments, 100*compaction.Verbatim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tight.Truncated {
+		t.Fatal("a budget too small for the kept turn must report the cut")
+	}
+	for _, turn := range tight.Turns {
+		if turn.Offset == skipped {
+			t.Fatal("the cut comes from the oldest end, which is where the kept turn sits")
+		}
 	}
 }

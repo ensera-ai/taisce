@@ -12,7 +12,9 @@ import (
 )
 
 // contextRequest asks for one subject's history under a budget: the newest turns verbatim, the
-// rest as the segments the compaction pass wrote.
+// older ones as the segments written from them, and anything no segment was written from verbatim
+// too. Nothing here is gated on formation — the operation makes no model call, and a turn's words
+// were the subject's when they were stored.
 type contextRequest struct {
 	DataSubjectID string `json:"data_subject_id"`
 	// MaxCharacters is the content allowance, in Unicode code points of message text and summary
@@ -21,12 +23,16 @@ type contextRequest struct {
 }
 
 type contextResponse struct {
-	// Segments stand in for the older history, oldest first; each names the range it covers.
+	// Segments stand in for the older turns they were written from, oldest first; each names the
+	// range it covers. The range is contiguous so erasure reaches through it, which means it can
+	// span a turn no summary was written from; that turn is in Turns, not behind a segment.
 	Segments []contextSegment `json:"segments"`
-	// Turns are the newest turns as they were said, oldest first.
+	// Turns are the turns no segment stands in for, as they were said, oldest first: the newest of
+	// the history, and any older one the compaction pass has not summarised.
 	Turns []contextTurn `json:"turns"`
-	// Watermark is how far the deployment has formed, so a caller knows what the context cannot
-	// yet include.
+	// Watermark is how far the deployment has formed, so a caller knows how much of this history is
+	// not yet answerable by a question, and Truncated says whether the budget cut any of it. A
+	// short answer is one of those two; it is never silence.
 	Watermark  freshnessResponse `json:"watermark"`
 	Characters int               `json:"characters"`
 	Truncated  bool              `json:"truncated"`

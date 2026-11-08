@@ -702,3 +702,89 @@ cost of having chosen wrongly is paid once, by whoever has to rotate credentials
 reaches the first project exist at rest nowhere, so reading a Secret, listing a namespace or
 restoring a cluster backup yields neither. Operations: losing them stops being a dead end, and the
 two commands that end it are named at each of the places an operator meets the problem.
+
+## D16 — A context carries every turn the subject said, and a summary stands in only for the turns it was written from
+
+**Date.** 2026-11-08. **Issue.** [#111](https://github.com/ensera-ai/taisce/issues/111).
+
+**Why it was open.** `POST /v1/contexts` read the same turns the compaction pass reads: formed, not
+parked. The pass needs that gate — it writes a summary from a model's reading of turns and ties it to
+each one, and a turn still inside the formation window may yet park or be erased. Applied to the read
+as well, it meant a subject whose turns were stored but not yet formed got `{"segments": [], "turns":
+[], "characters": 0, "truncated": false}`, and the adapter that asked for it replaced the history its
+framework held with nothing and reported success. Formation is asynchronous by design, so the gap was
+as wide as the worker backlog, which for a subject mid-conversation covers exactly the newest turns
+the next turn is about. For a parked turn the gap never closes: it exhausted its attempts, the
+watermark moved past it, and it will never be formed and so never summarised.
+
+Fixing the read then forced a second choice. A segment names a *contiguous* range because erasure has
+to reach through it, and the pass plans that range over the turns that had formed — so a range closes
+across a turn the pass skipped. Choosing a segment by offset alone would let a summary that never read
+a turn's words stand in for them, permanently and invisibly.
+
+**Decided.**
+- The read path and the write path have separate readers. `SegmentStore.Formed` keeps the gate and
+  stays the pass's; `SegmentStore.History` returns every stored turn of the subject and is the
+  context's.
+- A context replaces a turn with a segment only when that segment was written from it. The store
+  reports this per turn from the registration the segment write made against the turn — the same row
+  an erasure of that turn follows to delete the segment. So a turn counts as summarised exactly when
+  a segment would be destroyed by erasing it: the substrate's own answer, not a range comparison.
+- Every other turn is returned as it was said, in its place in the log, and costs the budget like any
+  other. The loss a budget forces is therefore reported as `truncated`, and how far formation is
+  behind is reported as the watermark. A short answer is one of those two and never silence.
+- The registration is matched on the scope and the subject passed to the read, not on the turn's own
+  columns. Correlating the subquery to `o.scope` makes it unindexable, and the planner answers it by
+  scanning every segment registration in the project — so one person's context would cost more as
+  other people were added. With both as parameters it uses
+  `projection_dependency_subject_idx (scope, data_subject_id)`. On a project seeded with 45,960 turns
+  across 81 subjects, the 5,000-turn subject's context reads 9,966 registration rows through that
+  index rather than 50,286 through a sequential scan — 191 buffers against 877 — and what it reads is
+  bounded by that subject's own history. That is a query plan, read on 2026-11-08; no latency figure
+  is claimed, and none can be taken on a development machine.
+- `TestAContextCarriesTheTurnsFormationHasNotReachedAndTheOnesItParked` holds both halves against a
+  real deployment, and `TestATurnNoSegmentWasWrittenFromIsKeptVerbatimInsideTheRangeThatSpansIt`
+  holds the assembly rule without one. Each fails on its own when its half is reverted.
+
+**Rejected: keep the gate and document it.** Saying a context carries only formed turns would make
+the implementation honest at the cost of the operation. An adapter's compaction replaces the
+framework's history with the answer, so the answer has to be the history; a caller told to compare
+`stored` against `formed` and decide for itself has been handed the problem the operation exists to
+solve. It would also leave parked turns permanently unreachable through any read, which is the one
+outcome worse than a stale answer.
+
+**Rejected: a field reporting what was withheld.** A count of turns left out would make the loss
+visible without returning the words. It is a new field on the response for a case that now cannot
+arise, and it asks every adapter author to decide what to do about a number — where returning the
+turns needs no decision from anyone.
+
+**Rejected: deciding coverage from the offset range.** Simpler to compute, and wrong for exactly the
+turns that matter most: the ones formation gave up on, whose words a summary never saw and never will.
+The registration already answers the question correctly and is already indexed by the turn.
+
+**Rejected: forming a turn on demand when a context is asked for.** It would close the window at the
+cost of a model call on the read path, which is the one path paid for on every call, and it would put
+extraction — the write path — behind a read. The operation's whole value is that it costs no model.
+
+**What this does not cover.**
+- Sizing the turns is still the expensive half of the read, and this does not touch it. Both readers
+  compute each turn's size by joining `turn_message`, which nothing narrows to the subject, so the
+  planner reads every message row in the project: 1,699 of the 1,982 buffers in the plan above.
+  [#116](https://github.com/ensera-ai/taisce/issues/116) holds that, with the plan.
+- A context is only as long as the budget, so a deployment whose model is unreachable fills that
+  budget with stored turns and reports the cut. The newest are kept and the oldest are cut, which is
+  a loss a caller can see rather than one it cannot — not a loss this removes.
+- Formation is unchanged. A turn in a context is not yet answerable by a question, and the watermark
+  is still the only thing that says so.
+- Nothing here makes a parked turn form. Unparking is still the operator's action, and a parked turn
+  stays outside every answer a question gives.
+
+**Undo cost.** Low. One method on the store, one condition in the assembly rule, and one field on the
+turn the store reports. No schema change — the registration it reads has existed since a segment was
+first written — and nothing stored depends on it, so reverting changes what a read returns and leaves
+every row as it is.
+
+**Impact.** Correctness of the read path: the operation returns what its contract describes, and an
+adapter that hands a model a context no longer hands it an empty one for a subject whose history is
+newer than the worker backlog. Operations: a deployment whose model is unreachable keeps serving
+contexts from stored text instead of serving empty ones.

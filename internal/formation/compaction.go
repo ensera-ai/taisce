@@ -11,7 +11,10 @@ import (
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 )
 
-// SegmentStore is what the compaction pass needs from the database.
+// SegmentStore is what the compaction pass needs from the database. Formed rather than the store's
+// whole history, because the pass may summarise only what formation has admitted: it ties each
+// summary to the turns it was written from, and a turn still awaiting formation may yet park or be
+// erased. What a context returns is a wider question and not this interface's.
 type SegmentStore interface {
 	Subjects(ctx context.Context, scope string, limit int) ([]string, error)
 	Formed(ctx context.Context, scope, subject string) ([]compaction.Turn, error)

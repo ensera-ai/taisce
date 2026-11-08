@@ -55,6 +55,11 @@ A person the deployment knows nothing about gets an empty context, not an error.
 
 - **Summaries arrive later than turns.** If the worker has not reached part of the history yet, that
   part is handed over word for word and cut to the budget. It is never summarised on demand.
+- **A turn formation gave up on is still in the context.** The worker summarises only turns that have
+  formed, so a parked turn never gets a summary — and because it is never formed, it never will. Its
+  words are the person's either way, so a context carries them verbatim, in their place in the log.
+  A summary whose range happens to span a parked turn does not stand in for it: a summary stands in
+  only for the turns it was written from.
 - **The budget is in characters,** not tokens.
 - **Erasure reaches summaries.** Erasing a person removes every summary that covered their turns. The
   worker then writes new summaries from what is left.
@@ -74,8 +79,9 @@ for the details per language.
 
 ### The roll-up
 
-A person's history is their formed turns in log order. The newest eight stay word for word. Behind
-them:
+The pass rolls up the turns that have formed, in log order — it writes a summary from a model's
+reading of them, and a turn still waiting for formation may yet be parked or erased. The newest eight
+stay word for word. Behind them:
 
 - every run of eight turns becomes one **level-1 segment**: a summary a model wrote from those turns,
   stored with the range it covers;
@@ -89,6 +95,18 @@ reads ten segments and eight turns.
 
 A tool call and its results are one group inside one turn. A segment always covers whole turns, so
 no segment ever splits a tool call from its results.
+
+### What a context carries, which is not what the pass summarises
+
+A segment names a contiguous range of the log, and the pass plans that range over the turns that had
+formed. So a range can close across a turn the pass skipped. Each segment is tied to every turn it
+was written from — the same tie an erasure follows to delete it — and a context replaces a turn with
+a segment only when that tie exists. Every other turn is handed over as it was said, wherever it sits
+in the log, and counts against the budget like any other.
+
+`TestAContextCarriesTheTurnsFormationHasNotReachedAndTheOnesItParked` holds this against a real
+deployment: a parked turn inside a written segment's range, and a turn stored after the last
+formation, both come back verbatim beside the one summary that was written.
 
 ### Segments and erasure
 
