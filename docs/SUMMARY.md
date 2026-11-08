@@ -101,6 +101,7 @@
 - 31-vocabulary-coverage-ap-news.md
 - 36-extraction-models.md
 - 37-helm-cluster-install.md
+- 38-adapters-against-a-deployment.md
 -->
 
 # Reference
