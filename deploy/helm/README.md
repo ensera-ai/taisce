@@ -66,6 +66,40 @@ Nothing, until asked. `ingress.api` publishes the memory routes. `ingress.portal
 portal at `/portal` and is refused unless `manage.portal=on`, so an ingress can never point at the
 management surface's door by accident. The management surface itself is a ClusterIP service.
 
+## Removing it
+
+```sh
+helm uninstall memory -n taisce
+kubectl delete namespace taisce
+```
+
+Both steps, if the deployment is meant to be gone. The uninstall removes everything the chart
+created except one Secret, and says so as it goes:
+
+```
+These resources were kept due to the resource policy:
+[Secret] memory-taisce-credentials
+```
+
+That Secret holds `dataPassword` and `controlPassword`, the two role passwords generated on first
+install, and it is annotated `helm.sh/resource-policy: keep` deliberately. The reason is not the
+uninstall: the generated Secret leaves the release's manifest set the moment
+`credentials.existingSecret` is named or `postgresql.mode` becomes `external`, and without the
+annotation that upgrade would delete the passwords of a database that is still running.
+
+What the annotation costs is paid at removal. `controlPassword` is the role the write path uses, and
+a role's password belongs to the database rather than to the release, so it stays valid against any
+database that accepts that role — one restored from a backup of this deployment, or installed again
+into the same namespace, where the chart reads the Secret it finds rather than generating new
+passwords. An operator who uninstalls and stops there has left a working write credential in the
+cluster with nothing currently listening on it, which is the kind nobody thinks to rotate.
+`kubectl get all` does not list Secrets, so the obvious check for leftovers does not show it.
+Deleting the namespace is what removes it.
+
+Uninstalling in order to reinstall is the case the annotation is for, and it is the first command on
+its own. It leaves the passwords behind on purpose; this is a note about knowing which of the two
+states a cluster is in, not an argument for removing the annotation.
+
 ## The failover measurement
 
 `deploy/helm/failover.sh` builds the image, creates a kind cluster with the operator, installs the
