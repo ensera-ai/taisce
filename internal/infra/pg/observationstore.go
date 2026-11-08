@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -71,7 +72,7 @@ func appendTurnTx(ctx context.Context, tx pgx.Tx, schema Schema, turn domain.Tur
 	lead := turn.Messages[0].Role
 	if _, err := tx.Exec(ctx, schema.SQL(insertObservationSQL),
 		id, turn.Scope, offset, KindTurn, turn.OccurredAt, ingested,
-		string(lead), nullIfEmpty(turn.DataSubjectID)); err != nil {
+		string(lead), nullIfEmpty(turn.DataSubjectID), turnCharacters(turn)); err != nil {
 		return domain.Observation{}, fmt.Errorf("insert observation: %w", err)
 	}
 
@@ -163,8 +164,30 @@ RETURNING log_offset`
 
 const insertObservationSQL = `
 INSERT INTO {schema}.observation
-    (observation_id, scope, log_offset, kind, occurred_at, ingested_at, source_role, data_subject_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+    (observation_id, scope, log_offset, kind, occurred_at, ingested_at, source_role, data_subject_id,
+     content_characters)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+
+// turnCharacters is what a context's budget spends on this turn: the characters of every message's
+// role label and its content.
+//
+// Code points rather than bytes, because that is what the budget is documented in and what the
+// readers computed before this was stored — `length()` on a UTF-8 database counts characters, and a
+// Go len() would count bytes and quietly change what a budget buys for anything but ASCII.
+//
+// Counted here, with the turn in hand, so the column can be NOT NULL from the insert: computing it
+// afterwards from the rows just written would mean a window in which a turn exists with no size, and
+// a NOT NULL column cannot be deferred to the end of the transaction. A write path that forgets this
+// is refused by the substrate rather than storing a turn a context would value at nothing.
+//
+// Safe to store because a message's role and content are written once, here, and never updated.
+func turnCharacters(turn domain.Turn) int {
+	total := 0
+	for _, m := range turn.Messages {
+		total += utf8.RuneCountInString(string(m.Role)) + utf8.RuneCountInString(m.Content)
+	}
+	return total
+}
 
 const insertMessageSQL = `
 INSERT INTO {schema}.turn_message

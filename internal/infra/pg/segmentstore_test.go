@@ -266,3 +266,94 @@ func TestAContextCarriesTheTurnsFormationHasNotReachedAndTheOnesItParked(t *test
 		t.Fatal("history must fail when the database cannot answer")
 	}
 }
+
+// A turn's size comes off the turn, and is what summing its messages would have given.
+//
+// Both readers used to compute it by joining turn_message. That table carries neither scope nor
+// subject — it is reached through the observation — so nothing narrowed the join, and the planner
+// read every message row in the project to size the turns of one person in it. On a project of
+// 45,960 turns across 81 subjects, answering for the 5,000-turn subject found its own rows through
+// an index in 92 buffers and spent 1,699 sizing them: 85% of the query, and growing with the project
+// while the answer did not.
+//
+// Rewriting the query was measured and rejected. A correlated scalar subquery bounds the work by the
+// subject and costs four buffers per turn, which took the same answer from 1,985 buffers to 20,283;
+// each shape wins on a different shape of project, which is a plan that flips rather than a fix.
+//
+// So this holds the two properties the stored value needs: that it equals what the join computed,
+// for every turn in the schema, and that a turn written now carries it. It is safe to store because
+// a message's role and content are written once and never updated.
+func TestATurnCarriesTheSizeSummingItsMessagesWouldHaveGiven(t *testing.T) {
+	pool := testPool(t)
+	schema := tenant(t, pool, "wp_turn_size")
+	ctx := context.Background()
+	store := pg.NewSegmentStore(pool, schema)
+	observations := pg.NewObservationStore(pool)
+	storeFormed(t, pool, schema, "dana", 5)
+
+	// Characters, not bytes: counted by the database, where length() on a UTF-8 database counts
+	// code points. A turn whose text is outside ASCII is where a byte count would diverge, and the
+	// budget a context spends is documented in code points.
+	wide, err := observations.Append(ctx, schema, domain.Turn{Scope: "p1", DataSubjectID: "dana", OccurredAt: time.Now(),
+		Messages: []domain.Message{{Role: domain.RoleUser, Content: "sé mo chroí é — ⌘ ∑ 文字"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored, characters, bytes int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT o.content_characters,
+		 (SELECT coalesce(sum(length(m.role)+length(m.content)),0) FROM {schema}.turn_message m WHERE m.observation_id=o.observation_id),
+		 (SELECT coalesce(sum(octet_length(m.role)+octet_length(m.content)),0) FROM {schema}.turn_message m WHERE m.observation_id=o.observation_id)
+		 FROM {schema}.observation o WHERE o.observation_id=$1::uuid`), wide.ID).Scan(&stored, &characters, &bytes); err != nil {
+		t.Fatal(err)
+	}
+	if stored != characters {
+		t.Fatalf("a turn's stored size must be what summing its messages gives: %d against %d", stored, characters)
+	}
+	if bytes == characters {
+		t.Fatal("this turn is meant to have multi-byte text, so that a byte count would be visibly wrong")
+	}
+
+	// Every turn in the schema, not only the one just written: a backfill that missed rows would
+	// make a context silently value them at nothing.
+	var mismatched int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT count(*) FROM {schema}.observation o
+		 WHERE o.content_characters <>
+		       coalesce((SELECT sum(length(m.role)+length(m.content)) FROM {schema}.turn_message m
+		                  WHERE m.observation_id=o.observation_id), 0)`)).Scan(&mismatched); err != nil {
+		t.Fatal(err)
+	}
+	if mismatched != 0 {
+		t.Fatalf("%d turns carry a size that is not their messages' size", mismatched)
+	}
+
+	// And the readers hand that number on, so a budget spends what the turn actually holds.
+	turns, err := store.Formed(ctx, "p1", "dana")
+	if err != nil || len(turns) != 5 {
+		t.Fatalf("the pass reads the formed turns, got %d %v", len(turns), err)
+	}
+	for _, turn := range turns {
+		if turn.Size == 0 {
+			t.Fatalf("every turn carries a size, offset %d has none", turn.Offset)
+		}
+	}
+	history, err := store.History(ctx, "p1", "dana")
+	if err != nil || len(history) != 6 {
+		t.Fatalf("the context reads every stored turn, got %d %v", len(history), err)
+	}
+	if history[5].Size != characters {
+		t.Fatalf("the newest turn's size must be its own: %d against %d", history[5].Size, characters)
+	}
+	// A context assembled over them spends exactly the sum of what it returned.
+	assembled, err := store.Context(ctx, "p1", "dana", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, turn := range history {
+		total += turn.Size
+	}
+	if assembled.Characters != total || assembled.Truncated {
+		t.Fatalf("an ample budget returns every turn and counts every character: %d against %d, truncated=%v",
+			assembled.Characters, total, assembled.Truncated)
+	}
+}

@@ -127,6 +127,21 @@ The credential must be write-enabled for one project. The run prints one verdict
 summary, and exits non-zero when any case fails or the driver cannot be used. `--reference` runs the
 adapter this suite ships with, to prove the deployment and the suite before an adapter is blamed.
 
+### Where it runs on its own
+
+Each adapter repository has a `conformance` workflow that stands a deployment up and runs its own
+drivers against it, on every push to `main` and on demand. It needs no model key: the suite stubs the
+model inside each driver and seeds facts through the API, so the stack is given a key that is not a
+key beside an allowlist naming no reachable host, and nothing anybody said could leave it even if
+something tried. The deployment is the quickstart's compose stack at a released version, and the
+runner is that release's binary, checked against the checksums published with it.
+
+The worker is not part of that run. Without a model it can never become healthy, and formation is not
+what the suite tests — so a green conformance run says the adapter keeps its contract with the
+deployment, and says nothing about extraction. That is the same limit the suite has when a person
+runs it, stated here because a workflow that runs on its own is read by people who did not set it up
+([D23](../docs/01-decisions.md)).
+
 ## How the suite is proved
 
 `internal/conformance` runs the reference through the suite against a live deployment and expects

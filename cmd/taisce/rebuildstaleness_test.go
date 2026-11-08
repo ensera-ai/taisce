@@ -95,8 +95,8 @@ func TestARebuildsOwnFieldsStayWhereTheyAreAndStalenessIsAddedBesideThem(t *test
 	// A generation one turn behind says "one turn", not "1 turns". An operator reading this at two
 	// in the morning is owed a sentence rather than a template with a number in it.
 	if _, err := pool.Exec(ctx, `INSERT INTO `+env[envSchema]+`.observation
-	       (observation_id, scope, log_offset, kind, occurred_at, ingested_at, source_role)
-	       VALUES (gen_random_uuid(), 'p1', 1, 'turn', now(), now(), 'user')`); err != nil {
+	       (observation_id, scope, log_offset, kind, occurred_at, ingested_at, source_role, content_characters)
+	       VALUES (gen_random_uuid(), 'p1', 1, 'turn', now(), now(), 'user', 0)`); err != nil {
 		t.Fatal(err)
 	}
 	var generation string
@@ -134,8 +134,8 @@ func TestARebuildsOwnFieldsStayWhereTheyAreAndStalenessIsAddedBesideThem(t *test
 
 	// And more than one is counted, not pluralised wrongly.
 	if _, err := pool.Exec(ctx, `INSERT INTO `+env[envSchema]+`.observation
-	       (observation_id, scope, log_offset, kind, occurred_at, ingested_at, source_role)
-	       VALUES (gen_random_uuid(), 'p1', 2, 'turn', now(), now(), 'user')`); err != nil {
+	       (observation_id, scope, log_offset, kind, occurred_at, ingested_at, source_role, content_characters)
+	       VALUES (gen_random_uuid(), 'p1', 2, 'turn', now(), now(), 'user', 0)`); err != nil {
 		t.Fatal(err)
 	}
 	var further bytes.Buffer

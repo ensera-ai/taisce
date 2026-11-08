@@ -918,3 +918,152 @@ there is nothing to migrate back.
 **Impact.** Operations: a project failing on its own is visible on the instance page and in its own
 row, where before it was visible only as a backlog that looked like a slow model. Performance: one
 aggregate over a partial index per page load, which in a healthy instance reads an empty index.
+
+## D22 — A turn carries its own size, because sizing one subject's history was reading every message in the project
+
+**Date.** 2026-11-08. **Issue.** [#116](https://github.com/ensera-ai/taisce/issues/116).
+
+**Why it was open.** Both readers of a subject's history computed each turn's size in the query, by
+joining `turn_message` and summing the length of every role and content. That table carries neither
+scope nor subject — it is reached through the observation — so nothing narrowed the join, and the
+planner read every message row in the project to size the turns of one person in it.
+
+Measured on a project of 45,960 turns across 81 subjects. Asking for the 5,000-turn subject found its
+own rows through an index in 92 buffers and then spent 1,699 sizing them: 85% of the 1,982 the whole
+query touched, reading eighty other subjects' messages to answer a question about none of them. The
+scan grows with the project while the answer does not, so two subjects of the same length cost
+different amounts depending on who else the project holds, and every subject's context gets more
+expensive when a new subject is added. `POST /v1/contexts` is on the read path, paid for on every
+call.
+
+**Decided.**
+- `observation.content_characters` holds the characters of that turn's message roles and contents,
+  written when the turn is written. Both readers take it off the row they are already reading.
+- Counted in Go, from the turn in hand, rather than from the rows afterwards. The column is `NOT
+  NULL` with no default, and a `NOT NULL` column cannot be deferred to the end of a transaction — so
+  computing it after the messages were inserted would need either a nullable column or a default,
+  and both of those let a write path that forgets it store a turn a context values at nothing. This
+  way the substrate refuses such a path at the moment it tries.
+- Code points, not bytes. That is what the budget is documented in and what the readers computed
+  before this was stored; a Go `len()` would count bytes and quietly change what a budget buys for
+  anything but ASCII. A test holds a turn of multi-byte text against both counts.
+- Safe to store because a message's role and content are written once, in the transaction that
+  creates the turn, and never updated afterwards — the one write to `turn_message` outside that path
+  sets `occurred_at`.
+- `TestATurnCarriesTheSizeSummingItsMessagesWouldHaveGiven` holds that the stored value equals what
+  the join computed, for every turn in the schema rather than for the one just written, so a backfill
+  that missed rows fails there.
+
+**Measured, on the same project and the same question** (`EXPLAIN (ANALYZE, BUFFERS)`, read
+2026-11-08, after a vacuum):
+
+| Sizing | Buffers | What the cost follows |
+|---|---:|---|
+| Joining `turn_message`, as it stood | 1,985 | every message row in the project |
+| A correlated scalar subquery per turn | 20,283 | four buffers per turn of the subject |
+| On the observation row | **305** | the subject's own rows, and nothing else |
+
+The message table is not read at all, so the term that grew with the project is gone rather than
+reduced. These are plans and buffer counts; no latency figure is claimed, and none can be taken on a
+development machine.
+
+**Rejected: rewriting the query.** The issue's first candidate, and the one that needs no schema
+change. A correlated scalar subquery bounds the work by the subject and cannot be planned as a scan
+of the whole table — and costs four buffers a probe, which took the same answer to 20,283 buffers.
+On a 512-turn subject it was 2,060 against the join's 1,714. So the join wins on a project whose
+messages are few relative to the subject asked about, and the subquery wins on a large project with
+small subjects: each shape wins on a different shape of data, which is the plan that flips the issue
+warned about rather than a fix. Measured before being rejected, because the opposite was expected.
+
+**Rejected: an index that narrows the join.** `turn_message` carries no scope and no subject, so
+narrowing it needs a denormalised column on that table — which is the same stored value as this
+decision, written once per message instead of once per turn, and still joined on every read.
+
+**Rejected: a generated column.** A stored generated column would make the database compute it and
+remove the possibility of a write path forgetting. PostgreSQL's cannot reference another table, and
+the messages are in another table.
+
+**What this does not cover.**
+- The registration probe is now the larger half of the read, at 191 of the 305 buffers. It is bounded
+  by the subject's own history ([D16](#d16--a-context-carries-every-turn-the-subject-said-and-a-summary-stands-in-only-for-the-turns-it-was-written-from)),
+  so nothing here grows with the project, but it is where the next measurement should look.
+- The backfill rewrites every observation row once, so an upgrade on a large deployment pays a full
+  table rewrite and the table is twice its size until it is vacuumed. Measured here: the heap scan
+  read 380 buffers before a vacuum and 305 after.
+- Nothing is claimed about latency. The buffer counts are what a plan reports.
+
+**Undo cost.** Low for the code, moderate for the column. Reverting the readers to the join is two
+queries; the column would be dropped by a migration, and a deployment that had written turns with it
+would lose nothing, because the value is derivable from the messages it was computed from.
+
+**Impact.** Performance of the read path: sizing one subject's history stops reading the project, so
+`POST /v1/contexts` costs what the subject holds rather than what the instance holds. Operations: the
+cost of a context no longer rises when an unrelated subject is added.
+
+## D23 — The adapter conformance suite runs on each adapter's main, against a released deployment it stands up itself
+
+**Date.** 2026-11-08. **Issue.** [#109](https://github.com/ensera-ai/taisce/issues/109).
+
+**Why it was open.** The suite holds ten rules that are easy to get subtly wrong once per language
+and impossible to notice from inside one adapter. It is the only artefact in the project that holds
+them for all three adapters at once, and it executed only when a person ran `taisce conformance` by
+hand and looked at what it printed. Read on 2026-11-08, none of the three adapter repositories'
+`ci.yml` ran it: each mentions it in a header comment and runs deployment-free tests. So each
+adapter's own suite could stay green while its behaviour diverged from the other two, and the
+divergence that matters most is the quiet one — an adapter that swallows a store failure loses
+turns, and a lost turn is invisible until somebody asks what the system holds about them.
+
+**Decided.**
+- A `conformance` workflow in each adapter repository, on push to `main`, on demand, and callable
+  from a release workflow.
+- It stands up the quickstart's compose stack at a released version and runs that release's binary
+  as the suite runner, so an adapter is proven against what an operator actually installs rather than
+  against a build of the day.
+- **No model key.** The suite stubs the model inside each driver and seeds facts through the API, so
+  the stack is given a value that is not a key beside an allowlist naming no reachable host. That was
+  checked rather than assumed: the stack comes up and all ten cases pass with nothing a provider
+  could be reached through.
+- **The worker is not started.** Without a model it can never become healthy, and formation is not
+  what the suite tests. The workflow waits on the API, which is what an adapter talks to, and says in
+  its own text that a green run therefore proves nothing about extraction.
+- The binary is verified against the checksums published with the release. `compose.yaml` and
+  `cases.json` are fetched at the **commit** the release was cut from, not the tag: a commit cannot
+  be moved, which is the same reason every action in these workflows is pinned by SHA.
+- Each adapter is run through its own repository's documented entry point — the module for the
+  Python adapters, `scripts/conformance.sh` for the others — so what CI runs is what the README tells
+  a person to run, rather than a path nobody else takes.
+- The reference adapter runs first, so a failure afterwards is the adapter under test rather than the
+  stack it was run against.
+
+**Rejected: on every pull request.** A deployment per pull request costs runner minutes on every
+change, including the ones that touch a README. The rules it holds change slowly, and a divergence
+introduced in a branch is caught when that branch reaches `main`, before any release carries it.
+
+**Rejected: on release only.** Cheapest, and it lets a broken adapter sit on `main` between releases
+— so the failure is found by whoever cuts the release, at the moment it is most expensive to fix.
+
+**Rejected: publishing `compose.yaml` and `cases.json` as release assets.** Attempted first, so that
+one checksums file would cover everything a run trusts. They would exist only from the next release,
+so the workflows could not run until one was cut — and a commit SHA is already immutable and already
+the standard this project pins actions by. Built, measured against what it would buy, and removed.
+
+**Rejected: a reusable workflow shared from this repository.** One file instead of three near-copies.
+It makes every adapter's CI depend on a workflow in another repository resolving, and the three
+differ in toolchain and in how many drivers they run, which is most of the file.
+
+**What this does not cover.**
+- Extraction. The deployment under test reaches no model, so nothing here exercises forming a turn
+  into facts. `make test-inference` is what covers that, against a real provider.
+- The release workflows do not yet refuse to publish a version whose conformance run did not pass.
+  The workflow is `workflow_call`-able so that they can, which is a change in each adapter's
+  `release.yml` and is not in this one.
+- The version each adapter is tested against is pinned in its workflow and raised by hand. An adapter
+  proven against an old release is not proven against the newest one, and nothing here notices.
+
+**Undo cost.** Very low: one file per repository, deleting which returns each to deployment-free CI.
+Nothing in this repository changes except the suite's own README.
+
+**Impact.** Correctness across the adapters: the ten rules are exercised in three languages without
+anybody remembering to run them, and the evidence an adapter release carries stops being pasted
+terminal output nobody else can re-execute. Security: the run holds no credential of anybody's — the
+deployment is created and destroyed by the job, and the key it is given reaches nothing.

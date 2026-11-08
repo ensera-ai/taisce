@@ -202,8 +202,8 @@ func TestTheOpsCentreShowsAProjectFailingOnItsOwnWhileTheInstanceReadsAsRecovere
 		for _, offset := range offsets {
 			if _, err := a.pool.Exec(ctx, a.schema.SQL(`INSERT INTO {schema}.observation
 				(observation_id, scope, log_offset, kind, occurred_at, source_role, data_subject_id,
-				 formation_attempts, formation_failed_at, formation_error)
-				VALUES (gen_random_uuid(), $1, $2, 'turn', now(), 'user', 'someone', 2, clock_timestamp(), 'the model refused')`),
+				 formation_attempts, formation_failed_at, formation_error, content_characters)
+				VALUES (gen_random_uuid(), $1, $2, 'turn', now(), 'user', 'someone', 2, clock_timestamp(), 'the model refused', 0)`),
 				scope, offset); err != nil {
 				t.Fatal(err)
 			}

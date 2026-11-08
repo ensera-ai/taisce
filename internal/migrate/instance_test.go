@@ -33,7 +33,14 @@ func TestAnExistingMemoryNamespaceUpgradesWithoutMovingItsObservations(t *testin
 	if _, err := apply(ctx, pool, schema, prior); err != nil {
 		t.Fatal(err)
 	}
-	source := seedObservation(t, pool, schema, "existing")
+	// Written here rather than through seedObservation: this schema has only the history before
+	// version 23, and the helper writes the columns a current schema has.
+	var source string
+	if err := pool.QueryRow(ctx, schema.SQL(`INSERT INTO {schema}.observation
+        (observation_id,scope,log_offset,kind,occurred_at,source_role)
+        VALUES(gen_random_uuid(),'existing',0,'turn',now(),'user') RETURNING observation_id::text`)).Scan(&source); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 2; i++ {
 		if err := ProvisionMemorySchema(ctx, pool, schema.String()); err != nil {
 			t.Fatal(err)
