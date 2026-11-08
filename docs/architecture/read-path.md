@@ -484,8 +484,15 @@ The worker rolls a subject's formed turns up along the time axis: every eight tu
 segment, every eight level-1 segments a level-2 segment, up to level six. A context is:
 
 - the newest eight turns, verbatim;
-- plus the highest-level segments covering everything older;
+- plus, over everything older, the highest-level segment that was written from each turn;
+- plus any older turn no segment was written from, verbatim and in its place in the log — a turn
+  still awaiting formation, or one formation parked, which will never be formed and so never
+  summarised;
 - returned oldest first, and cut from the oldest end when the budget runs out.
+
+A segment is chosen by the tie recorded when it was written, not by its offset range. The range is
+contiguous because erasure must reach through it, and it can therefore close across a turn the pass
+skipped; a summary that never read a turn does not stand in for it.
 
 The planning rule is pure code ([`internal/compaction`](../../internal/compaction/)). The store feeds
 it and reads back what it chose (`SegmentStore.Context` in

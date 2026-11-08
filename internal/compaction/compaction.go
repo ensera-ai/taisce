@@ -18,11 +18,21 @@
 //
 // # The assembly
 //
-// A context is the newest Verbatim turns as they were said, then the highest-level segments that
-// cover everything older, newest first, each replacing the turns and lower segments under it.
-// Reading a context touches O(log n) segments. It is assembled under a character budget and cut
-// from the oldest end, because the newest is what the next turn is about; the cut is reported,
-// never silent.
+// A context is the newest Verbatim turns as they were said, then, over everything older, the
+// highest-level segment that was written from each turn's words, each replacing the turns and lower
+// segments under it. Reading a context touches O(log n) segments. It is assembled under a character
+// budget and cut from the oldest end, because the newest is what the next turn is about; the cut is
+// reported, never silent.
+//
+// # Why a segment replaces a turn only when it was written from it
+//
+// A segment names a contiguous offset range, and the pass plans that range over the turns the
+// formation pass has admitted. A turn the formation pass skipped — one that parked after exhausting
+// its attempts — sits inside the range without ever having reached the summariser. Choosing a
+// segment by offset alone would therefore let a summary that never saw a turn's words stand in for
+// them, silently and permanently, since a parked turn is never formed and so never summarised. So
+// the store reports, per turn, whether a segment was written from it, and only that turn is
+// replaced. Every other turn comes back as it was said, where the budget reports what it cut.
 //
 // # Why segments cover whole turns
 //
@@ -45,11 +55,16 @@ const (
 	MaxLevel = 6
 )
 
-// Turn is one formed turn as the store reports it: its offset in the log and its size in
+// Turn is one of a subject's turns as the store reports it: its offset in the log and its size in
 // characters, which is what the assembly budgets.
 type Turn struct {
 	Offset int64
 	Size   int
+	// Summarised says a segment was written from this turn's words. It is not implied by a
+	// segment's range spanning the offset: see the package comment on why a segment replaces a
+	// turn only when it was written from it. The compaction pass does not read it — the pass is
+	// given only turns that may be summarised, and decides coverage from the segments themselves.
+	Summarised bool
 }
 
 // Segment is one written summary: the level it sits at and the contiguous offset range it covers,
@@ -164,7 +179,9 @@ type Context struct {
 }
 
 // Assemble picks the newest Verbatim turns and, for everything older, the highest-level segment
-// covering each offset, then cuts from the oldest end to fit the budget.
+// that was written from each turn, then cuts from the oldest end to fit the budget. An older turn
+// no segment was written from is kept as it was said, in its place in the log, rather than left to
+// a summary that never read it.
 func Assemble(turns []Turn, segments []Segment, budget int) (Context, error) {
 	if !sorted(turns) {
 		return Context{}, ErrDisorder
@@ -185,7 +202,7 @@ func Assemble(turns []Turn, segments []Segment, budget int) (Context, error) {
 	var loose []Turn
 	for _, t := range older {
 		best, ok := covering(segments, t.Offset)
-		if !ok {
+		if !ok || !t.Summarised {
 			loose = append(loose, t)
 			continue
 		}
@@ -193,7 +210,9 @@ func Assemble(turns []Turn, segments []Segment, budget int) (Context, error) {
 			chosen = append(chosen, best)
 		}
 	}
-	// Oldest first: segments in offset order, then any uncovered older turn, then the verbatim tail.
+	// Oldest first: segments in offset order, then any older turn no segment stands in for, then
+	// the verbatim tail. The sort below puts each back at its own offset, so a turn the pass
+	// skipped reads in the place it was said rather than at one end.
 	sort.Slice(chosen, func(i, j int) bool { return chosen[i].From < chosen[j].From })
 	items := make([]item, 0, len(chosen)+len(loose)+Verbatim)
 	for _, s := range chosen {

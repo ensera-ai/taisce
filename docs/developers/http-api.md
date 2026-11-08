@@ -567,7 +567,11 @@ func history(subject string) (Context, error) {
 | `watermark` | Freshness at the time of the answer, shaped like `GET /v1/freshness` |
 | `characters`, `truncated` | How much of the limit was used, and whether it cut anything |
 
-Only turns that have formed appear. Without a subject you get `400 invalid_context`.
+A context is everything the person said. A turn no summary has been written over comes back word
+for word — including one that is still waiting to be formed, and one formation gave up on, because a
+parked turn is never formed and so never summarised. `watermark` says how far formation has got, and
+`truncated` says whether the budget cut anything; a short answer is always one of those two and never
+silence. Without a subject you get `400 invalid_context`.
 
 ### Citations: the words behind a fact
 
