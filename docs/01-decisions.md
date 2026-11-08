@@ -788,3 +788,133 @@ every row as it is.
 adapter that hands a model a context no longer hands it an empty one for a subject whose history is
 newer than the worker backlog. Operations: a deployment whose model is unreachable keeps serving
 contexts from stored text instead of serving empty ones.
+
+## D20 — A worker that stands down is counted on the health row, not only in a log line
+
+**Date.** 2026-11-08. **Issue.** [#105](https://github.com/ensera-ai/taisce/issues/105).
+
+**Why it was open.** The chart runs two workers by default and invites more. What makes that safe is
+that each scope is drained under an advisory lock, so a second worker finds the scope busy and stands
+down instead of forming the same turn twice. The count of scopes that were busy existed for the
+length of one pass and was then discarded, and the one log line carrying it sat behind a gate the
+count was not in — so a pass whose every scope was held by another replica formed nothing, errored on
+nothing, wrote no report and no segment, and logged nothing at all. The replica doing exactly what
+the design intends was the silent one.
+
+On a single-scope instance, which is what the default project makes and what most deployments will
+be, every replica but one is busy on every pass. So on the most common topology, four healthy workers
+and one healthy worker beside three that were wedged, crash-looping on a schedule that hid it, or
+pointed at the wrong database produced identical evidence. Confirming the property the deployment is
+sold on meant sampling `pg_locks` on the primary for the lock key and reading `pg_stat_activity` to
+find which pod held it — not an answer an operator should reach for, and not available at all to
+anyone who cannot open a psql session.
+
+**Decided.**
+- `formation_health` gains `stood_down_count` and `last_stood_down_at`, written by the driver after
+  each pass that stood down. The ops centre shows both, because the instance page is where somebody
+  asks whether their replicas are working and this is the answer to exactly that question.
+- `Busy` joins the log gate as well. One line per worker per interval is the same volume the holder
+  already produces, and it is the half that reaches whoever is reading logs.
+- A pass that stood down for nothing writes nothing. The time means "a pass last stood down then";
+  touching it on a pass that did not would make it mean "a pass last ran then", which the heartbeat
+  already says.
+- No scope name and no replica identity on the row. An operator asking whether their workers are
+  serialising is asking about the instance, and a scope name would be the one piece of per-project
+  state on an aggregate record.
+- Not a judgement anywhere. Zero is normal on a single-replica deployment and expected on a
+  multi-replica one until two workers want the same scope, so nothing is marked on this number.
+- `TestAPassThatStoodDownOnEveryScopeStillReportsIt` holds both halves against a real deployment, and
+  each fails on its own when its half is reverted.
+
+**Rejected: the log line alone.** It is the cheaper half and it is in this change, but it answers
+only whoever is reading logs. The reader the portal exists for is an operator looking at a page, and
+a property the deployment is sold on should be visible to them.
+
+**Rejected: a log line per stand-down.** The reasoning already in the code is right about volume —
+in a deployment with several replicas this is the normal case — and wrong only in its conclusion.
+Frequent is a reason not to log per occurrence; it is not a reason for the number never to be
+reachable.
+
+**Rejected: a per-scope or per-replica record.** It would answer which worker stood down on which
+project, which sounds more useful and is a row per pass per scope on the formation path, written in
+the common case, to answer a question nobody has asked. The aggregate answers "are my replicas
+serialising", which is the question the issue was about.
+
+**Rejected: deriving it from `pg_locks`.** The information is there and needs no write at all. It
+needs a database session and a privilege the portal does not hold, and it reports the instant rather
+than the history: a page refreshed between two passes sees nothing.
+
+**What this does not cover.**
+- The count says stand-downs happened, not that every replica is healthy. A worker that is wedged
+  before it reaches the lock still contributes nothing, and the heartbeat is what speaks for that.
+- It is instance-wide, so it does not say which project replicas are contending on.
+- A single-replica deployment stays at zero forever, which is correct and indistinguishable from
+  several replicas that have never wanted the same scope at the same moment.
+
+**Undo cost.** Low. Two columns with defaults, one update statement, one gate condition and a tile.
+The columns are additive, so a rollback of the code leaves them unread rather than wrong.
+
+**Impact.** Operations: the mechanism the several-replica topology rests on is visible on the page an
+operator already reads, instead of requiring a psql session against the primary.
+
+## D21 — Whether a project's formation is failing is read from its backlog, not from a per-scope health row
+
+**Date.** 2026-11-08. **Issue.** [#99](https://github.com/ensera-ai/taisce/issues/99).
+
+**Why it was open.** `formation_health` is one row for the instance: one `last_progress_at`, one
+`last_failure_at`. The ops centre's **Formation is failing** status and its **Failed attempts** tile
+are read from it, so a turn forming in any project cleared the mark while another project failed
+every attempt. An instance with one busy project and one broken one read as healthy on the page an
+operator is told to watch. The evidence was present — the broken project's *Behind by* and *Parked*
+counts rising — and drew no eye, and a rising backlog looks the same as a slow model.
+
+**Decided.**
+- A project is failing now when its backlog holds a turn that has been tried and did not form:
+  unformed, not parked, and stamped with a failure. No second stamp and no window. A turn that formed
+  has left the backlog and a turn the driver gave up on is parked, so what remains stamped with a
+  failure is work still owed that has already gone wrong once — the backlog's own contents are the
+  state.
+- Counted from `observation` through `observation_backlog_idx`, a partial index holding exactly the
+  unformed, unparked turns of a scope, which in a healthy project is empty. **No schema change and
+  nothing on the formation path**: this adds no row, no counter and no stamp to the write path.
+- The instance status takes the worse of the two readings, so a page that says nothing needs
+  attention beside a failing project cannot happen.
+- The projects table carries the count of such turns per project, not a boolean. One failing turn is
+  a turn to park; every turn failing is an endpoint to look at, and a boolean loses the difference.
+- `TestTheOpsCentreShowsAProjectFailingOnItsOwnWhileTheInstanceReadsAsRecovered` holds it, including
+  that a parked turn is parked rather than failing and that a formed turn stops it with no stamp to
+  reset.
+
+**Rejected: a formation health row per scope.** The shape the issue reached for, and the one that
+would make the existing stamp comparison work per project. It is a schema change, a migration and a
+write on the formation path for every scope drained, to answer a question the rows already answer.
+It would also need a rule for what the instance status says when one of forty projects is failing,
+which this does not: the count is shown and the status is marked, and forty projects failing reads
+differently from one because the number is there.
+
+**Rejected: moving only the stamps per scope and leaving the counters instance-wide.** The middle
+option, and it keeps the write on the formation path while splitting one record into two shapes that
+have to be read together. The counters are lifetime totals nobody reads per project, which is the
+part of the original issue's reasoning that holds; the conclusion that follows is to leave the row
+alone entirely.
+
+**Rejected: a time window on `formation_failed_at`.** "Failed in the last N minutes" needs a duration
+nobody here has measured and is wrong in both directions on a quiet project — a project whose
+attempts are further apart than the window reads as healthy in the gaps. The backlog needs no
+duration.
+
+**What this does not cover.**
+- It says a project is failing, not why. The reason is on the turn, and the project page lists it.
+- A project whose every turn has already parked reads as not failing, which is correct — it is
+  reported as parked, a different thing to act on — but means a project that gave up entirely stops
+  being marked as failing. Parked is the louder signal at that point.
+- The instance-wide stamps are unchanged and still answer for the instance. They are not wrong; they
+  were being asked a question they cannot answer.
+- This is a count per project on a page, not an alert. Nothing notifies anybody.
+
+**Undo cost.** Very low: one query, one view-model field and a table column. Nothing is stored, so
+there is nothing to migrate back.
+
+**Impact.** Operations: a project failing on its own is visible on the instance page and in its own
+row, where before it was visible only as a backlog that looked like a slow model. Performance: one
+aggregate over a partial index per page load, which in a healthy instance reads an empty index.

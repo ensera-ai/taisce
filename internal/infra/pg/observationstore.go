@@ -405,6 +405,49 @@ SELECT w.log_offset,
   FROM {schema}.watermark w
  WHERE w.scope = $1`
 
+// FormationFailing reports whether one scope's formation is failing now, and when it last did.
+//
+// # Why this is a per-scope question the health row cannot answer
+//
+// `formation_health` is one row for the instance. Whether failures are current is read from it by
+// comparing two stamps, which is right for the instance and silent about a project: a turn forming
+// in any scope moves `last_progress_at`, so one busy project clears the mark while another fails
+// every attempt. An instance with one busy project and one broken one reads as healthy.
+//
+// # Why no second stamp, and nothing on the write path
+//
+// A scope is failing now exactly when its backlog holds a turn that has already been tried and did
+// not form. That is a state the observation rows already carry: unformed, not parked, and stamped
+// with a failure. It needs no progress time to compare against, because a turn that formed is no
+// longer in the backlog and a turn the driver gave up on is parked — so the backlog's own contents
+// answer the question with no clock, no window and no duration anybody had to measure.
+//
+// It is also cheap. `observation_backlog_idx` is a partial index over exactly the unformed, unparked
+// turns of a scope, which in a healthy project is empty, so this reads the backlog rather than the
+// history. Nothing is written: no per-scope health row, no counter, no stamp on the formation path.
+//
+// Attempts is how many of those turns have failed at least once, which is the width of the problem
+// rather than its depth: one poisoned turn and a project whose every turn is refused look different
+// here and identical in a boolean.
+func (s *ObservationStore) FormationFailing(ctx context.Context, schema Schema, scope string) (domain.FormationFailure, error) {
+	var out domain.FormationFailure
+	err := s.pool.QueryRow(ctx, schema.SQL(selectFormationFailingSQL), scope).Scan(&out.Turns, &out.LastFailureAt)
+	if err != nil {
+		return domain.FormationFailure{}, fmt.Errorf("read formation failure for %s: %w", scope, err)
+	}
+	out.Failing = out.Turns > 0
+	return out, nil
+}
+
+// An aggregate over a partial index, so it returns one row for a scope with no backlog rather than
+// no rows: a count of zero and no time is the answer "nothing is failing", which is different from
+// "this scope does not exist" and is what a caller wants for either.
+const selectFormationFailingSQL = `
+SELECT count(*), max(formation_failed_at)
+  FROM {schema}.observation
+ WHERE scope = $1 AND formed_at IS NULL AND parked_at IS NULL
+   AND formation_failed_at IS NOT NULL`
+
 // ── When forming does not work ────────────────────────────────────────────────────────────────
 
 // RecordFormationFailure remembers why an attempt failed, and returns how many have been made.

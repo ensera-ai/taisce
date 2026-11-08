@@ -276,14 +276,15 @@ ledger and from PostgreSQL's own statistics, never from anything anybody said.
 
 ### How it is running
 
-Six tiles, and a status that says which of them needs you first:
+Seven tiles, and a status that says which of them needs you first:
 
 | Tile | What it tells you | When to act |
 |---|---|---|
 | Formation backlog | Unfinished turns against the instance's admission limit (4,096 by default) | Near the limit, new turns are refused with `429 rate_limited`. See [the ingestion backlog](../06-ingestion-budget.md) |
 | Parked | Turns formation gave up on, across every project | Any at all: see [parked turns](#turns-that-failed-parked-turns) |
 | Worker | `answering` if a worker has reported in the last 330 seconds | `not answering` means formation has stopped, even though writes are still accepted |
-| Failed attempts | Formation attempts that have failed over the life of the instance: a running total kept in the database, so a restart does not reset it, with the time of the last one beside it | Whether it is marked. It is marked only while the last failure is more recent than the last turn to form, which is what "still rising" means on a page you read once. A marked tile usually means the model is unreachable or refusing |
+| Failed attempts | Formation attempts that have failed over the life of the instance: a running total kept in the database, so a restart does not reset it, with the time of the last one beside it — or, when any project is failing on its own, how many are | Whether it is marked. It is marked while the last failure is more recent than the last turn to form, which is what "still rising" means on a page you read once, or while any project is failing. A marked tile usually means the model is unreachable or refusing |
+| Stood down | How many times a worker found a project already being formed by another replica and waited, with the time of the last one | Nothing. It is the per-project lock doing its job, and it is the evidence that several workers are serialising rather than that only one of them is alive. It stays at zero on a single-replica deployment, and until two workers want the same project at the same moment |
 | Connections | Database sessions in use across the whole PostgreSQL server | Watch it as you add workers and API replicas |
 | Headroom | Sessions left before PostgreSQL refuses a new one | Marked low at 10 sessions or a tenth of `max_connections`, whichever is larger. The next process to start may be refused |
 
@@ -291,9 +292,16 @@ The status reads **Formation has stopped**, **Connections are low**, **Formation
 **Turns are parked**, or **Nothing needs attention**, in that order of urgency. The same numbers
 appear in the rail on every page as *Instance load*.
 
-One health row covers the instance, so **Formation is failing** clears as soon as a turn forms in any
-project, even if another project is still failing. A project stuck on its own shows up as *Behind by*
-and *Parked* in the projects table, not in this status.
+A project failing on its own is counted separately from the instance's own numbers, because one
+health row covers the instance: a turn forming in any project moves its stamps, so those alone would
+clear the status while another project failed every attempt. A project is failing when its backlog
+holds a turn that has been tried and did not form — which needs no stamp of its own, since a turn
+that formed has left the backlog and one formation gave up on is parked. The status reads whichever
+of the two is worse, and says **A project is failing** or **N projects are failing** when it is that
+one.
+
+The projects table carries the count per project under **Failing**. One failing turn is a turn to
+look at; all of a project's turns failing is an endpoint to look at.
 
 *What the model costs* says **Not recorded**, because no table holds a token count or a bill. The
 model gateway, when you run one, is where that number lives.

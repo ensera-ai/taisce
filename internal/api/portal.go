@@ -156,6 +156,32 @@ type portalHealth struct {
 	// a per-scope row, which this does not add.
 	LastFailureAt   *time.Time
 	FailuresCurrent bool
+	// StoodDown is how many times a pass found a scope held by another replica, and
+	// LastStoodDownAt when that last happened.
+	//
+	// This is the only evidence the deployment produces that the per-scope lock is serialising
+	// several workers, and it is the number an operator wants when asking whether their replicas are
+	// working. Without it, four workers against one backlog look identical to one worker and three
+	// that are wedged, crash-looping on a schedule that hides it, or pointed at the wrong database —
+	// and a replica standing down is a replica doing exactly what the topology intends.
+	//
+	// Not a judgement. A zero here is normal on a single-replica deployment and expected on a
+	// multi-replica one only once two workers have wanted the same scope, so there is no state in
+	// which a number is the wrong one and nothing is marked on it.
+	StoodDown       int64
+	LastStoodDownAt *time.Time
+	// FailingProjects is how many projects are failing on their own, counted from their backlogs
+	// rather than from this row.
+	//
+	// The row is one row for the instance, so FailuresCurrent above answers for the instance and is
+	// silent about a project: a turn forming in any scope moves the progress stamp, which clears the
+	// mark while another project fails every attempt. An instance with one busy project and one
+	// broken one read as healthy on the page an operator is told to watch.
+	//
+	// So the status takes the worse of the two readings. A project is failing when its backlog holds
+	// a turn that has been tried and did not form, which needs no second stamp and no window: a turn
+	// that formed has left the backlog, and one the driver gave up on is parked.
+	FailingProjects int
 	Connections     int64
 	MaxConnections  int64
 	Headroom        int64
@@ -180,6 +206,19 @@ type portalScope struct {
 	Formed    *int64
 	Behind    int64
 	Parked    int
+	// Failing is whether this project's formation is failing now, and FailingTurns how many of its
+	// waiting turns have already been tried and did not form. LastFailureAt is the most recent of
+	// those attempts.
+	//
+	// Per project, because the instance-wide row cannot say: it holds one progress stamp, so any
+	// project forming turns clears the mark for all of them. A project stuck on its own was visible
+	// here only as Behind rising, which looks the same as a slow model.
+	//
+	// FailingTurns separates one poisoned turn from a provider refusing everything — the first is a
+	// turn to park, the second is an endpoint to look at, and a boolean loses the difference.
+	Failing       bool
+	FailingTurns  int64
+	LastFailureAt *time.Time
 }
 
 type portalProject struct {
@@ -486,6 +525,15 @@ func (p *Portal) home(w http.ResponseWriter, r *http.Request, grant credential.G
 			return
 		}
 		scope := portalScope{Project: project.Scope, Suspended: project.Suspended, Parked: f.Parked}
+		// Read per project because no instance-wide row can answer it. A read that fails loses this
+		// column for that project and leaves the rest of its row: a page that refuses to render
+		// because one aggregate could not be counted tells an operator less than one that renders
+		// without it.
+		if failure, err := p.m.stores.Observations.FormationFailing(r.Context(), p.m.schema, project.Scope); err != nil {
+			p.m.log.Error("portal: read formation failure", "error", err, "project", project.Scope)
+		} else {
+			scope.Failing, scope.FailingTurns, scope.LastFailureAt = failure.Failing, failure.Turns, failure.LastFailureAt
+		}
 		if f.HasStored {
 			stored := f.Stored
 			scope.Stored = &stored
@@ -537,11 +585,18 @@ func (p *Portal) health(r *http.Request) *portalHealth {
 	// than the failure rather than as nothing to report.
 	current := health.LastFailureAt != nil &&
 		(health.LastProgressAt == nil || health.LastFailureAt.After(*health.LastProgressAt))
+	// Or any project failing on its own. The stamps above are one pair for the instance, so a
+	// project forming turns clears them for a project that is not — and a project whose backlog
+	// holds turns that have been tried and did not form is failing whatever the instance's stamps
+	// say. The status takes the worse of the two readings, because the page exists to be read once.
+	current = current || health.FailingProjects > 0
 	return &portalHealth{
 		Pending: health.Pending, PendingLimit: health.PendingLimit, Parked: health.Parked,
 		WorkerResponsive: health.WorkerResponsive, FailedAttempts: health.FailedAttempts,
 		LastFailureAt: health.LastFailureAt, FailuresCurrent: current,
-		Connections: health.ClusterConnections, MaxConnections: health.MaxConnections,
+		StoodDown: health.StoodDown, LastStoodDownAt: health.LastStoodDownAt,
+		FailingProjects: int(health.FailingProjects),
+		Connections:     health.ClusterConnections, MaxConnections: health.MaxConnections,
 		Headroom:        headroom,
 		Tight:           headroom <= max64(10, health.MaxConnections/10),
 		PendingShare:    share(health.Pending, health.PendingLimit),

@@ -169,6 +169,25 @@ type Observation struct {
 //
 // Two numbers because they answer two questions. Stored is what an append confirms, and the caller
 // already knows it. Formed is what a recall depends on, and it is the one being asked about.
+// FormationFailure is whether one scope's formation is failing now, read from its backlog rather
+// than from a clock.
+//
+// Failing means the scope's backlog holds a turn that has been tried and did not form. A turn that
+// formed has left the backlog and a turn the driver gave up on is parked, so what remains stamped
+// with a failure is work that is still owed and has already gone wrong once. No window, no duration
+// and no second timestamp: the backlog's contents are the state.
+//
+// Turns is how many such turns there are, which separates one poisoned turn from a project whose
+// every turn is being refused — a distinction a boolean loses and an operator needs, because the
+// first is one turn to park and the second is a provider to look at.
+type FormationFailure struct {
+	Failing bool
+	Turns   int64
+	// LastFailureAt is when the most recent of those attempts failed. Absent when none has, which
+	// is the same case as Failing being false.
+	LastFailureAt *time.Time
+}
+
 type Freshness struct {
 	Scope string
 	// Stored is the highest offset ever appended in this scope. HasStored distinguishes

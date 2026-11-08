@@ -100,12 +100,20 @@ object:
   "last_failure_at": null,
   "formed_count": 5310,
   "failed_attempts": 7,
+  "stood_down": 118,
+  "last_stood_down_at": "2026-09-11T08:15:39Z",
+  "failing_projects": 0,
   "database_connections": 18,
   "cluster_connections": 21,
   "max_connections": 100,
   "reserved_connections": 3
 }
 ```
+
+`stood_down` is how many times a worker found a project already being formed by another replica and
+waited. It is the evidence that several workers are serialising on the per-project lock rather than
+that only one of them is alive, and it stays at zero on a single-replica deployment. `failing_projects`
+is how many projects hold a turn that has been tried and did not form.
 
 The report holds aggregate counts only: no subject IDs, project names, observation IDs, message
 content or provider errors. Project credentials can't read it. The command gives up after ten
@@ -114,8 +122,12 @@ seconds.
 ## Watch out for
 
 - **A live worker is not a working model.** A worker can report in on time while every turn it tries
-  fails and gets parked. One healthy worker also keeps the instance-wide check green while one
-  project is stuck. Look at `parked`, `oldest_pending_at` and `last_failure_at` as well.
+  fails and gets parked. One healthy worker also keeps this instance-wide check green while one
+  project is stuck: it reports on the instance, and that is all it can report on. Look at `parked`,
+  `oldest_pending_at` and `last_failure_at` as well, and at `failing_projects`, which counts the
+  projects whose backlog holds a turn that has been tried and did not form — the one number here
+  that is per project rather than per instance. The ops centre's overview reads the same count and
+  names the projects in its table.
 - **A fresh heartbeat doesn't mean an outage is over.** Fix the provider first, then retry parked
   turns with the [ingestion backlog guide](06-ingestion-budget.md).
 - **Connection counts are database pressure.** They cover the whole database and cluster, not one
