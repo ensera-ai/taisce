@@ -575,3 +575,56 @@ data depend on the local tag.
 
 **Impact.** Operations: an install started from a release keeps running that release whatever is built
 on the same machine, and `docker image ls` shows builds and releases under different names.
+
+## D14 — Whether formation is failing is read from two stamps, not from a clock or a counter reset
+
+**Date.** 2026-11-08. **Issue.** [#97](https://github.com/ensera-ai/taisce/issues/97).
+
+**Why it was open.** `formation_health.failed_attempts` only ever rises, and nothing resets it. The
+ops centre marked its tile on any non-zero value, so the first failure an instance ever suffered
+marked the page for the life of the instance, and the page could not tell a failing instance from one
+that recovered an hour ago. The operator guide asked the reader to watch "whether it is still rising",
+which is a question a page read once cannot answer. Building the answer forced a choice about what
+"now" means on a page that holds no clock of its own.
+
+**Decided.**
+- Failures are current when `last_failure_at` is more recent than `last_progress_at`, and when
+  `last_progress_at` is absent while `last_failure_at` is not: nothing has ever formed, which is the
+  worst case the tile exists for, so an absent stamp counts as older rather than as nothing to report.
+- The tile is marked on that, and carries `last_failure_at` whether or not it is marked, so an
+  operator can see when the failures stopped as well as that they did.
+- The section header takes the same answer, between **Connections are low** and **Turns are parked**,
+  so a header saying nothing needs attention can no longer appear beside a marked tile.
+- `internal/api/portalhealth_test.go` holds the four states against a real deployment: failing,
+  recovered with the total intact, never formed, and never failed.
+
+**Rejected: a recency window.** Marking the tile while `last_failure_at` is within the last N minutes
+is what a monitoring system would do. It needs a duration nobody here has measured, and it is wrong in
+both directions on a quiet instance: a worker whose attempts are further apart than the window reads
+as healthy in the gaps between its failures, and an instance that failed once inside the window reads
+as failing when the next turn has already formed. It also needs a wall clock the page trusts, where
+the two stamps come from one clock in the substrate and need no agreement with this process.
+
+**Rejected: resetting the counter on success.** It would make a non-zero value mean "failing now"
+directly. It also destroys the only record that failures ever happened, which is the number the health
+report publishes and the operator guide tells people to watch, and it would make the page's reading
+depend on write-path behaviour rather than on what the row says.
+
+**Rejected: counting failures in a window from the ledger.** The ledger holds operations, not failed
+formation attempts, so this would mean writing a row per failure — a write on the failure path, in a
+table whose chain is verified, to answer a question two columns in a row already hold.
+
+**What this does not cover.**
+- One health row covers the instance, so a turn forming in any project clears the mark while another
+  project may still be failing. Per-project currency needs a per-scope row, which this does not add,
+  and a project stuck on its own is visible as *Behind by* and *Parked* in the projects table.
+- The mark says a failure has not been recovered from, not how many failures there were or how fast
+  they are arriving. The count beside it is still a lifetime total.
+- A clock moved backwards on the database server can order the two stamps wrongly. Both come from
+  `clock_timestamp()` on one server, so this is one clock being wrong rather than two disagreeing.
+
+**Undo cost.** Low: one derived boolean in the portal's view model, one template condition, and a
+test. No schema change, no stored value, and nothing a release or a row depends on.
+
+**Impact.** Operations: an operator reading the page once can tell whether formation is failing now,
+and an instance that recovered stops asking for attention while keeping the evidence that it failed.

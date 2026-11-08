@@ -123,6 +123,10 @@ seconds.
 - **Formation counters are best-effort.** `formed_count` and `failed_attempts` are updated after each
   attempt. They are not a transactional record of every formation, and `failed_attempts` includes
   parsing and extraction failures as well as provider failures. Erasure does not reset them.
+- **A total is not a state.** `failed_attempts` only ever rises, so its value says nothing about
+  whether anything is failing now. Compare `last_failure_at` with `last_progress_at`: a failure more
+  recent than the last turn to form is a failure that has not been recovered from, and a missing
+  `last_progress_at` means nothing has ever formed. The ops centre marks its tile on that comparison.
 - **Bad input can't take the API down.** A turn that keeps failing parks. It never flips the API's
   readiness.
 - **No numbers have been measured.** The one-second cache and the 330-second window are defaults,

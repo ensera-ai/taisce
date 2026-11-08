@@ -24,16 +24,17 @@
 </div>
 {{else}}{{if .ActivityUnavailable}}<div class="banner bad" role="status">{{template "i-alert"}}<div><strong>The ledger could not be counted.</strong> There is no activity to show for that reason, not because nothing happened; the rest of this page is unaffected.</div></div>{{end}}{{end}}
 {{with .Health}}<section class="section">
-<div class="section-head"><h2>How it is running</h2>{{if not .WorkerResponsive}}<span class="pill bad dot">Formation has stopped</span>{{else if .Tight}}<span class="pill bad dot">Connections are low</span>{{else if .Parked}}<span class="pill warn dot">Turns are parked</span>{{else}}<span class="pill ok dot">Nothing needs attention</span>{{end}}</div>
+<div class="section-head"><h2>How it is running</h2>{{if not .WorkerResponsive}}<span class="pill bad dot">Formation has stopped</span>{{else if .Tight}}<span class="pill bad dot">Connections are low</span>{{else if .FailuresCurrent}}<span class="pill warn dot">Formation is failing</span>{{else if .Parked}}<span class="pill warn dot">Turns are parked</span>{{else}}<span class="pill ok dot">Nothing needs attention</span>{{end}}</div>
 <div class="tiles six">
 <div class="tile"><div class="label">{{template "i-activity"}}Formation backlog</div><div class="value">{{.Pending}}<small> of {{.PendingLimit}}</small></div><div class="meter"><i style="--fill:{{.PendingShare}}%"></i></div></div>
 <div class="tile{{if .Parked}} warn{{end}}"><div class="label">{{template "i-pause"}}Parked</div><div class="value">{{.Parked}}</div><p class="hint">turns formation gave up on</p></div>
 <div class="tile{{if not .WorkerResponsive}} bad{{end}}"><div class="label">{{template "i-cpu"}}Worker</div><div class="value word">{{if .WorkerResponsive}}answering{{else}}not answering{{end}}</div></div>
-<div class="tile{{if .FailedAttempts}} warn{{end}}"><div class="label">{{template "i-alert"}}Failed attempts</div><div class="value">{{.FailedAttempts}}</div></div>
+<div class="tile{{if .FailuresCurrent}} warn{{end}}"><div class="label">{{template "i-alert"}}Failed attempts</div><div class="value">{{.FailedAttempts}}</div>{{with .LastFailureAt}}<p class="hint">last failed {{.UTC.Format "2006-01-02 15:04:05"}}</p>{{else}}<p class="hint">no failure recorded</p>{{end}}</div>
 <div class="tile{{if .Tight}} bad{{end}}"><div class="label">{{template "i-db"}}Connections</div><div class="value">{{.Connections}}<small> of {{.MaxConnections}}</small></div><div class="meter"><i style="--fill:{{.ConnectionShare}}%"></i></div></div>
 <div class="tile{{if .Tight}} bad{{end}}"><div class="label">{{template "i-gauge"}}Headroom</div><div class="value">{{.Headroom}}<small> sessions</small></div></div>
 </div>
 <p class="note">The backlog is unfinished turns against the instance's admission limit; a worker that is not answering means formation has stopped even though writes are still accepted. Headroom is how many database sessions are left before the server refuses one — a deployment that runs out of those loses writes, so it is on this page rather than in a log.{{if .Tight}} <strong>It is low: the next process to start may be refused.</strong>{{end}}</p>
+<p class="note">Failed attempts is a running total over the life of the instance, and nothing resets it. It is marked only while the last failure is more recent than the last turn to form, so a count that stopped rising stops asking for attention; the time beside it says when it stopped. One health row covers the whole instance, so a turn forming in any project clears the mark even if another project is still failing.</p>
 </section>{{end}}
 <section class="card" id="projects">
 <div class="card-head"><div><div class="title-row">{{template "i-folder"}}<h2>Projects and formation</h2></div><p class="sub">{{len .Scopes}} on this instance</p></div>
