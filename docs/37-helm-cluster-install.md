@@ -165,22 +165,22 @@ ran with three API replicas and four workers, all four workers contending for on
 
 ### Test one: how many workers hold the lock at once
 
-`pg_locks` on the primary was sampled for the lock whose key is `hashtext('memory/default')`, 259
-times over just under eight minutes, while the four workers drained a backlog of several hundred
-turns.
+`pg_locks` on the primary was sampled for the lock whose key is `hashtext('memory/default')`, 420
+times over thirteen minutes, while the four workers drained a backlog of several hundred turns.
 
 | | |
 |---|---|
-| Samples with the lock held by nobody | 119 |
-| Samples with exactly one granted holder | 139 |
+| Samples with the lock held by nobody | 260 |
+| Samples with exactly one granted holder | 159 |
 | Samples with more than one granted holder | **0** |
-| Distinct backends that held it across the window | 8, belonging to the four worker pods |
+| Distinct backends that held it granted | 11: ten belonging to worker pods, one the measuring session |
 
 **The lock was never granted to two sessions at once.** It moved between workers rather than being
 monopolised by one, which is what a lock taken per drain and released at the end of it should look
-like.
+like. The ten worker backends span five pods — the four the deployment started with, and the
+replacement for the one killed in the third test.
 
-One sample of the 259 returned two rows, and it is worth saying what it was rather than rounding it
+One sample of the 420 returned two rows, and it is worth saying what it was rather than rounding it
 away. At 08:50:14 the sample read `1219:true, 4687:false`: a worker holding the lock granted, and a
 second session waiting. The waiting session was the measuring session, a tick before it acquired the
 lock for the second test below. It waits because it asks with `pg_advisory_lock`, which queues. The
