@@ -31,9 +31,41 @@ install and kept (`helm.sh/resource-policy: keep`); an existing secret carrying 
 `controlPassword` is used when `credentials.existingSecret` names it. The provider key is a secret
 you create (`inference.apiKeySecret`, key `apiKey`) and is never a value.
 
+**That last command is not optional, and it is not repeatable.** The two tokens exist in the Job's
+log and nowhere else, because only their digests are stored. The Job is named by revision, so the
+next upgrade takes the previous Job out of the release and Helm deletes it with its log — and the
+new revision's bootstrap finds the instance already reachable, mints nothing, and has no token to
+print. Changing a replica count is enough. Copy both tokens somewhere before anything else happens.
+
 The database image must provide the `vector` extension; `btree_gist` and `pg_stat_statements` are
 contrib modules of every build. The default is the operator's image family that bundles pgvector;
 a deployment that builds its own substrate image sets `postgresql.cnpg.image`.
+
+### If the first credentials were lost
+
+Mint replacements; do not go looking for the old ones. The administrative database connection
+outlives every credential, and the management surface is the workload that holds it:
+
+```sh
+kubectl -n taisce exec deploy/memory-taisce-manage -- /taisce operator issue replacement
+kubectl -n taisce exec deploy/memory-taisce-manage -- /taisce credential issue replacement -project default
+```
+
+**Minting does not revoke what was lost.** A token nobody can find is still a token that works for
+whoever has it — the person who read the log before it was deleted, or whatever shipped that log
+somewhere. `/taisce credential list` names what exists and `/taisce credential revoke <id>` closes
+it, and doing that is part of recovering rather than an optional tidy-up.
+
+This is why nothing in the chart keeps a token at rest. A Secret holding one, or a bootstrap Job
+kept on every upgrade, would turn a credential that exists for a moment into one that exists for the
+life of the deployment and can be read by anyone who can read the namespace — in exchange for
+convenience that the two commands above already provide
+([D15](../../docs/01-decisions.md)).
+
+**What this does not cover.** With `manage.enabled=false` there is no workload holding the
+administrative connection, so there is nothing to exec into: enable the management surface, mint,
+and disable it again. And nothing brings back the tokens themselves — they are gone, which is the
+property that makes a stolen database useless for impersonation.
 
 ### From a published chart
 

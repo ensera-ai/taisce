@@ -159,3 +159,60 @@ func TestTheChartAsksForAnImageTheReleasePushed(t *testing.T) {
 		t.Error("the chart image check must run before the chart is pushed, not after")
 	}
 }
+
+// notes renders the chart's NOTES.txt, which `helm template` does not emit.
+//
+// A client-side dry-run install does, and it reaches no cluster: KUBECONFIG is pointed at nothing
+// so that a machine which happens to have a context cannot make this pass for a reason a build
+// runner would not share.
+func notes(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("helm", append([]string{"install", "t", "taisce", "--dry-run=client", "-n", "taisce"}, args...)...)
+	cmd.Env = append(os.Environ(), "KUBECONFIG=/dev/null")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm install --dry-run=client %v: %v\n%s", args, err, out)
+	}
+	_, after, found := strings.Cut(string(out), "\nNOTES:\n")
+	if !found {
+		t.Fatalf("the dry-run printed no NOTES:\n%s", out)
+	}
+	return after
+}
+
+// The tokens bootstrap prints exist in one Job's log and nowhere else, and the next upgrade deletes
+// that Job. An operator who learns this after the fact has lost nothing they cannot mint again, but
+// only if the notes said both halves: copy it now, and here is how to replace it. This test is what
+// a later reader re-runs to find out whether they still do.
+func TestTheNotesSayTheFirstTokensAreTheOnlyCopyAndHowToReplaceThem(t *testing.T) {
+	out := notes(t)
+	for _, want := range []string{
+		"the only copy",
+		"the next upgrade",
+		"mints nothing",
+		"exec deploy/t-taisce-manage -- /taisce operator issue replacement",
+		"exec deploy/t-taisce-manage -- /taisce credential issue replacement -project default",
+		"Minting does not revoke what was lost",
+		"/taisce credential revoke <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the notes do not say %q:\n%s", want, out)
+		}
+	}
+}
+
+// With no management surface there is no workload holding the administrative connection, so the
+// recipe above would name a deployment that does not exist. The notes have to say that instead of
+// printing a command that cannot work — a recovery instruction that fails is worse than none,
+// because it is read as evidence that recovery was tried.
+func TestTheNotesDoNotOfferAnExecRecipeWhenNoWorkloadHoldsTheAdminConnection(t *testing.T) {
+	out := notes(t, "--set", "manage.enabled=false")
+	if strings.Contains(out, "exec deploy/t-taisce-manage") {
+		t.Errorf("the notes offer an exec into a management surface that is disabled:\n%s", out)
+	}
+	for _, want := range []string{"the only copy", "it is disabled", "--set manage.enabled=true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the notes do not say %q with the management surface off:\n%s", want, out)
+		}
+	}
+}
