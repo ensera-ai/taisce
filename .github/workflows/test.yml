@@ -55,6 +55,31 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The chart tests render the chart, and which helm renders it decides what they are testing:
+      # the majors differ in what they will render at all, so a client-side dry run needs no cluster
+      # on one and contacts a cluster on the other. The runner image ships a helm of its own, and
+      # taking it would render the chart here with a different engine than `make gate` uses — making
+      # this file's promise above untrue for every chart test, in the quiet direction as well as the
+      # loud one: a rendering both accept for different reasons is one nobody has checked.
+      #
+      # So the version is the one deploy/gate/Dockerfile pins, and moving major stays the deliberate
+      # act that file describes. The two pins are held together by a test, because they live in
+      # different files and are edited months apart by somebody changing something else.
+      #
+      # Pinned and verified rather than installed by a script fetched at run time: a pipe into a
+      # shell is a build that runs whatever a host served that morning.
+      - name: Helm
+        env:
+          HELM_VERSION: v4.3.0
+          HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp linux-amd64/helm
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version --short
+
       # The substrate is the project's own image, built from deploy/postgres, so the extensions and
       # settings the tests need are the ones a deployment has. `make db-up` waits until it answers.
       - name: Start the substrate
