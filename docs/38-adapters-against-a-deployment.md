@@ -115,6 +115,11 @@ watermark advances past it — is invisible permanently. In the install run that
 261 of 512 turns parked while the model was unreachable; a compaction in that state hands the model
 almost nothing and reports no loss.
 
+This run reached that state inside the hour without being pushed towards it. Of the fifty turns the
+adapters stored, forty-nine had parked and none had formed by the time the last driver finished. Every
+subject the suite created now has a context that will stay empty for as long as the deployment
+exists, and nothing asking for one would be told why.
+
 What makes this a defect rather than a choice is that the contract describes the other behaviour.
 The response's own documentation says a context is the newest turns verbatim with segments standing
 in for the rest, and the client says what the deployment has not rolled up yet comes back verbatim.
