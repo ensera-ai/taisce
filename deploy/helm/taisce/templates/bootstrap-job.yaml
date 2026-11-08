@@ -41,7 +41,10 @@ spec:
           env:
             - name: TAISCE_SCHEMA
               value: {{ .Values.schema | quote }}
-            {{- include "taisce.adminEnv" . | nindent 12 }}
+            {{/* Three: the floor the admission gate accepts. The Job runs its statements in order
+                 and exits, so nothing here benefits from more, and a Job that outlived its pool
+                 would be a bootstrap that failed for a reason unrelated to bootstrapping. */}}
+            {{- include "taisce.adminEnv" (dict "root" . "pool" 3) | nindent 12 }}
             {{- if ne .Values.postgresql.mode "external" }}
             - name: TAISCE_DATA_PASSWORD
               valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" . | quote }}, key: dataPassword}}

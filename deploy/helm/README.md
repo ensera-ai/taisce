@@ -17,12 +17,55 @@ The operator first, because it is the machinery that knows how to promote a repl
 
 ```sh
 kubectl apply --server-side -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.27/releases/cnpg-1.27.0.yaml
-helm install memory deploy/helm/taisce -n taisce --create-namespace \
+```
+
+Then the namespace, then the provider key inside it, then the install. That order is not a style:
+the key is a Secret you create and a Secret lives in a namespace, so an install that creates the
+namespace itself forecloses the only point at which the Secret could exist. A deployment installed
+without it comes up, and its workers fail to reach a model until somebody works out why.
+
+```sh
+kubectl create namespace taisce
+```
+
+```sh
+kubectl -n taisce create secret generic model-key --from-literal=apiKey="$YOUR_PROVIDER_KEY"
+```
+
+```sh
+helm install memory deploy/helm/taisce -n taisce \
   --set inference.endpoint=https://models.example/v1 \
   --set inference.extractorModel=Qwen/Qwen3.8-27B \
-  --set inference.allowlist=models.example
+  --set inference.allowlist=models.example \
+  --set inference.apiKeySecret=model-key
+```
+
+```sh
 kubectl -n taisce logs job/memory-taisce-bootstrap-1 | grep token
 ```
+
+`inference.allowlist` names the hosts that may receive somebody's words. Empty permits nothing, so
+formation does not start — which is the default, because an allowlist that permits everything when
+unset is one forgotten variable from being no allowlist.
+
+### Reaching it
+
+The chart exposes nothing, which is the right default and leaves first contact to you. On a cluster
+with no ingress controller — which is most clusters somebody is trying this on — a port-forward is
+all it takes, one per surface:
+
+```sh
+kubectl -n taisce port-forward svc/memory-taisce-api 8080:8080
+```
+
+```sh
+kubectl -n taisce port-forward svc/memory-taisce-manage 8081:8081
+```
+
+The memory routes are then at `http://localhost:8080` with the project token as a bearer, and the
+ops centre at `http://localhost:8081/portal` with the operator token — once `manage.portal=on`,
+which it is not by default. `ingress.api` and `ingress.portal` are for publishing either of them
+properly, and **What is exposed** below covers that.
 
 Bootstrap prints the first project token and the first operator token once; it is a Job named by the
 release revision, so every upgrade runs it again and it applies pending migrations. The serving
@@ -80,21 +123,74 @@ Each release publishes the chart to `oci://ghcr.io/ensera-ai/charts/taisce`, ver
 tag's `v`; it installs the image published beside it, named by the release tag. Pass the same values
 as above:
 
+Omitting `--version` installs the newest published chart, which is what you want unless you are
+pinning. The namespace and the key come first here too:
+
 ```sh
-helm install memory oci://ghcr.io/ensera-ai/charts/taisce --version 0.4.0 -n taisce --create-namespace
+helm install memory oci://ghcr.io/ensera-ai/charts/taisce -n taisce --set inference.apiKeySecret=model-key
 ```
+
+Pin with `--version <chart version>` — plain SemVer, the release tag without its `v`. No version is
+named in this file on purpose: one written here is one that goes stale and leaves a reader unable to
+tell whether it is the current release, an example, or the last version known to work.
 
 Charts 0.3.0 and 0.3.1 ask for their image without the `v` and so name a tag that was never pushed
 ([D5](../../docs/01-decisions.md)); installing either needs `--set image.tag=v0.3.1`.
 
+## What this deployment states about itself
+
+Two things the chart used to leave to whatever was underneath it, because a limit nobody chose is
+not a limit.
+
+**What each process may open against the database.** `api.memoryPool`, `api.registryPool`,
+`worker.memoryPool` and `manage.adminPool` are on every connection string the chart builds. Told
+nothing, a pool sizes itself at the number of CPUs the process can see — so the same release
+declared 32 connections on a 32-CPU node and 4 on a 4-CPU one, and for the API that is not only a
+pool setting: admission bounds concurrent work at one less than the memory pool, half of that for
+any one project and half again for any one credential. Three replicas behind one Service admitted
+31, 11 and 3 requests at once, and which replica the Service picked decided whether a request was
+served or shed. At the defaults each API replica serves eleven at once, five per project, two per
+credential.
+
+Work the arithmetic out before scaling: `api.replicas × (memoryPool + registryPool) + worker.replicas
+× worker.memoryPool + manage.adminPool + 3` for bootstrap, which must fit `max_connections` with
+headroom for operators and migrations. **The chart refuses to render when it does not**, naming both
+numbers — every process already refuses to start when its own pool cannot fit the free slots, but
+pools fill lazily, so over-declaration is invisible at install and arrives later as connection
+refusals on a deployment that came up green.
+
+**How long a lost node holds a project's formation.** `tcp_keepalives_idle` is 60 seconds on the
+database the chart declares. Formation holds a session advisory lock for the whole drain of a scope,
+and a session lock is released when its session ends and by nothing else — so "the holder has gone"
+is a question only the database answers. A process dying answers it in about three seconds, because
+the kernel on its node closes the sockets. A node going away answers it only when the keepalive
+gives up, and left unset that is the operating system's default: on Linux, about two hours and
+eleven minutes, during which every other worker asking for that scope is refused and the project
+forms nothing. Raise it on a network where a healthy peer can be silent for longer.
+
+With `postgresql.mode=external` neither applies. The DSNs come from a secret this chart never reads,
+so the pool ceilings are yours to put in them, and the keepalives are yours to set on your server.
+
 ## Shrinking it, deliberately
 
 ```sh
-helm install memory deploy/helm/taisce --set postgresql.cnpg.instances=1 --set api.replicas=1 --set worker.replicas=1
+helm install memory deploy/helm/taisce -n taisce -f deploy/helm/values-small.yaml
 ```
 
-That is a single point of failure in every tier and the chart renders it as asked. The default is
-the other way round so that nobody deploys the small shape believing it was the large one.
+One database instance, one API replica, one worker, a 10Gi volume and a 2Gi memory limit: a shape
+that fits a cluster already carrying other work. The default topology asks for 6 CPUs and 750Gi of
+reservable capacity across three database instances, which an ordinary cluster does not have spare,
+and the default is that way round so nobody deploys the small shape believing it was the large one.
+`values-small.yaml` is a file in the repository rather than a paragraph here, so it renders and is
+tested.
+
+**Lowering the memory limit is enough on its own.** `shared_buffers`, `effective_cache_size`,
+`maintenance_work_mem`, `max_wal_size` and the shared-memory volume are fractions of
+`postgresql.cnpg.resources.limits.memory`, so they follow it and cannot disagree with it. They used
+to be written beside it, which meant lowering the limit alone left a database configured to reserve
+more than its container allowed — it does not start, and nothing said so. State any of them in
+`postgresql.cnpg.parameters` to override the derivation; the limit must be written in `Gi` or `Mi`,
+and a unit the chart cannot read is refused rather than guessed at.
 
 An existing database instead of the operator's: `postgresql.mode=external` with a secret carrying
 `adminDSN`, `memoryDSN`, `registryDSN`, `dataPassword` and `controlPassword`.

@@ -36,7 +36,7 @@ spec:
               value: "127.0.0.1:8082"
             - name: TAISCE_FORMATION_TURN_BUDGET
               value: {{ .Values.worker.turnBudget | quote }}
-            {{- include "taisce.serviceEnv" . | nindent 12 }}
+            {{- include "taisce.serviceEnv" (dict "root" . "pool" .Values.worker.memoryPool) | nindent 12 }}
           readinessProbe:
             exec: {command: ["/taisce", "probe", "--worker"]}
             periodSeconds: 10
