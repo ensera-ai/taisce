@@ -20,7 +20,7 @@ took, what the journey did, and what the availability tests showed.
   centre signed in and reported on the instance.
 - **Four defects stood between the documentation and a working install**, and none of them could have
   been caught by a test that reads rendered YAML: #101, #102, #103 and #104. Two more came out of the
-  availability tests: #105 and #106.
+  availability tests: #105 and #106, and a seventh came out of removing the install again: #108.
 - **One of them loses data an operator cannot get back.** `helm upgrade` deletes the bootstrap Job,
   and with it the only copy of the first operator and project credentials (#102). Changing a replica
   count is enough to trigger it, and it happened during this run.
@@ -270,15 +270,35 @@ each be refused the lock, and would say nothing about it (#105).
 - **Whether the over-declared connection pools of #101 actually exhaust the database.** That needs a
   load that fills them.
 
-## What is still installed
+## What was installed, and what removing it took
 
-The release `memory` in namespace `taisce`: three database instances, three API replicas, four
-workers, the management surface with the portal on, one Secret holding the provider key, and one
-`toolbox` pod used to drive the journey from inside the cluster. Nothing outside that namespace was
-created or changed, and nothing cluster-scoped was needed — the CloudNativePG operator was already
-installed, and the cluster's image policy applies only to namespaces that opt in by label, which this
-one does not.
+For the length of this run the release `memory` held namespace `taisce`: three database instances,
+three API replicas, four workers, the management surface with the portal on, one Secret holding the
+provider key, and one `toolbox` pod used to drive the journey from inside the cluster. Nothing
+outside that namespace was created or changed, and nothing cluster-scoped was needed — the
+CloudNativePG operator was already present, and the cluster's image policy applies only to
+namespaces that opt in by label, which this one did not.
 
-Removing it is `helm uninstall memory -n taisce` followed by deleting the namespace. The role
-passwords carry `helm.sh/resource-policy: keep`, so they survive the uninstall and go with the
-namespace.
+It was removed at the end of the run. `helm uninstall memory -n taisce` reported one resource kept:
+
+```
+These resources were kept due to the resource policy:
+[Secret] memory-taisce-credentials
+```
+
+So `helm.sh/resource-policy: keep` on the role passwords is now observed behaviour rather than a
+reading of the template. Deleting the namespace afterwards took that Secret, the provider key, the
+`toolbox` pod and the three volumes with it, and no `PersistentVolume` survived — this cluster's
+default storage class reclaims on delete.
+
+That makes the uninstall and the removal two different things, and only one of them is in the chart's
+documentation. An operator who uninstalls in order to reinstall is protected by the kept Secret,
+which is what the annotation is for. An operator who uninstalls in order to be rid of the deployment
+is left holding the database role passwords in a namespace with no database in it, and `kubectl get
+all` does not list Secrets, so the usual check for leftovers does not show them. The gap is in the
+documentation rather than the template — the annotation should stay — and it is #108.
+
+The cluster was verified unchanged after the removal: every other namespace present, the six Helm
+releases that were there before still deployed, the five CloudNativePG clusters belonging to other
+workloads all healthy, both cluster image policies untouched at the age they had before this run, and
+all three nodes `Ready`.
