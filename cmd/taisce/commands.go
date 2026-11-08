@@ -121,7 +121,7 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 	case "serve":
 		return run(ctx, log)
 	case "bootstrap":
-		return bootstrap(ctx, log, args[1:])
+		return bootstrap(ctx, log, args[1:], os.Stdout)
 	case "project":
 		if c, ok := managementFromEnv(); ok {
 			return c.project(ctx, args[1:])
@@ -201,7 +201,7 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 // printed once, to stdout, and is not recoverable afterwards: only its digest is stored. That is the
 // property being bought, so the message says it plainly rather than leaving an operator to discover
 // it when they lose the value.
-func bootstrap(ctx context.Context, log *slog.Logger, args []string) error {
+func bootstrap(ctx context.Context, log *slog.Logger, args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 	project := flags.String("project", "default", "the project to create")
 	credentialName := flags.String("credential", "bootstrap", "the name of the first credential")
@@ -257,6 +257,7 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
+	printed := false
 	// The management surface needs an operator credential before anyone can speak to it,
 	// and bootstrap is the one path that exists before then; one is minted when none is live.
 	operators, err := operatorCredentials(ctx, admin)
@@ -268,12 +269,20 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string) error {
 		if err != nil {
 			return fmt.Errorf("mint the first operator credential: %w", err)
 		}
-		fmt.Printf("\noperator credential %s (%s) reaches the management surface and no project\n", grant.Name, grant.CredentialID)
-		fmt.Printf("operator token: %s\n", token)
+		fmt.Fprintf(out, "\noperator credential %s (%s) reaches the management surface and no project\n", grant.Name, grant.CredentialID)
+		fmt.Fprintf(out, "operator token: %s\n", token)
+		printed = true
 	}
 	if existing > 0 {
+		// The attribute carries the way out. An operator reaches this line on every upgrade, and
+		// on the first upgrade after installing it is the line that replaces the one holding the
+		// token they meant to copy — so it is the wrong place to say only that nothing happened.
 		log.Info("this project can already be reached; no credential minted",
-			"project", *project, "credentials", existing)
+			"project", *project, "credentials", existing,
+			"mint-another", "taisce credential issue <name> -project "+*project)
+		if printed {
+			fmt.Fprint(out, tokenAdvice(*project))
+		}
 		return nil
 	}
 
@@ -281,14 +290,32 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string) error {
 	if err != nil {
 		return fmt.Errorf("mint the first credential: %w", err)
 	}
-	// Printed to stdout rather than logged, so that it can be captured by a script without the log
-	// format getting in the way — and said once, because it is not recoverable.
-	fmt.Printf("\ncredential %s (%s) reaches project %s\n",
+	// Printed to the writer rather than logged, so that it can be captured by a script without the
+	// log format getting in the way — and said once, because it is not recoverable.
+	fmt.Fprintf(out, "\ncredential %s (%s) reaches project %s\n",
 		grant.Name, grant.CredentialID, grant.Project)
-	fmt.Printf("token: %s\n", token)
-	fmt.Print("\nThis token is shown once. Only its digest is stored, so it cannot be recovered — " +
-		"mint another if it is lost.\n\n")
+	fmt.Fprintf(out, "token: %s\n", token)
+	fmt.Fprint(out, tokenAdvice(*project))
 	return nil
+}
+
+// tokenAdvice is printed beside whatever tokens bootstrap just printed.
+//
+// Only digests are stored, which is what makes a stolen database useless for impersonation and is
+// also what makes a lost token unrecoverable. So the answer to losing one is not to keep a copy of
+// it somewhere — a token at rest is a token that can be read — but to mint a replacement through
+// the administrative connection, which is the one authority that outlives any credential. That is
+// cheap, and it is only cheap if the operator knows the command, which is why the command is here
+// rather than left for them to find at the moment they discover the loss.
+//
+// It does not cover the token itself: nothing printed here brings back what was shown once.
+func tokenAdvice(project string) string {
+	return "\nShown once: only digests are stored, so nothing above can be printed again. Copy it now.\n" +
+		"\nIf one is lost, mint a replacement rather than looking for it:\n" +
+		"  taisce operator issue <name>\n" +
+		"  taisce credential issue <name> -project " + project + "\n" +
+		"\nMinting a replacement does not revoke what was lost. taisce credential list names the\n" +
+		"credentials that exist, and taisce credential revoke <id> closes the one you no longer hold.\n\n"
 }
 
 // credentialsForProject counts the live credentials that grant a project.
