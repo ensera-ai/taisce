@@ -137,9 +137,28 @@ type portalHealth struct {
 	Parked           int64
 	WorkerResponsive bool
 	FailedAttempts   int64
-	Connections      int64
-	MaxConnections   int64
-	Headroom         int64
+	// LastFailureAt is when formation last failed, and FailuresCurrent is whether that failure is
+	// more recent than the last turn to form.
+	//
+	// The count on its own cannot answer the question an operator asks of it — whether formation is
+	// failing now — because it is a lifetime total that nothing resets. Marked on any non-zero
+	// value it stays marked for the life of the instance, which tells a failing instance apart from
+	// a recovered one not at all.
+	//
+	// Current is decided by comparing the two stamps the health row already holds, both written by
+	// the substrate's own clock, rather than by measuring the last failure against a window: a
+	// window needs a duration nobody here has measured, and an instance whose attempts are further
+	// apart than the window reads as healthy in the gaps between its failures. Comparing two stamps
+	// from one clock needs neither a duration nor a clock this process has to trust.
+	//
+	// What this does not cover: the health row is instance-wide, so a turn forming in any project
+	// clears the mark even while another project is still failing. Per-project currency would need
+	// a per-scope row, which this does not add.
+	LastFailureAt   *time.Time
+	FailuresCurrent bool
+	Connections     int64
+	MaxConnections  int64
+	Headroom        int64
 	// Tight is the judgement, made here rather than left to the reader: an operator scanning a page
 	// should not have to do arithmetic to notice they are nearly out of connections.
 	Tight bool
@@ -513,9 +532,15 @@ func (p *Portal) health(r *http.Request) *portalHealth {
 		return nil
 	}
 	headroom := health.ConnectionHeadroom()
+	// A missing progress stamp is not recovery: an instance where nothing has ever formed and
+	// attempts are failing is the worst case this tile exists for, so the absence counts as older
+	// than the failure rather than as nothing to report.
+	current := health.LastFailureAt != nil &&
+		(health.LastProgressAt == nil || health.LastFailureAt.After(*health.LastProgressAt))
 	return &portalHealth{
 		Pending: health.Pending, PendingLimit: health.PendingLimit, Parked: health.Parked,
 		WorkerResponsive: health.WorkerResponsive, FailedAttempts: health.FailedAttempts,
+		LastFailureAt: health.LastFailureAt, FailuresCurrent: current,
 		Connections: health.ClusterConnections, MaxConnections: health.MaxConnections,
 		Headroom:        headroom,
 		Tight:           headroom <= max64(10, health.MaxConnections/10),

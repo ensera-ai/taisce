@@ -62,6 +62,13 @@ life of the deployment and can be read by anyone who can read the namespace — 
 convenience that the two commands above already provide
 ([D15](../../docs/01-decisions.md)).
 
+**A role password is kept and a token is not, and the difference is who has to read it back.** The
+deployment itself presents `dataPassword` and `controlPassword` on every connection it opens, so
+something it can read has to hold them — which is the Secret **Removing it** below describes. Nobody
+in the deployment ever presents a token: the holder does, and the service compares a digest. So
+there is nothing a stored token would be read back *for*, and storing it would buy a convenience at
+the cost of a credential.
+
 **What this does not cover.** With `manage.enabled=false` there is no workload holding the
 administrative connection, so there is nothing to exec into: enable the management surface, mint,
 and disable it again. And nothing brings back the tokens themselves — they are gone, which is the
@@ -97,6 +104,40 @@ An existing database instead of the operator's: `postgresql.mode=external` with 
 Nothing, until asked. `ingress.api` publishes the memory routes. `ingress.portal` publishes the
 portal at `/portal` and is refused unless `manage.portal=on`, so an ingress can never point at the
 management surface's door by accident. The management surface itself is a ClusterIP service.
+
+## Removing it
+
+```sh
+helm uninstall memory -n taisce
+kubectl delete namespace taisce
+```
+
+Both steps, if the deployment is meant to be gone. The uninstall removes everything the chart
+created except one Secret, and says so as it goes:
+
+```
+These resources were kept due to the resource policy:
+[Secret] memory-taisce-credentials
+```
+
+That Secret holds `dataPassword` and `controlPassword`, the two role passwords generated on first
+install, and it is annotated `helm.sh/resource-policy: keep` deliberately. The reason is not the
+uninstall: the generated Secret leaves the release's manifest set the moment
+`credentials.existingSecret` is named or `postgresql.mode` becomes `external`, and without the
+annotation that upgrade would delete the passwords of a database that is still running.
+
+What the annotation costs is paid at removal. `controlPassword` is the role the write path uses, and
+a role's password belongs to the database rather than to the release, so it stays valid against any
+database that accepts that role — one restored from a backup of this deployment, or installed again
+into the same namespace, where the chart reads the Secret it finds rather than generating new
+passwords. An operator who uninstalls and stops there has left a working write credential in the
+cluster with nothing currently listening on it, which is the kind nobody thinks to rotate.
+`kubectl get all` does not list Secrets, so the obvious check for leftovers does not show it.
+Deleting the namespace is what removes it.
+
+Uninstalling in order to reinstall is the case the annotation is for, and it is the first command on
+its own. It leaves the passwords behind on purpose; this is a note about knowing which of the two
+states a cluster is in, not an argument for removing the annotation.
 
 ## The failover measurement
 
