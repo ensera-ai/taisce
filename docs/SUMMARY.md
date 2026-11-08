@@ -100,6 +100,7 @@
 - 28-anchor-query-plans.md
 - 31-vocabulary-coverage-ap-news.md
 - 36-extraction-models.md
+- 38-adapters-against-a-deployment.md
 -->
 
 # Reference
