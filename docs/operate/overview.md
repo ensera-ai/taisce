@@ -283,13 +283,17 @@ Six tiles, and a status that says which of them needs you first:
 | Formation backlog | Unfinished turns against the instance's admission limit (4,096 by default) | Near the limit, new turns are refused with `429 rate_limited`. See [the ingestion backlog](../06-ingestion-budget.md) |
 | Parked | Turns formation gave up on, across every project | Any at all: see [parked turns](#turns-that-failed-parked-turns) |
 | Worker | `answering` if a worker has reported in the last 330 seconds | `not answering` means formation has stopped, even though writes are still accepted |
-| Failed attempts | Formation attempts that have failed over the life of the instance: a running total kept in the database, so a restart does not reset it | Not the number, but whether it is still rising. A climbing count usually means the model is unreachable or refusing |
+| Failed attempts | Formation attempts that have failed over the life of the instance: a running total kept in the database, so a restart does not reset it, with the time of the last one beside it | Whether it is marked. It is marked only while the last failure is more recent than the last turn to form, which is what "still rising" means on a page you read once. A marked tile usually means the model is unreachable or refusing |
 | Connections | Database sessions in use across the whole PostgreSQL server | Watch it as you add workers and API replicas |
 | Headroom | Sessions left before PostgreSQL refuses a new one | Marked low at 10 sessions or a tenth of `max_connections`, whichever is larger. The next process to start may be refused |
 
-The status reads **Formation has stopped**, **Connections are low**, **Turns are parked**, or
-**Nothing needs attention**, in that order of urgency. The same numbers appear in the rail on every
-page as *Instance load*.
+The status reads **Formation has stopped**, **Connections are low**, **Formation is failing**,
+**Turns are parked**, or **Nothing needs attention**, in that order of urgency. The same numbers
+appear in the rail on every page as *Instance load*.
+
+One health row covers the instance, so **Formation is failing** clears as soon as a turn forms in any
+project, even if another project is still failing. A project stuck on its own shows up as *Behind by*
+and *Parked* in the projects table, not in this status.
 
 *What the model costs* says **Not recorded**, because no table holds a token count or a bill. The
 model gateway, when you run one, is where that number lives.
