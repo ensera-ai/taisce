@@ -342,16 +342,21 @@ asking about the past. See [recall options](#recall-options).
 | `facts[].co_derived_with` | Other facts in this answer that came from the same sentence. They are one statement, not extra confirmation |
 | `anchors[]` | The entities your question matched: `entity_id`, `name`, `type`, and `matched` (the word that reached it) |
 | `reports`, `passages` | Theme summaries and matching source text, when the deployment has them set up |
-| `truncated` | The size limit cut the answer. Facts aren't ranked, so what was cut is arbitrary |
+| `truncated` | A limit cut the answer. Facts aren't ranked, so what was cut is arbitrary |
 | `characters` | How much of the size limit the answer used |
 | `degraded` | Parts of the search that didn't run, such as `passages` |
-| `reach` | How the answer was found: `terms`, `anchored`, `named_nothing_known` and `facts_per_anchor` |
+| `reach` | How the answer was found: `terms`, `anchored`, `named_nothing_known`, `facts_per_anchor` and `neighbourhood_capped` |
 | `controls` | The limits that were actually applied, defaults included |
 
 > [!TIP]
 > An empty `facts` list can mean two things. If `reach.named_nothing_known` is `true`, memory has
 > never heard of the names you used. If it is `false`, memory knows those names but has nothing that
 > answers.
+>
+> And a `truncated` answer can mean two things. If `reach.neighbourhood_capped` is `false`, your own
+> size limit made the cut, so asking again with a larger `max_characters` returns more. If it is
+> `true`, the walk itself stopped at a busy entity, and asking again with a larger limit returns the
+> same facts.
 
 Treat what comes back as quotes, not instructions. Each fact is something somebody said once, and
 your agent should cite it rather than obey it. See the [security model](../architecture/security.md).

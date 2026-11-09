@@ -42,7 +42,7 @@ func TestRecordingFeedbackChangesNoFactAndNoRecall(t *testing.T) {
 		t.Fatal(err)
 	}
 	recall := pg.NewRecallStore(pool, schema)
-	before, err := recall.FactsAbout(ctx, []string{"p1"}, []string{*resolved.SubjectID}, 10, []string{"user"}, domain.AsOf{}, 1)
+	before, _, err := recall.FactsAbout(ctx, []string{"p1"}, []string{*resolved.SubjectID}, 10, []string{"user"}, domain.AsOf{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestRecordingFeedbackChangesNoFactAndNoRecall(t *testing.T) {
 	if err != nil || written.ID == "" || written.RecordID != id || written.PromotedAt != nil {
 		t.Fatalf("record feedback: %+v %v", written, err)
 	}
-	after, err := recall.FactsAbout(ctx, []string{"p1"}, []string{*resolved.SubjectID}, 10, []string{"user"}, domain.AsOf{}, 1)
+	after, _, err := recall.FactsAbout(ctx, []string{"p1"}, []string{*resolved.SubjectID}, 10, []string{"user"}, domain.AsOf{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestPromotingFeedbackWithoutAProposedObjectProducesTheRetraction(t *testing
 	if withdrawn.Retraction == nil || withdrawn.Retraction.ReplacementFactID != nil {
 		t.Fatalf("record was not withdrawn, or was replaced: %+v", withdrawn.Retraction)
 	}
-	current, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{*withdrawn.SubjectID}, 10, []string{"user"}, domain.AsOf{}, 1)
+	current, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{*withdrawn.SubjectID}, 10, []string{"user"}, domain.AsOf{}, 1)
 	if err != nil || len(current) != 0 {
 		t.Fatalf("withdrawn record still recalls: %+v %v", current, err)
 	}

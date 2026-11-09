@@ -46,7 +46,7 @@ into a vector, and that is the only model work on any read.
 | Operation | Route | Model work |
 |---|---|---|
 | Recall, exact path | `POST /v1/recalls` | None |
-| Recall, semantic surfaces | `POST /v1/recalls` | Up to three embedding calls of the question: one per surface that runs |
+| Recall, semantic surfaces | `POST /v1/recalls` | One embedding call of the question, however many surfaces run |
 | Passage search | `POST /v1/passages/search` | One embedding call |
 | Entity candidates | `POST /v1/entities/candidates` | One embedding call |
 | Report candidates | `POST /v1/reports/candidates` | One embedding call |
@@ -64,9 +64,23 @@ and recall runs the exact path alone ([semantic.go](../../internal/api/semantic.
 When the surfaces are on, each retriever
 ([`internal/entitycandidate`](../../internal/entitycandidate/),
 [`internal/reportcandidate`](../../internal/reportcandidate/) and
-[`internal/passage`](../../internal/passage/)) embeds the question itself, because each searches its
-own model space. A recall that runs all three surfaces therefore sends the same question to the
-embedding endpoint three times. Which surfaces run depends on the question; see
+[`internal/passage`](../../internal/passage/)) asks for the question's vector itself, because each
+searches its own generation and checks its own model identity before it does. The *generations* are
+separate; the model is not. A deployment configures one embedding model, so the three asks are three
+requests for the same vector from the same endpoint.
+
+**They are answered once.** Every admitted request carries one embedding scope
+([questionmemo.go](../../internal/infra/inference/questionmemo.go)), and within it a single input is
+embedded once per model and endpoint. The first surface to ask pays the round trip and the others are
+handed a copy. Nothing else changes: each surface still reads its own active generation, still builds
+its own identity, and every store still re-checks that identity inside the transaction that reads the
+vectors — so a surface whose generation was built on a different model asks for its own vector and
+refuses on its own terms.
+
+The scope is a request and nothing longer. A question held past the request would be a second place a
+caller's words live, with its own staleness and its own obligation under an erasure, to save a round
+trip that somebody else's question never makes. Two recalls of the same question share nothing, and
+batches — the write path's call, every entity in a scope — are not memoised at all. Which surfaces run depends on the question; see
 [composing surfaces under one budget](#composing-surfaces-under-one-budget).
 
 ## One recall, step by step
@@ -84,13 +98,13 @@ sequenceDiagram
     R->>R: expand the question into windows of up to four words
     R->>DB: one anchor query over canonical keys and the speaker
     alt no exact anchor and semantic surfaces configured
-        R->>M: embed the question
+        R->>M: embed the question (once for the whole request)
         R->>DB: entity candidates from the active generation
     end
     R->>DB: when anything anchored, one recursive fact walk with evidence
     R->>R: charge facts to the character budget, mark co-derivation
     opt reports when wanted, then passages while budget remains
-        R->>M: embed the question, once per surface
+        R->>M: the question's vector, already embedded
         R->>DB: candidates, then the stored report, children or messages
     end
     R-->>H: bundle
@@ -196,10 +210,18 @@ Each branch carries every boundary filter: project, source role, data subject, a
 is cut at `domain.Fanout` = 64 facts per direction, per entity, per hop, in fact-id order. Hops are
 clamped to 1–2 (`recall.MaxHops`), and a path may not revisit an entity already on it.
 
+**A branch reads one row past its cap, so the cut can be reported.** Sixty-four returned rows is what
+an entity with four hundred facts looks like and also what an entity with exactly sixty-four looks
+like, and the two call for different responses from a caller. So each branch asks for 65, keeps 64,
+and the row it drops is what sets `capped` on the rows it keeps. That flag is OR-ed across the whole
+walk — before the dedup, before the row limit and before the budget, because the question is what the
+*traversal* left behind — and it arrives as `truncated` plus `reach.neighbourhood_capped`.
+
 | Bound | Value | Where |
 |---|---|---|
 | Hops | 1 by default, 2 at most; clamped, not refused | `recall.DirectHop`, `recall.MaxHops` |
 | Fanout | 64 per direction, per entity, per hop | `domain.Fanout` |
+| Rows read per branch | `Fanout + 1` = 65; the extra row detects the cap | `domain.Fanout` |
 | Rows returned | `MaxRows + 1` = 201; the extra row detects truncation | `recall.DefaultBudget` |
 
 One hop is the default because a second hop costs every caller, and it brings in facts about things
@@ -246,6 +268,12 @@ allowance is never exceeded. A bundle whose first fact was too large comes back 
 The cut drops whatever comes last, not the least useful facts, because nothing has ranked them. That
 is why `truncated` exists: without it, a caller would read a cut as a verdict.
 
+Three different cuts set `truncated`: the row limit, this character budget, and the traversal's own
+fanout cap. The first two are the caller's own allowance, and asking again for more returns more. The
+third is a property of how busy an entity is, and asking again for more returns exactly the same
+facts — so it is also reported on its own, as `reach.neighbourhood_capped`, and a caller that retries
+on `truncated` alone would retry against a cut that cannot move.
+
 After the cut, and only over what survived it, `markCoDerived` lists facts extracted from the same
 message about the same subject in `co_derived_with`. Two such rows are one person saying one thing
 once, and a reader that counted them as corroboration would count one sentence twice.
@@ -261,10 +289,10 @@ once, and a reader that counted them as corroboration would count one sentence t
 | `facts[].evidence` | `observation_id`, `source_ordinal`, `quote`, `byte_start`, `byte_end`, `context`, `context_start`, `context_complete` |
 | `reports` | Community and report ids, title, summary, importance, similarity, level, parent, and the source observations the report was registered against |
 | `passages` | Chunk id, source id, ordinal, role, a quote of at most 512 characters, similarity, occurrence time, whether the quote is the whole message |
-| `truncated` | The row limit or the character budget cut something |
+| `truncated` | The row limit, the character budget, or the traversal's fanout cap cut something |
 | `characters` | What the returned content cost, in the unit it was cut in |
 | `degraded` | Parts of retrieval that did not run: `citation_context`, `semantic_anchors`, `reports`, `passages` |
-| `reach` | `terms` offered, `anchored` by exact match, `named_nothing_known`, `facts_per_anchor` |
+| `reach` | `terms` offered, `anchored` by exact match, `named_nothing_known`, `facts_per_anchor`, `neighbourhood_capped` |
 
 Arrays are present and empty rather than absent, so an empty surface can be told apart from one that
 did not run.
@@ -631,10 +659,12 @@ are separate; only the fact walk is one snapshot.
 - The anchor query is bounded by the candidate count and the 256-match refusal.
 - The walk carries at most 64 facts per direction per entity to the next hop, over at most two hops,
   so the rows *carried* depend on depth, not on corpus size.
-- The rows *read* at a busy entity are another matter. The fanout cut is `ORDER BY fact_id LIMIT 64`,
-  and none of the indexes a branch can use is ordered by fact id. So the planner reads every
-  qualifying fact of an entity before keeping 64. At a hub, the work of one hop grows with that
-  entity's number of facts. (This is inferred from the index definitions; it has not been measured.)
+- The rows *read* at a busy entity are bounded too, and that is measured rather than inferred.
+  `fact_subject_walk_idx` and `fact_object_walk_idx` are ordered so that a branch seeks them in
+  fact-id order and stops at the cap. `TestTheFanoutCapBoundsTheRowsAHubEntityIsReadFor` asserts it
+  with `EXPLAIN (ANALYZE)` against a hub named by 5,000 facts on each side among 50,000 facts about
+  something else: each walk index reads at most `Fanout + 1` rows, the one extra being the row that
+  detects the cap. So the work of one hop does not grow with that entity's number of facts.
 - The row limit and the character budget cut the answer, not the work: the final ordering needs the
   whole reachable set first.
 

@@ -1272,7 +1272,7 @@ func TestARecallReturnsWhatThePrincipalSaidAndNotWhatAToolAsserted(t *testing.T)
 	}
 
 	// The ordinary read.
-	spoken, err := store.FactsAbout(ctx, []string{"p1"}, []string{acme}, 50, []string{"user"}, domain.AsOf{}, 1)
+	spoken, _, err := store.FactsAbout(ctx, []string{"p1"}, []string{acme}, 50, []string{"user"}, domain.AsOf{}, 1)
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
@@ -1290,7 +1290,7 @@ func TestARecallReturnsWhatThePrincipalSaidAndNotWhatAToolAsserted(t *testing.T)
 
 	// The wider read, for a caller that genuinely wants what a tool asserted — and gets told which is
 	// which rather than a merged list.
-	all, err := store.FactsAbout(ctx, []string{"p1"}, []string{acme}, 50, []string{"user", "tool"}, domain.AsOf{}, 1)
+	all, _, err := store.FactsAbout(ctx, []string{"p1"}, []string{acme}, 50, []string{"user", "tool"}, domain.AsOf{}, 1)
 	if err != nil {
 		t.Fatalf("wide recall: %v", err)
 	}
@@ -1337,7 +1337,7 @@ func TestAnEmptySourceSetReturnsNothing(t *testing.T) {
 		t.Fatalf("find entity: %v", err)
 	}
 
-	got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{ensera}, 50, nil, domain.AsOf{}, 1)
+	got, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{ensera}, 50, nil, domain.AsOf{}, 1)
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
@@ -1445,7 +1445,7 @@ func TestACitationCarriesTheWordsAroundItAndNothingFromAnotherMessage(t *testing
 		`SELECT entity_id::text FROM {schema}.entity WHERE normalized_name = 'ensera'`)).Scan(&ensera); err != nil {
 		t.Fatalf("find entity: %v", err)
 	}
-	got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{ensera}, 10, []string{"user"}, domain.AsOf{}, 1)
+	got, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{ensera}, 10, []string{"user"}, domain.AsOf{}, 1)
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
@@ -1498,7 +1498,7 @@ func TestACitationCarriesTheWordsAroundItAndNothingFromAnotherMessage(t *testing
 		`SELECT entity_id::text FROM {schema}.entity WHERE normalized_name = 'dublin'`)).Scan(&dublin); err != nil {
 		t.Fatalf("find entity: %v", err)
 	}
-	whole, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{dublin}, 10, []string{"user"}, domain.AsOf{}, 1)
+	whole, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{dublin}, 10, []string{"user"}, domain.AsOf{}, 1)
 	if err != nil {
 		t.Fatalf("recall short: %v", err)
 	}
@@ -1565,7 +1565,7 @@ func TestContextIsNotReadFromAnotherProjectsMessage(t *testing.T) {
 		t.Fatalf("find entity: %v", err)
 	}
 
-	got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p2"}, []string{ensera}, 10, []string{"user"}, domain.AsOf{}, 1)
+	got, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p2"}, []string{ensera}, 10, []string{"user"}, domain.AsOf{}, 1)
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
@@ -1709,7 +1709,7 @@ func TestThreeQuestionsAboutOneSubjectGetThreeAnswers(t *testing.T) {
 	}
 	ask := func(at domain.AsOf) map[string]*time.Time {
 		t.Helper()
-		got, err := store.FactsAbout(ctx, []string{"p1"}, []string{user}, 50, []string{"user"}, at, 1)
+		got, _, err := store.FactsAbout(ctx, []string{"p1"}, []string{user}, 50, []string{"user"}, at, 1)
 		if err != nil {
 			t.Fatalf("read: %v", err)
 		}
@@ -1808,7 +1808,7 @@ func TestAHistoricalReadIsBoundedLikeTheCurrentOne(t *testing.T) {
 	}
 	store := pg.NewRecallStore(pool, schema)
 
-	spoken, err := store.FactsAbout(ctx, []string{"p1"}, []string{acme}, 50, []string{"user"},
+	spoken, _, err := store.FactsAbout(ctx, []string{"p1"}, []string{acme}, 50, []string{"user"},
 		domain.AsOf{Valid: april}, 1)
 	if err != nil {
 		t.Fatalf("historical read: %v", err)
@@ -1822,7 +1822,7 @@ func TestAHistoricalReadIsBoundedLikeTheCurrentOne(t *testing.T) {
 		}
 	}
 
-	elsewhere, err := store.FactsAbout(ctx, []string{"p2"}, []string{acme}, 50, []string{"user"},
+	elsewhere, _, err := store.FactsAbout(ctx, []string{"p2"}, []string{acme}, 50, []string{"user"},
 		domain.AsOf{Valid: april}, 1)
 	if err != nil {
 		t.Fatalf("historical read in another project: %v", err)
@@ -1831,7 +1831,7 @@ func TestAHistoricalReadIsBoundedLikeTheCurrentOne(t *testing.T) {
 		t.Fatalf("a historical read reached another project: %+v", elsewhere)
 	}
 
-	none, err := store.FactsAbout(ctx, []string{"p1"}, []string{acme}, 50, nil, domain.AsOf{Valid: april}, 1)
+	none, _, err := store.FactsAbout(ctx, []string{"p1"}, []string{acme}, 50, nil, domain.AsOf{Valid: april}, 1)
 	if err != nil {
 		t.Fatalf("historical read with no sources: %v", err)
 	}
@@ -1901,7 +1901,7 @@ func TestAFactRecordedAMomentAgoIsVisibleToAReadOfThePast(t *testing.T) {
 	}
 	// Immediately, with no wait: the read happens within the skew between the two clocks, which is
 	// where the defect lived.
-	got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{user}, 50,
+	got, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{user}, 50,
 		[]string{"user"}, domain.AsOf{Valid: april}, 1)
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -1956,7 +1956,7 @@ func TestASecondHopIsReachedOnlyWhenAskedForAndComesBackWithItsChain(t *testing.
 	store := pg.NewRecallStore(pool, schema)
 	ask := func(hops int) map[string]domain.CitedFact {
 		t.Helper()
-		got, err := store.FactsAbout(ctx, []string{"p1"}, []string{marta}, 50, []string{"user"},
+		got, _, err := store.FactsAbout(ctx, []string{"p1"}, []string{marta}, 50, []string{"user"},
 			domain.AsOf{}, hops)
 		if err != nil {
 			t.Fatalf("read at %d hops: %v", hops, err)
@@ -2062,7 +2062,7 @@ func TestTheSecondHopCarriesEveryBoundTheFirstOneDoes(t *testing.T) {
 	}
 	store := pg.NewRecallStore(pool, schema)
 
-	got, err := store.FactsAbout(ctx, []string{"p1"}, []string{marta}, 50, []string{"user"}, domain.AsOf{}, 2)
+	got, _, err := store.FactsAbout(ctx, []string{"p1"}, []string{marta}, 50, []string{"user"}, domain.AsOf{}, 2)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -2083,7 +2083,7 @@ func TestTheSecondHopCarriesEveryBoundTheFirstOneDoes(t *testing.T) {
 	}
 
 	// The project predicate, on the same read.
-	elsewhere, err := store.FactsAbout(ctx, []string{"p2"}, []string{marta}, 50, []string{"user"}, domain.AsOf{}, 2)
+	elsewhere, _, err := store.FactsAbout(ctx, []string{"p2"}, []string{marta}, 50, []string{"user"}, domain.AsOf{}, 2)
 	if err != nil {
 		t.Fatalf("read in another project: %v", err)
 	}
@@ -2129,7 +2129,7 @@ func TestATraversalDoesNotFollowACycle(t *testing.T) {
 		t.Fatalf("find entity: %v", err)
 	}
 
-	got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{marta}, 50,
+	got, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{marta}, 50,
 		[]string{"user"}, domain.AsOf{}, 2)
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -2285,7 +2285,7 @@ func TestAStoreThatCannotReadDoesNotReportAnEmptyMemory(t *testing.T) {
 	if _, err := recall.Anchors(ctx, []string{"p1"}, []string{"anything"}); err == nil {
 		t.Error("resolving anchors returned no error")
 	}
-	if _, err := recall.FactsAbout(ctx, []string{"p1"}, []string{"00000000-0000-0000-0000-000000000000"},
+	if _, _, err := recall.FactsAbout(ctx, []string{"p1"}, []string{"00000000-0000-0000-0000-000000000000"},
 		10, []string{"user"}, domain.AsOf{}, 1); err == nil {
 		t.Error("reading facts returned no error")
 	}

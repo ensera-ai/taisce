@@ -317,11 +317,13 @@ type Evidence struct {
 //
 // # Why this number, and what it costs
 //
-// Sixty-four either side of an entity, so one hop from one anchor reads at most 128 rows and two hops
+// Sixty-four either side of an entity, so one hop from one anchor reads at most 130 rows and two hops
 // at most about sixteen thousand — a bounded query on any corpus. What it costs is completeness at a
 // hub: a fact reachable only through the hundredth relation of a busy entity is not reached. That is
-// an arbitrary cut like the budget's, and the bundle says when it was made rather than pretending the
-// neighbourhood was smaller than it was.
+// an arbitrary cut like the budget's, and like the budget's it is reported: each branch reads one row
+// beyond the cap purely to tell reaching the cap from exactly filling it, the bundle's Truncated says
+// it was cut, and Reach.NeighbourhoodCapped says this cut did it rather than the caller's own budget.
+// The distinction matters because a budget is something the caller can raise and this is not.
 //
 // It is a constant because nothing has asked to vary it and because the number that would justify
 // changing it is a measurement nobody has taken yet — the corpus sizes in the scaling work are where
@@ -970,6 +972,19 @@ type Reach struct {
 	// FactsPerAnchor is how many facts each anchor contributed, keyed by entity id. Everything
 	// arriving from one anchor when several matched is the signature worth seeing.
 	FactsPerAnchor map[string]int
+	// NeighbourhoodCapped says the traversal's fanout cap took facts off at least one entity on the
+	// way, so the walk returned a bounded part of a busier neighbourhood.
+	//
+	// Truncated already says the bundle was cut. This says which cut, and the distinction decides
+	// what a caller should do next: a budget cut is the caller's own allowance, so asking again for
+	// more characters returns more facts, while a capped neighbourhood is a property of the entity,
+	// so asking again for more characters returns exactly the same ones. Without this, a caller
+	// doing the sensible thing on Truncated retries forever against a cut that cannot move.
+	//
+	// What it does not cover: a walk that returned no rows at all cannot report its cap, because the
+	// flag travels on the rows the traversal produced. An empty bundle says nothing about whether a
+	// neighbourhood was bounded.
+	NeighbourhoodCapped bool
 }
 
 // NamedNothingKnown reports that the question offered candidates and none of them are in this memory.

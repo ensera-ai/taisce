@@ -26,6 +26,10 @@ type walkPlanNode struct {
 // walk indexes the planner either reads every one of the hub's facts to sort them, or walks the primary
 // key in fact_id order discarding other entities' facts until the cap fills — and for a rarely named
 // entity that second plan reads the whole table. Either way the cap bounded the answer, not the work.
+//
+// The bound is the cap plus one row, and the extra row is the price of saying so: each branch asks
+// for one more than it may keep, so that reaching the cap is distinguishable from exactly filling it
+// and the bundle can report a neighbourhood it had to cut. One row per branch, per entity, per hop.
 func TestTheFanoutCapBoundsTheRowsAHubEntityIsReadFor(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
@@ -83,8 +87,8 @@ func TestTheFanoutCapBoundsTheRowsAHubEntityIsReadFor(t *testing.T) {
 		if !ok {
 			t.Fatalf("the traversal did not seek %s; it read the fact table through %v", index, read)
 		}
-		if rows > float64(domain.Fanout) {
-			t.Fatalf("%s read %v rows for a cap of %d", index, rows, domain.Fanout)
+		if rows > float64(domain.Fanout+1) {
+			t.Fatalf("%s read %v rows for a cap of %d and one row of signal", index, rows, domain.Fanout)
 		}
 	}
 }

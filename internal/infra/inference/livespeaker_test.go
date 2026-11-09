@@ -89,7 +89,7 @@ func TestLiveSpeakersAreBoundAcrossLanguagesAndCorrections(t *testing.T) {
 		if err != nil || count != 1 {
 			t.Fatalf("%s has %d current correctly bound residences: %v", subject, count, err)
 		}
-		bundle, err := pg.NewRecallStore(pool, schema).FactsAboutForSubject(ctx, []string{"p1"}, []string{}, 20, []string{"user"}, domain.AsOf{}, 2, subject)
+		bundle, _, err := pg.NewRecallStore(pool, schema).FactsAboutForSubject(ctx, []string{"p1"}, []string{}, 20, []string{"user"}, domain.AsOf{}, 2, subject)
 		if err != nil || len(bundle) != 0 {
 			t.Fatal("empty anchor read widened")
 		}

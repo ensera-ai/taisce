@@ -47,7 +47,7 @@ func TestEarlierKnowledgeRetainsItsOriginalValidity(t *testing.T) {
 		{"Current", "Amman", second, domain.AsOf{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{person}, 10, []string{"user"}, tc.at, 1)
+			got, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{person}, 10, []string{"user"}, tc.at, 1)
 			if err != nil {
 				t.Fatal(err)
 			}

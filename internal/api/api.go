@@ -30,6 +30,7 @@ import (
 	"github.com/ensera-ai/taisce/internal/credential"
 	"github.com/ensera-ai/taisce/internal/domain"
 	"github.com/ensera-ai/taisce/internal/entitycandidate"
+	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/notify"
 	"github.com/ensera-ai/taisce/internal/passage"
@@ -343,7 +344,11 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCtx, cancelRequest := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancelRequest()
-		r = r.WithContext(requestCtx)
+		// One request is one question, and a question that reaches three retrievers is embedded
+		// once. Scoped here rather than in the recall handler because this is the door every
+		// protected route passes, so a route added later cannot forget it — and because the request
+		// is the only thing that bounds how long a caller's question may be held.
+		r = r.WithContext(inference.WithQuestionMemo(requestCtx))
 		grant, ok := s.resolveGrant(w, r)
 		if !ok {
 			return
@@ -669,6 +674,10 @@ type reachPayload struct {
 	// and have nothing to say". Both produce an empty bundle and they are different answers.
 	NamedNothingKnown bool           `json:"named_nothing_known"`
 	FactsPerAnchor    map[string]int `json:"facts_per_anchor"`
+	// NeighbourhoodCapped separates the cut a caller can do something about from the one it cannot.
+	// `truncated` says the bundle was cut; this says the traversal's own fanout cap did it, so
+	// asking again with a larger budget returns the same facts rather than more of them.
+	NeighbourhoodCapped bool `json:"neighbourhood_capped"`
 }
 
 type anchorPayload struct {
@@ -823,6 +832,7 @@ func renderBundle(b domain.Bundle) recallResponse {
 		Reach: reachPayload{
 			Terms: b.Reach.Terms, Anchored: b.Reach.Anchored,
 			NamedNothingKnown: b.Reach.NamedNothingKnown(), FactsPerAnchor: perAnchor,
+			NeighbourhoodCapped: b.Reach.NeighbourhoodCapped,
 		},
 	}
 	for _, a := range b.Anchors {
