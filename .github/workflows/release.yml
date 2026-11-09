@@ -29,9 +29,26 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # The tag and VERSION have to agree before anything is built. VERSION holds the published
+      # minor line, and `scripts/version.sh current` labels every working-tree build from it — so a
+      # tag that does not match it releases vX.Y.0 while every build in between calls itself
+      # something else. That is #152: VERSION sat at 0.3 for two published lines and nothing noticed,
+      # because nothing compared them. This is the check that would have.
+      - name: The tag matches the version line
+        run: |
+          set -euo pipefail
+          line="$(tr -d '[:space:]' < VERSION)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "${line}.0" ]; then
+            echo "tag $GITHUB_REF_NAME does not match VERSION ${line}: expected v${line}.0" >&2
+            echo "either the tag is wrong, or VERSION was not bumped in the release commit" >&2
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches VERSION ${line}"
       - run: make db-up
       - run: make test COVER_PROFILE=coverage.out
       - run: go vet ./...
+      - run: make vuln
       - if: always()
         run: make db-down
 
