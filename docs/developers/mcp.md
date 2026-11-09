@@ -7,6 +7,12 @@ Coding agents such as Claude Code reach tools through the Model Context Protocol
 serves MCP at `/mcp` on the same API you already run, with the same project token. There's nothing
 extra to install on the server.
 
+This surface was last reviewed against MCP protocol revision 2026-07-28 on 9 November 2026. A test
+fails if an upgrade changes the revision the server negotiates, so a new revision is read before
+it reaches your agents. The list results carry the revision's caching hints as `ttlMs: 0` and
+`cacheScope: "private"`: a client should re-fetch each time, and no shared cache may serve one
+caller's list to another.
+
 ## Connect
 
 Every MCP client needs two things: the URL `https://<your deployment>/mcp`, and the header
