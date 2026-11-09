@@ -513,6 +513,7 @@ func TestEveryPortalActionRefusesATargetItCannotActOn(t *testing.T) {
 		{"issue with no label", "/portal/actions/issue", url.Values{"project": {"p1"}, "name": {""}}},
 		{"issue with a long label", "/portal/actions/issue", url.Values{"project": {"p1"}, "name": {strings.Repeat("x", 129)}}},
 		{"issue to a bad project", "/portal/actions/issue", url.Values{"project": {"P1"}, "name": {"ok"}}},
+		{"issue with an access the form does not offer", "/portal/actions/issue", url.Values{"project": {"p1"}, "name": {"ok"}, "access": {"admin"}}},
 		{"revoke a bad id", "/portal/actions/revoke", url.Values{"project": {"p1"}, "id": {"nope"}, "confirm": {"nope"}}},
 	}
 	for _, c := range cases {

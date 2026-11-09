@@ -20,7 +20,7 @@
 <div class="card-foot"><h3>Issue a credential</h3>
 <form class="row" method="post" action="/portal/actions/issue">{{template "guard" $.Guard}}<input type="hidden" name="project" value="{{.Name}}">
 <label class="field">Name<input name="name" maxlength="128" required autocomplete="off"></label>
-<label class="field">Access<select name="access"><option value="read_write">read and write</option><option value="read_only">read only</option></select></label>
+<label class="field">Access<select name="access"><option value="agent" selected>agent: everything but erasure and entity purge</option><option value="read_write">read and write, erasure included</option><option value="read_only">read only</option></select></label>
 <button class="btn btn-primary">{{template "i-plus"}}Issue</button></form>
 <p class="note" style="margin-top:14px">Revoking cannot be undone from here: the token is gone and every client holding it stops at once. Typing the identifier back is the confirmation, because a box people tick is a box people tick by accident. The token is not shown here and cannot be recovered afterwards. A token rendered into a page is a token in a screenshot, a scroll buffer and a printer queue; issue from the CLI when you need to hand one to somebody.</p></div>
 </section>

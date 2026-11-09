@@ -36,13 +36,27 @@ const Prefix = "tsk_"
 // otherwise get.
 var ErrUnknown = errors.New("credential does not resolve")
 
-// Access is the memory authority stored with a project credential.
+// Access is the memory authority stored with a project credential. The set is closed and ordered:
+// each level holds everything the one before it does.
 type Access string
 
 const (
-	ReadOnly  Access = "read_only"
+	// ReadOnly reads, recalls and exports, and changes nothing.
+	ReadOnly Access = "read_only"
+	// Agent is every memory operation except the two that destroy data irreversibly: erasing a
+	// person and purging an entity (D26). It is what an agent process holds, and the default for a
+	// credential issued without naming an authority.
+	Agent Access = "agent"
+	// ReadWrite is every memory operation, erasure included. It is what an application's own
+	// erasure path holds, and what the first credential a project is bootstrapped with carries.
 	ReadWrite Access = "read_write"
 )
+
+// Valid reports whether a is one of the three authorities. Anything else is refused, at issue and at
+// every resolve, so an unknown value stored by hand fails closed rather than meaning something.
+func (a Access) Valid() bool {
+	return a == ReadOnly || a == Agent || a == ReadWrite
+}
 
 // Grant carries the authenticated project and memory access mode, never caller-supplied authority.
 // Kind is which door a credential opens. A project credential opens one project's memory
@@ -144,7 +158,7 @@ func (s *Store) resolve(ctx context.Context, token string) (Grant, Kind, error) 
 		return Grant{}, "", fmt.Errorf("resolve credential: %w", err)
 	}
 	// Authority comes from the protected registry, never from the token format or request body.
-	if g.Access != ReadOnly && g.Access != ReadWrite {
+	if !g.Access.Valid() {
 		return Grant{}, "", ErrUnknown
 	}
 	return g, kind, nil
@@ -155,6 +169,10 @@ func (s *Store) resolve(ctx context.Context, token string) (Grant, Kind, error) 
 // The token is not recoverable afterwards, by us or by anyone with the database: only its digest is
 // stored. That is the property being bought, and it is why this returns the token rather than
 // writing it anywhere.
+//
+// It mints read_write. Its caller is the bootstrap, minting the first credential a project has: its
+// owner's, which the application's own erasure path holds. Every credential issued afterwards
+// through the CLI, the management surface or the portal defaults to Agent instead (D26).
 func (s *Store) Issue(ctx context.Context, name, project string) (string, Grant, error) {
 	return s.IssueWithAccess(ctx, name, project, ReadWrite)
 }
@@ -162,8 +180,8 @@ func (s *Store) Issue(ctx context.Context, name, project string) (string, Grant,
 // IssueWithAccess creates an explicitly restricted project credential. Access is registry metadata;
 // it is never taken from an HTTP request using that credential.
 func (s *Store) IssueWithAccess(ctx context.Context, name, project string, access Access) (string, Grant, error) {
-	if access != ReadOnly && access != ReadWrite {
-		return "", Grant{}, fmt.Errorf("credential access must be read_only or read_write")
+	if !access.Valid() {
+		return "", Grant{}, fmt.Errorf("credential access must be read_only, agent or read_write")
 	}
 	if strings.TrimSpace(name) == "" {
 		return "", Grant{}, fmt.Errorf("a credential needs a name, so a person can tell it from another")

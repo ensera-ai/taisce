@@ -150,13 +150,16 @@ and a grant separates the two.
 **Authorisation** runs next, before the body is read. `permitted` in
 [authorization.go](../../internal/api/authorization.go) allows every operation for a `read_write`
 credential. A `read_only` credential gets an explicit list of reads. `observe` is not on it, so a
-reader gets `403 forbidden`, and the attempt leaves an attributed ledger row. An unknown access mode
-is refused, and a new operation stays closed to readers until someone adds it to the list.
+reader gets `403 forbidden`, and the attempt leaves an attributed ledger row. An `agent` credential
+gets the reads and an explicit list of writes, which leaves out erasure, entity purge and notification
+endpoints (D26). An unknown access mode is refused, and a new operation stays closed to readers and to
+agent keys until someone adds it to a list.
 
 **What this does not cover.**
 
-- A `read_write` credential can write any turn into its project, under any `data_subject_id` and
-  any role label, until it is revoked.
+- A `read_write` or `agent` credential can write any turn into its project, under any
+  `data_subject_id` and any role label, until it is revoked. An `agent` key cannot erase, but it can
+  write turns that recall then returns.
 - The subject is the application's label for a person, not a verified identity.
 - Message roles are declared by the caller. Formation's speaker rule protects a person from a model's
   or a document's words only when the caller labelled those messages honestly.

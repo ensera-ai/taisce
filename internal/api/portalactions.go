@@ -206,9 +206,14 @@ func (p *Portal) issue(r *http.Request, _ credential.Grant) (string, string, err
 	if !validProjectName(name) || label == "" || len(label) > 128 {
 		return name, "", errInvalidPortalTarget
 	}
-	access := credential.ReadWrite
-	if r.PostFormValue("access") == "read_only" {
-		access = credential.ReadOnly
+	// An access the form did not offer is refused rather than read as some default: the select is
+	// the page's, and a value outside it was not chosen on the page.
+	access := credential.Access(r.PostFormValue("access"))
+	if r.PostFormValue("access") == "" {
+		access = credential.Agent
+	}
+	if !access.Valid() {
+		return name, "", errInvalidPortalTarget
 	}
 	// The token is deliberately not carried to the page. It is shown once, by the CLI, to whoever
 	// ran it; a token rendered into a browser page is a token in a screenshot, a scroll buffer and

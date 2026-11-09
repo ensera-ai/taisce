@@ -93,29 +93,95 @@ func runCase(ctx context.Context, client *apiClient, p *proxy, driver Driver, c 
 	}
 	p.begin(c.Faults, c.Context)
 	// A repeated turn is the same instruction sent again, as a retry would be: the driver is not
-	// told it is a repeat, because an application retrying is not told either.
+	// told it is a repeat, because an application retrying is not told either. A second turn, when
+	// the case has one, follows in the same subject and the same case, so in the same run.
+	//
+	// A store error on any turn is kept, not only the last one's: with a second turn, the turn that
+	// was refused is the one a last-wins report would throw away.
 	var report Report
-	for i := 0; i < max(1, c.Turn.Repeat); i++ {
-		if i > 0 && c.Turn.RepeatAfterMS > 0 {
-			select {
-			case <-time.After(time.Duration(c.Turn.RepeatAfterMS) * time.Millisecond):
-			case <-ctx.Done():
-				return result, ctx.Err()
+	var storeError string
+	turns := []Turn{c.Turn}
+	if c.Then != nil {
+		turns = append(turns, *c.Then)
+	}
+	for t, turn := range turns {
+		repeats := 1
+		if t == 0 {
+			repeats = max(1, turn.Repeat)
+		}
+		for i := 0; i < repeats; i++ {
+			if i > 0 && turn.RepeatAfterMS > 0 {
+				select {
+				case <-time.After(time.Duration(turn.RepeatAfterMS) * time.Millisecond):
+				case <-ctx.Done():
+					return result, ctx.Err()
+				}
+			}
+			report, err = driver.Run(ctx, Instruction{Case: c.Name, API: p.URL(), Token: client.token, DataSubjectID: subject, Turn: turn})
+			if err != nil {
+				return result, fmt.Errorf("driver: %w", err)
+			}
+			if storeError == "" {
+				storeError = report.StoreError
 			}
 		}
-		report, err = driver.Run(ctx, Instruction{Case: c.Name, API: p.URL(), Token: client.token, DataSubjectID: subject, Turn: c.Turn})
-		if err != nil {
-			return result, fmt.Errorf("driver: %w", err)
-		}
 	}
+	report.StoreError = storeError
 	recorded := p.recorded()
 	after, err := client.stored(ctx)
 	if err != nil {
 		return result, err
 	}
 	result.Failures = judge(c.Expect, report, recorded, after-before)
+	if c.Erase {
+		erased, err := driver.Run(ctx, Instruction{Case: c.Name, Action: ActionErase, API: p.URL(), Token: client.token, DataSubjectID: subject})
+		if err != nil {
+			return result, fmt.Errorf("driver: %w", err)
+		}
+		left, err := client.exported(ctx, subject)
+		if err != nil {
+			return result, err
+		}
+		result.Failures = append(result.Failures, judgeErasure(c.Expect, erased.Erasure, left)...)
+	}
 	result.Passed = len(result.Failures) == 0
 	return result, nil
+}
+
+// judgeErasure holds an erasure to its receipt and to the deployment. left is how many rows the
+// runner's own export found for the subject after the erasure.
+func judgeErasure(expect Expect, receipt *Erasure, left int) []string {
+	if expect.Erased == nil || !*expect.Erased {
+		return nil
+	}
+	var failures []string
+	fail := func(format string, args ...any) { failures = append(failures, fmt.Sprintf(format, args...)) }
+	if receipt == nil {
+		fail("the driver reported no erasure receipt: the residual count is the product, and an erasure that hands it to nobody has proved nothing")
+	} else {
+		if receipt.Error != "" {
+			fail("the client raised %q for an erasure the deployment completed clean", receipt.Error)
+		}
+		if !receipt.Clean {
+			fail("the receipt is not clean")
+		}
+		deleted := 0
+		for _, n := range receipt.Deleted {
+			deleted += n
+		}
+		if deleted == 0 {
+			fail("the receipt deleted nothing although the subject held a turn")
+		}
+		for kind, n := range receipt.Residual {
+			if n != 0 {
+				fail("the receipt reports %d %s still matching", n, kind)
+			}
+		}
+	}
+	if left != 0 {
+		fail("the deployment still exports %d row(s) for the subject after the erasure: a receipt the adapter reported is not one the deployment wrote", left)
+	}
+	return failures
 }
 
 // judge is the whole of what the suite asserts, in one place, so a reader can see every rule
@@ -329,6 +395,28 @@ func (c *apiClient) seed(ctx context.Context, subject string, seeds []Seed) erro
 		return fmt.Errorf("seeding refused (%d): %s", status, raw)
 	}
 	return nil
+}
+
+// exported is how many rows the deployment exports for a subject, across every section.
+func (c *apiClient) exported(ctx context.Context, subject string) (int, error) {
+	status, raw, err := c.post(ctx, "/v1/exports", map[string]any{"data_subject_id": subject})
+	if err != nil {
+		return 0, err
+	}
+	if status != http.StatusOK {
+		return 0, fmt.Errorf("export answered %d: %s", status, raw)
+	}
+	var e struct {
+		Rows map[string]int `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, n := range e.Rows {
+		total += n
+	}
+	return total, nil
 }
 
 // stored reads how many observations the project holds, as the freshness watermark's stored

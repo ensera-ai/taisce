@@ -438,21 +438,22 @@ func project(ctx context.Context, args []string) error {
 
 // credentialCommand mints and revokes credentials.
 func credentialCommand(ctx context.Context, args []string) error {
-	const usageLine = "usage: taisce credential issue <name> [-project <name>] [--read-only] | list [-project <name>] | revoke <id>"
+	const usageLine = "usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write] | list [-project <name>] | revoke <id>"
 	if len(args) == 0 {
 		return errors.New(usageLine)
 	}
 	// Every argument is checked before connecting, so a mistyped command fails without opening the
 	// administrative connection.
 	var name, project string
-	var readOnly bool
+	var access credential.Access
 	switch args[0] {
 	case "issue":
 		flags := flag.NewFlagSet("issue", flag.ContinueOnError)
 		projectFlag := flags.String("project", "default", "the project this credential reaches")
-		readOnlyFlag := flags.Bool("read-only", false, "allow reads and exports, but no memory mutations")
+		accessFlag := flags.String("access", "", accessFlagHelp)
+		readOnlyFlag := flags.Bool("read-only", false, "the same as --access read_only")
 		if len(args) < 2 {
-			return fmt.Errorf("usage: taisce credential issue <name> [-project <name>] [--read-only]")
+			return fmt.Errorf("usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write]")
 		}
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
@@ -460,7 +461,11 @@ func credentialCommand(ctx context.Context, args []string) error {
 		if flags.NArg() != 0 {
 			return fmt.Errorf("unexpected credential arguments; flags must follow the credential name")
 		}
-		name, project, readOnly = args[1], *projectFlag, *readOnlyFlag
+		var err error
+		if access, err = issuedAccess(*accessFlag, *readOnlyFlag); err != nil {
+			return err
+		}
+		name, project = args[1], *projectFlag
 	case "list":
 		flags := flag.NewFlagSet("list", flag.ContinueOnError)
 		projectFlag := flags.String("project", "", "the project whose credentials to list; empty lists the operator credentials")
@@ -497,10 +502,6 @@ func credentialCommand(ctx context.Context, args []string) error {
 		// management surface refuses it.
 		if err := requireActiveProject(ctx, admin, project); err != nil {
 			return err
-		}
-		access := credential.ReadWrite
-		if readOnly {
-			access = credential.ReadOnly
 		}
 		token, grant, err := store.IssueWithAccess(ctx, name, project, access)
 		if err != nil {
@@ -681,4 +682,27 @@ func reportVerification(v domain.AuditVerification) error {
 		fmt.Printf("\n%d entries written since the last seal are covered by nothing.\n", v.Unsealed)
 	}
 	return nil
+}
+
+const accessFlagHelp = "read_only, agent or read_write; agent, the default, does everything but erase a person or purge an entity"
+
+// issuedAccess is the authority a credential is issued with from the command line. Naming none is
+// agent, not read_write (D26): a key is most often minted for a process that runs a model, and the
+// default is the one that cannot destroy anything. --read-only predates --access and is kept so a
+// script that used it keeps working; given beside a different --access it is refused rather than one
+// of them silently winning.
+func issuedAccess(access string, readOnly bool) (credential.Access, error) {
+	if readOnly {
+		if access != "" && access != string(credential.ReadOnly) {
+			return "", fmt.Errorf("--read-only and --access %s disagree; give one", access)
+		}
+		return credential.ReadOnly, nil
+	}
+	if access == "" {
+		return credential.Agent, nil
+	}
+	if a := credential.Access(access); a.Valid() {
+		return a, nil
+	}
+	return "", fmt.Errorf("--access must be read_only, agent or read_write, not %q", access)
 }
