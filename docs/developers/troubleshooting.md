@@ -249,8 +249,8 @@ curl -sS -X POST localhost:8081/manage/v1/refusals/summary \
 ```
 
 The reasons are `unmapped_relation`, `unlocatable_quote`, `duplicate_claim`, `not_asserted`,
-`unresolvable_subject`, `not_current`, `conflicting_value`, `not_spoken_by_principal` and
-`entity_name_limit`. A few
+`unresolvable_subject`, `unresolvable_object`, `not_current`, `conflicting_value`,
+`not_spoken_by_principal` and `entity_name_limit`. A few
 refusals are normal. If nearly everything is `unlocatable_quote` or `unmapped_relation`, the model
 is paraphrasing instead of quoting, or making up relations.
 
