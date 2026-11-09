@@ -30,17 +30,40 @@ postgresql:
     storage:
       size: 250Gi
       storageClass: ""
-    sharedMemory: 4Gi
+    # The shared-memory volume. Empty derives it from the memory limit, at an eighth — which is
+    # always twice maintenance_work_mem, the bound a parallel index build needs it to clear.
+    sharedMemory: ""
+    # The size of the database, and the one number the parameters below follow.
+    #
+    # Large on purpose. A chart that is small by default is one somebody runs in production
+    # believing it was the large one, and that is the worse failure. It does mean the default
+    # topology needs 6 CPUs and 750Gi of reservable capacity across three instances, which an
+    # ordinary cluster carrying other work does not have spare: values-small.yaml is the shape that
+    # fits one, and it changes these two blocks and nothing else, because shared_buffers,
+    # effective_cache_size, maintenance_work_mem, max_wal_size and the shared-memory volume are
+    # derived from the limit rather than written beside it.
     resources:
       requests: {cpu: "2", memory: 8Gi}
       limits: {memory: 32Gi}
+    # What is not a fraction of the memory limit. Stating any of the derived four here overrides it.
     parameters:
-      shared_buffers: 8GB
-      effective_cache_size: 22GB
+      # Memory per sort, so it follows how many queries run at once rather than how much memory the
+      # server has.
       work_mem: 16MB
-      maintenance_work_mem: 2GB
       max_connections: "200"
-      max_wal_size: 16GB
+      # How long a connection whose peer has stopped answering is kept.
+      #
+      # Formation holds a session advisory lock for the whole drain of a scope, which spans a model
+      # call per turn, and a session lock is released only when its session ends. So "the holder has
+      # gone" is a question only the database answers, and it answers it by noticing the connection
+      # is dead. Left at 0 that is the operating system's default — on Linux about two hours and
+      # eleven minutes — during which every other worker asking for that scope is refused and the
+      # project forms nothing. A process dying releases its lock at once, because the kernel on its
+      # node closes the socket; this is for the node going away, which is the failure several
+      # replicas exist to survive. The interval and count stay the operating system's: one idle
+      # bound is what moves the detection window from hours to minutes. Raise it on a network where
+      # a healthy peer can be silent for longer than this.
+      tcp_keepalives_idle: "60"
       wal_compression: "on"
       track_io_timing: "on"
   external:
@@ -66,6 +89,21 @@ api:
   replicas: 2
   requireFormation: true
   bundleCharacters: ""
+  # What one API replica may open against the database, and so what it will serve at once.
+  #
+  # Admission bounds concurrent work at one less than the memory pool, half of that for any one
+  # project and half again for any one credential. At 12 that is eleven requests at once per
+  # replica, five per project, two per credential, and two concurrent authentications from the
+  # registry pool. Those are the numbers this deployment states; left unset they would be whatever
+  # the node's CPU count happens to be, which is a load-shedding bound nobody chose.
+  #
+  # Raising these raises what one replica serves and what the database must have slots for. Work it
+  # out before scaling replicas: the demand is api.replicas × (memoryPool + registryPool) +
+  # worker.replicas × worker.memoryPool + manage.adminPool, and it has to fit inside
+  # postgresql.cnpg.parameters.max_connections with headroom for operators and migrations. At these
+  # defaults it is 38 of 200. A process whose own pool does not fit refuses to start and says so.
+  memoryPool: 12
+  registryPool: 2
   resources:
     requests: {cpu: 250m, memory: 256Mi}
     limits: {memory: 1Gi}
@@ -75,6 +113,9 @@ api:
 worker:
   replicas: 2
   turnBudget: 5m
+  # A worker forms one turn at a time and resolves no credentials, so it needs a fraction of what
+  # the API does and is given no registry connection at all.
+  memoryPool: 4
   resources:
     requests: {cpu: 250m, memory: 256Mi}
     limits: {memory: 1Gi}
@@ -84,6 +125,10 @@ worker:
 manage:
   enabled: true
   portal: "off"
+  # The ops centre serves from the administrative connection for the life of the pod, so it carries a
+  # stated ceiling like the API. Three is the floor admission accepts; the surface answers one reader
+  # at a time and has no concurrency to size for.
+  adminPool: 3
   resources:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {memory: 512Mi}

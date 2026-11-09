@@ -12,65 +12,145 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "taisce.credentialsSecret" -}}{{ .Values.credentials.existingSecret | default (printf "%s-credentials" (include "taisce.name" .)) }}{{- end -}}
 {{/* Where the runtime roles connect: the operator's read-write service, or the external secret. */}}
 {{- define "taisce.dbHost" -}}{{ include "taisce.db" . }}-rw{{- end -}}
+{{/* How many connections a pool may open, appended to a DSN.
+
+     pgx sizes a pool it is not told about at the number of CPUs the process can see. In a cluster
+     that is a property of whichever node the scheduler picked, so the same release declares one
+     ceiling on a 4-CPU node and eight times that on a 32-CPU one — and for the API the ceiling is
+     not only a cache setting, because admission bounds concurrent work at one less than the memory
+     pool. A bound nobody chose is not a bound. So every DSN this chart builds says what it may open.
+
+     The external mode takes its DSNs from a secret the operator wrote, and this chart cannot append
+     to a value it never sees: there the ceilings are the operator's to set, and the README says so. */}}
+{{- define "taisce.pool" -}}{{ printf "&pool_max_conns=%d" (int .) }}{{- end -}}
 {{/* The registry connection, for the roles that authenticate. A worker resolves no credentials, so it
-     is never given the login that can read them. */}}
+     is never given the login that can read them.
+
+     Takes a dict: root is the chart context, pool is this role's registry ceiling. A parameter
+     rather than one shared number because the roles do different work against this database, and a
+     single default wide enough for the busiest would be carried by every replica of the others. */}}
 {{- define "taisce.registryEnv" -}}
-{{- if eq .Values.postgresql.mode "external" }}
+{{- $root := .root -}}
+{{- if eq $root.Values.postgresql.mode "external" }}
 - name: TAISCE_REGISTRY_DSN
-  valueFrom: {secretKeyRef: {name: {{ .Values.postgresql.external.existingSecret | quote }}, key: registryDSN}}
+  valueFrom: {secretKeyRef: {name: {{ $root.Values.postgresql.external.existingSecret | quote }}, key: registryDSN}}
 {{- else }}
 - name: TAISCE_CONTROL_PASSWORD
-  valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" . | quote }}, key: controlPassword}}
+  valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" $root | quote }}, key: controlPassword}}
 - name: TAISCE_REGISTRY_DSN
-  value: "postgres://taisce_control:$(TAISCE_CONTROL_PASSWORD)@{{ include "taisce.dbHost" . }}:5432/taisce?sslmode=require"
+  value: "postgres://taisce_control:$(TAISCE_CONTROL_PASSWORD)@{{ include "taisce.dbHost" $root }}:5432/taisce?sslmode=require{{ include "taisce.pool" .pool }}"
 {{- end }}
 {{- end -}}
-{{/* The environment every serving role shares (compose.yaml's x-service-env, in cluster form). */}}
+{{/* The environment every serving role shares, as one definition rather than a copy per role: a
+     connection string that drifted between them would be a defect nobody sees until one half is
+     talking to the wrong database.
+
+     Takes a dict: root is the chart context, pool is this role's memory ceiling. */}}
 {{- define "taisce.serviceEnv" -}}
+{{- $root := .root -}}
 - name: TAISCE_SCHEMA
-  value: {{ .Values.schema | quote }}
-{{- if eq .Values.postgresql.mode "external" }}
+  value: {{ $root.Values.schema | quote }}
+{{- if eq $root.Values.postgresql.mode "external" }}
 - name: TAISCE_MEMORY_DSN
-  valueFrom: {secretKeyRef: {name: {{ .Values.postgresql.external.existingSecret | quote }}, key: memoryDSN}}
+  valueFrom: {secretKeyRef: {name: {{ $root.Values.postgresql.external.existingSecret | quote }}, key: memoryDSN}}
 {{- else }}
 - name: TAISCE_DATA_PASSWORD
-  valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" . | quote }}, key: dataPassword}}
+  valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" $root | quote }}, key: dataPassword}}
 - name: TAISCE_MEMORY_DSN
-  value: "postgres://taisce_data:$(TAISCE_DATA_PASSWORD)@{{ include "taisce.dbHost" . }}:5432/taisce?sslmode=require"
+  value: "postgres://taisce_data:$(TAISCE_DATA_PASSWORD)@{{ include "taisce.dbHost" $root }}:5432/taisce?sslmode=require{{ include "taisce.pool" .pool }}"
 {{- end }}
 - name: TAISCE_INFERENCE_ENDPOINT
-  value: {{ .Values.inference.endpoint | quote }}
+  value: {{ $root.Values.inference.endpoint | quote }}
 - name: TAISCE_INFERENCE_EXTRACTOR_MODEL
-  value: {{ .Values.inference.extractorModel | quote }}
+  value: {{ $root.Values.inference.extractorModel | quote }}
 - name: TAISCE_INFERENCE_ALLOWLIST
-  value: {{ .Values.inference.allowlist | quote }}
-{{- if .Values.inference.apiKeySecret }}
+  value: {{ $root.Values.inference.allowlist | quote }}
+{{- if $root.Values.inference.apiKeySecret }}
 - name: TAISCE_INFERENCE_API_KEY
-  valueFrom: {secretKeyRef: {name: {{ .Values.inference.apiKeySecret | quote }}, key: apiKey}}
+  valueFrom: {secretKeyRef: {name: {{ $root.Values.inference.apiKeySecret | quote }}, key: apiKey}}
 {{- end }}
 - name: TAISCE_INFERENCE_EMBEDDING_ENDPOINT
-  value: {{ .Values.inference.embedding.endpoint | quote }}
+  value: {{ $root.Values.inference.embedding.endpoint | quote }}
 - name: TAISCE_INFERENCE_EMBEDDING_MODEL
-  value: {{ .Values.inference.embedding.model | quote }}
+  value: {{ $root.Values.inference.embedding.model | quote }}
 - name: TAISCE_INFERENCE_EMBEDDING_REVISION
-  value: {{ .Values.inference.embedding.revision | quote }}
-{{- if .Values.inference.embedding.apiKeySecret }}
+  value: {{ $root.Values.inference.embedding.revision | quote }}
+{{- if $root.Values.inference.embedding.apiKeySecret }}
 - name: TAISCE_INFERENCE_EMBEDDING_API_KEY
-  valueFrom: {secretKeyRef: {name: {{ .Values.inference.embedding.apiKeySecret | quote }}, key: apiKey}}
+  valueFrom: {secretKeyRef: {name: {{ $root.Values.inference.embedding.apiKeySecret | quote }}, key: apiKey}}
 {{- end }}
 {{- end -}}
 {{/* The administrative connection, the database owner with CREATEROLE: only bootstrap and the
-manage role hold it. */}}
+manage role hold it.
+
+Takes a dict: root is the chart context, pool is this role's admin ceiling. The ops centre serves
+from this connection for the life of the pod, so it needs a stated ceiling as much as the API does;
+bootstrap runs its statements in order and exits, and is given the floor the admission gate accepts
+rather than a knob nobody would turn. */}}
 {{- define "taisce.adminEnv" -}}
-{{- if eq .Values.postgresql.mode "external" }}
+{{- $root := .root -}}
+{{- if eq $root.Values.postgresql.mode "external" }}
 - name: TAISCE_ADMIN_DSN
-  valueFrom: {secretKeyRef: {name: {{ .Values.postgresql.external.existingSecret | quote }}, key: adminDSN}}
+  valueFrom: {secretKeyRef: {name: {{ $root.Values.postgresql.external.existingSecret | quote }}, key: adminDSN}}
 {{- else }}
 - name: PGPASSWORD_ADMIN
-  valueFrom: {secretKeyRef: {name: {{ include "taisce.db" . }}-app, key: password}}
+  valueFrom: {secretKeyRef: {name: {{ include "taisce.db" $root }}-app, key: password}}
 - name: TAISCE_ADMIN_DSN
-  value: "postgres://taisce_admin:$(PGPASSWORD_ADMIN)@{{ include "taisce.dbHost" . }}:5432/taisce?sslmode=require"
+  value: "postgres://taisce_admin:$(PGPASSWORD_ADMIN)@{{ include "taisce.dbHost" $root }}:5432/taisce?sslmode=require{{ include "taisce.pool" .pool }}"
 {{- end }}
+{{- end -}}
+{{/* The database's memory limit, in MiB.
+
+     Refuses a unit it cannot read rather than guessing. Every parameter below is a fraction of this
+     number, so a quantity misread by a factor of 1024 would configure a database to reserve more
+     shared memory than its container allows and it would not start — a failure whose cause is this
+     line and whose symptom is somewhere else entirely. Gi and Mi are what a database limit is
+     written in; anything else is told so. */}}
+{{- define "taisce.dbMemoryMi" -}}
+{{- $v := .Values.postgresql.cnpg.resources.limits.memory | toString -}}
+{{- if hasSuffix "Gi" $v -}}
+{{- mul (trimSuffix "Gi" $v | int) 1024 -}}
+{{- else if hasSuffix "Mi" $v -}}
+{{- trimSuffix "Mi" $v | int -}}
+{{- else -}}
+{{- fail (printf "postgresql.cnpg.resources.limits.memory is %q: write it in Gi or Mi, because the database's shared_buffers, effective_cache_size, maintenance_work_mem, max_wal_size and shared-memory volume are all derived from it and a unit this chart cannot read would derive them wrongly." $v) -}}
+{{- end -}}
+{{- end -}}
+{{/* The PostgreSQL parameters that are fractions of the memory limit, and nothing else.
+
+     These four were written for the 32Gi limit they sat beside in values.yaml. Lowering the limit on
+     its own left a database configured to reserve more than its container allowed, which does not
+     start — and the README's own instructions for shrinking the deployment changed the replica counts
+     and nothing else, so a reader following them had no reason to expect it. A parameter an operator
+     must remember to change in step with another is the kind of rule that gets broken under pressure,
+     so the arithmetic is here and the two cannot disagree.
+
+     The fractions reproduce the previous defaults exactly at 32Gi: a quarter for shared_buffers,
+     eleven sixteenths for the cache estimate, a sixteenth for maintenance_work_mem, a half for
+     max_wal_size. An operator who states one of these in `parameters` still wins: these are the
+     defaults underneath, not a ceiling over the top.
+
+     work_mem is not here. It is memory per sort, so it scales with how many queries run at once
+     rather than with how much memory the server has, and deriving it from the limit would tie it to
+     the wrong number. */}}
+{{- define "taisce.derivedParameters" -}}
+{{- $mi := include "taisce.dbMemoryMi" . | int -}}
+shared_buffers: {{ printf "%dMB" (div (mul $mi 25) 100) | quote }}
+effective_cache_size: {{ printf "%dMB" (div (mul $mi 11) 16) | quote }}
+maintenance_work_mem: {{ printf "%dMB" (div $mi 16) | quote }}
+max_wal_size: {{ printf "%dMB" (div $mi 2) | quote }}
+{{- end -}}
+{{/* The shared-memory volume, derived unless an operator states it.
+
+     An eighth of the limit, which is twice maintenance_work_mem at every limit: parallel index
+     builds put their work there, so a volume smaller than that bound is one an index build fails in.
+     Keeping it a fraction of the same number keeps that relation true without anyone maintaining it. */}}
+{{- define "taisce.sharedMemory" -}}
+{{- if .Values.postgresql.cnpg.sharedMemory -}}
+{{- .Values.postgresql.cnpg.sharedMemory -}}
+{{- else -}}
+{{- printf "%dMi" (div (include "taisce.dbMemoryMi" . | int) 8) -}}
+{{- end -}}
 {{- end -}}
 {{- define "taisce.securityContext" -}}
 runAsNonRoot: true

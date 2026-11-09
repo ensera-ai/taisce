@@ -105,12 +105,21 @@ the same layout a real deployment uses. It also lets you scale the workers when 
 or stop them during a provider incident while reads keep answering.
 
 **Every pool size is set in its DSN.** A pool with no size defaults to the machine's CPU count, and
-several processes could then ask for more connections than the database has. The compose file sets
+several processes could then ask for more connections than the database has. In a cluster that
+default is worse than arbitrary: it is a property of whichever node the scheduler picked, so one
+release declares a different ceiling on every node it lands on. The compose file sets
 `pool_max_conns` per role:
 
 - the API: 8 memory and 2 registry connections (`TAISCE_MEMORY_POOL`, `TAISCE_REGISTRY_POOL`);
 - each worker: 4 memory connections (`TAISCE_WORKER_MEMORY_POOL`) and no registry connection. A
   worker resolves no credentials, so it is not given the login that can read them.
+
+The chart sets the same thing on every connection string it builds, as values: `api.memoryPool` at
+12 and `api.registryPool` at 2, `worker.memoryPool` at 4, `manage.adminPool` at 3, and 3 for the
+bootstrap Job. It also refuses to render when the sum, plus 25% headroom, does not fit the
+`max_connections` it declares beside it — the per-process check below catches a server that is
+already full, but pools fill lazily, so a release that over-declares starts cleanly and fails later
+([D17](../01-decisions.md)).
 
 Each process refuses to start if the database cannot satisfy its pool (see the
 [sizing connections](../21-production-postgresql.md#sizing-connections)). The API also needs at least

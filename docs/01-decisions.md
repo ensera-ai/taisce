@@ -789,6 +789,222 @@ adapter that hands a model a context no longer hands it an empty one for a subje
 newer than the worker backlog. Operations: a deployment whose model is unreachable keeps serving
 contexts from stored text instead of serving empty ones.
 
+## D17 — Every connection the chart builds states what it may open, and a release that over-declares is refused before it is applied
+
+**Date.** 2026-11-08. **Issue.** [#101](https://github.com/ensera-ai/taisce/issues/101).
+
+**Why it was open.** Every DSN the chart built omitted `pool_max_conns`. A pool told nothing sizes
+itself at the number of CPUs the process can see, so each pod's connection ceiling was decided by
+whichever node the scheduler put it on. Measured on a three-node cluster of 32, 12 and 4 CPUs: the
+three API replicas behind one Service admitted **31, 11 and 3** concurrent requests, because
+admission bounds work at one less than the memory pool. Which replica the Service picked decided
+whether a request was served or shed. A load-shedding bound that is a property of scheduling is not a
+bound anybody chose.
+
+The second half is that nothing could notice. Each process compares its own pool against the slots
+currently free and refuses to start when it is short, which catches a server that is already full.
+Pools fill lazily, so at install every pod sees a nearly empty database and starts cleanly — seven
+processes started here reporting 185 to 196 slots free while using 11. The sum of the declared
+ceilings was compared against nothing, so over-declaration was invisible at install and would arrive
+later as connection refusals on a deployment that came up green.
+
+**Decided.**
+- Each role carries its own ceiling as a value, on every connection string the chart builds:
+  `api.memoryPool` 12, `api.registryPool` 2, `worker.memoryPool` 4, `manage.adminPool` 3, and 3 for
+  the bootstrap Job. The API's is the top of the range this project's own sizing document gives,
+  because the chart is the several-replica deployment and the API's pool is what admission follows:
+  at 12 a replica serves eleven requests at once, five per project, two per credential.
+- A ceiling per role rather than one shared number. The roles do different work against this
+  database — a worker forms one turn at a time and resolves no credentials — and a single default
+  wide enough for the busiest would be carried by every replica of the others.
+- **The chart refuses to render when the declared demand, plus the 25% headroom the sizing document
+  asks for, does not fit the `max_connections` it declares beside it.** The refusal names both
+  numbers and what would satisfy it. Refused rather than warned, because a warning printed by
+  `helm upgrade` is read after the fact and this is cheaper to correct before anything is applied.
+- `deploy/helm/limits_test.go` finds every connection string in the rendering with a pattern rather
+  than a list, so a role added later without a ceiling fails there; and it holds the refusal, the
+  per-role values, and that raising one does not move the others.
+
+**Rejected: deriving the pool from the container's CPU limit.** It keeps the ceiling a property of
+configuration rather than of the node, and it needs no new values. It also keeps the number implicit,
+so the admission bound is still something a reader computes from two other settings rather than one
+the deployment states — and it ties request concurrency to a CPU limit that is set for a different
+reason.
+
+**Rejected: one pool value for every role.** Fewer knobs, and wrong in both directions at once: the
+API's pool is an admission bound and the worker's is a queue depth for one turn at a time. Sized for
+the API it multiplies the workers' demand against the database for nothing.
+
+**Rejected: a warning instead of a refusal.** It would let an operator who means to over-declare
+proceed. Nothing in this deployment benefits from over-declaring: the failure it buys is connection
+refusals under load, on a release that installed cleanly, which is the hardest kind to attribute.
+
+**Rejected: checking the sum at runtime instead.** A process can only see the slots that are free
+now, which is why the existing check cannot catch this. Counting sibling processes would mean a
+process that knows the topology, which is a coupling the deployment does not otherwise have.
+
+**What this does not cover.**
+- With `postgresql.mode=external` the DSNs come from a secret the chart never reads, so neither the
+  ceilings nor the arithmetic apply there. They are the operator's to put in those strings, and the
+  chart README says so.
+- The numbers are a starting point from this project's sizing document, not a measurement. No
+  latency or throughput figure stands behind 12 rather than 8 or 16, and the honest number comes
+  from hardware that can be held still.
+- The refusal arithmetic counts the processes this chart declares. An operator who runs something
+  else against the same database — a pooler, a monitoring session, a migration from a laptop — is
+  spending the headroom the 25% leaves, and nothing here can see that.
+
+**Undo cost.** Low. Four values, one printf in a template, and a test. No schema change and nothing
+stored; reverting changes what the next render produces and leaves every running deployment as it is.
+
+**Impact.** Operations: the number of requests a replica serves at once is stated by the deployment
+rather than by the node it landed on, and a topology the database cannot support is refused at render
+rather than discovered under load. Performance: the admission bound stops moving between replicas, so
+shedding becomes a property of the configuration.
+
+## D18 — A dead peer is given up on by the database's keepalive, and formation's lock is not given a lease
+
+**Date.** 2026-11-08. **Issue.** [#106](https://github.com/ensera-ai/taisce/issues/106).
+
+**Why it was open.** Formation holds a session advisory lock for the whole drain of a scope. That is
+the right shape — the drain spans a model call per turn, and a lock released at the end of the
+transaction that picks a turn would be released before the call it exists to protect. A session lock
+has one property a lease does not: it is released when the session ends and by nothing else. So "the
+holder has gone" is a question only the database can answer, and it answers it by noticing the
+connection is dead.
+
+Nothing in the deployment bounded how long that took. The installed cluster had
+`tcp_keepalives_idle`, `tcp_keepalives_interval` and `tcp_keepalives_count` all at `0`, which means
+the operating system's defaults — on the Linux the database container runs, about two hours and
+eleven minutes — and `idle_session_timeout` at `0`, so nothing else closed it either. For all of that
+time every other worker asking for that scope is refused, which is correct behaviour producing the
+wrong outcome, and a single-project instance is the common case and the worst one: one stuck lock is
+the whole deployment's formation.
+
+This is not the process-death case, which was measured on a cluster: a worker pod force-deleted with
+no grace period had its lock released within three seconds, because the kernel on its node closes the
+sockets of a process that no longer exists. It is the node-loss case — power, kernel panic, a severed
+network — which is the failure several replicas exist to survive.
+
+**Decided.**
+- `tcp_keepalives_idle` is 60 seconds on the database the chart declares, as a value an operator can
+  raise. The interval and count stay the operating system's: one idle bound moves detection from
+  hours to a couple of minutes, and the other two have no number here that is better than the
+  platform's.
+- It is set on the database rather than in each client's connection string, so it closes the window
+  for every session lock in the system — the rebuild lock and the bootstrap lock have the same
+  exposure — rather than for the one that was noticed.
+- `deploy/helm/limits_test.go` holds that the declared database sets it, that it is not zero, and
+  that it is an operator's to raise.
+
+**Rejected: giving formation a lease with a heartbeat.** It would bound takeover without depending on
+the database noticing anything, and the embedding builds already carry a `lease_id`, so the pattern
+exists here. It costs a heartbeat write per drain, and it introduces the failure a lease always
+introduces: the holder is alive but slow, loses its lease, and two workers form the same turn. The
+session lock has no such failure — it is held exactly as long as the holder's session exists. A
+keepalive keeps that property and closes the window, so the lease buys a smaller window at the cost
+of the guarantee the lock was chosen for.
+
+**Rejected: `idle_session_timeout`.** It closes idle sessions, and a worker in the middle of a model
+call is not idle in the sense the setting means — but a worker between drains is, so it would close
+healthy pooled connections and make the pool churn. It bounds the wrong thing.
+
+**Rejected: a liveness probe that releases the lock.** Nothing outside the holder's session can
+release a session lock, by construction. An operator can terminate the backend, and that is the
+documented manual remedy; a workload with permission to terminate backends is a workload that can
+stop formation.
+
+**What this does not cover.**
+- With `postgresql.mode=external` the chart declares no database, so the keepalives are the
+  operator's to set on their own server. The README says so.
+- Sixty seconds is chosen against the platform defaults it replaces, not measured. Demonstrating the
+  outcome needs a node removed or a partition imposed; what is measured is that nothing bounded it.
+- Detection is not the whole window. After the keepalive gives up, the replacement worker has to
+  reach its next tick, so the project's formation resumes some minutes after the node goes rather
+  than immediately.
+- Nothing here makes the stall visible while it lasts. The backlog grows and the freshness watermark
+  falls behind, which looks the same as a slow model. That is [#105](https://github.com/ensera-ai/taisce/issues/105).
+
+**Undo cost.** Very low: one parameter in the chart's values. It changes a setting on the next
+reconciliation of the cluster and nothing stored depends on it.
+
+**Impact.** Operations: a lost node stops a project's formation for a couple of minutes rather than
+for over two hours. Security: none — this neither grants nor withholds anything, and the lock's
+exclusivity is unchanged.
+
+## D19 — The database parameters that are fractions of its memory limit are derived from it
+
+**Date.** 2026-11-08. **Issue.** [#103](https://github.com/ensera-ai/taisce/issues/103).
+
+**Why it was open.** The chart's default database asks for 2 CPUs and 8Gi with a 32Gi limit and a
+250Gi volume, three times over, so the install command the README gave left the third instance
+`Pending` on any cluster carrying other work. That alone is a sizing opinion. The defect was what
+happened next: `shared_buffers` at 8GB, `effective_cache_size` at 22GB, `maintenance_work_mem` at
+2GB, `max_wal_size` at 16GB and a 4Gi shared-memory volume were all written for the 32Gi limit beside
+them. Lowering the limit on its own left a database configured to reserve more shared memory than its
+container allowed, and it does not start — while the README's own instructions for shrinking the
+deployment changed `instances` and the replica counts and nothing else. The smallest working change
+was five values across two blocks, derived by hand from a limit the operator picked, none of it
+documented and all of it needed before the first pod started.
+
+**Decided.**
+- The five are fractions of `postgresql.cnpg.resources.limits.memory`: a quarter for
+  `shared_buffers`, eleven sixteenths for `effective_cache_size`, a sixteenth for
+  `maintenance_work_mem`, a half for `max_wal_size`, an eighth for the shared-memory volume. The
+  fractions reproduce the previous defaults exactly at 32Gi, so this changed no deployment that
+  shrinking had not already broken.
+- The shared-memory volume stays an eighth, which is always twice `maintenance_work_mem`: a parallel
+  index build puts its work there, so a volume below that bound is one the build fails in. Keeping
+  both as fractions of one number keeps that relation true without anyone maintaining it.
+- Stating any of them in `postgresql.cnpg.parameters` still wins. These are the defaults underneath,
+  not a ceiling over the top.
+- **The defaults stay large.** A chart that is small by default is one somebody runs in production
+  believing it was the large one, which is the worse failure.
+- `deploy/helm/values-small.yaml` is the shape that fits an ordinary cluster, in the repository so it
+  renders and is tested rather than being prose somebody retypes. What makes it short is the
+  derivation: it states no parameter the limit now decides, and a test asserts that it does not.
+- A memory limit written in a unit the chart cannot read is **refused**, naming why. Misreading a
+  quantity by a factor of 1024 configures a database that will not start, for a reason nothing at the
+  failure would point at.
+- `work_mem` is not derived. It is memory per sort, so it follows how many queries run at once rather
+  than how much memory the server has, and deriving it from the limit would tie it to the wrong
+  number.
+
+**Rejected: lowering the defaults.** It makes the chart install anywhere, and it makes the production
+default the evaluation shape. The argument the chart already makes for its topology holds for its
+sizing: the failure that matters is a deployment that is smaller than its operator believes.
+
+**Rejected: documenting the five values instead.** A paragraph telling the reader to change five
+settings in step with a sixth is the rule that gets broken under pressure, and it was already
+half-written — the README's shrinking section existed and did not mention them.
+
+**Rejected: named size presets.** A `postgresql.cnpg.size: small | medium | large` switch reads well
+and hides the arithmetic. It answers only the shapes somebody thought of, and an operator with 6Gi to
+spend is back to deriving by hand. Deriving from the limit answers every shape, including the ones
+between.
+
+**Rejected: deriving from the CPU request as well.** `max_connections` and `work_mem` do follow
+concurrency, so there is a version of this that sizes them from CPU. Nothing here has measured that
+relation, and a derivation nobody has measured is a guess with arithmetic in front of it.
+
+**What this does not cover.**
+- The fractions are conventional starting points, not measurements. No benchmark here says a quarter
+  is better than a fifth, and the honest numbers come from hardware that can be held still.
+- `max_connections` is not derived. It follows the pools the deployment declares, which D17 made a
+  stated number and a render-time check.
+- An operator who states one parameter and expects the others to follow it gets the derivation from
+  the limit, not from their value. The limit is the one input.
+- Nothing here makes the default topology schedulable. It is not meant to be: the small shape is the
+  answer for a cluster without that headroom.
+
+**Undo cost.** Low. Two template helpers, one merge in the cluster template, and a values file. The
+rendered parameters at the default limit are byte-for-byte what they were, so reverting is visible
+only to a deployment that has changed its limit.
+
+**Impact.** Operations: lowering the database's memory limit is one value and the deployment starts,
+where it previously needed five derived by hand and failed silently if any disagreed. Cost: trying
+the chart on a cluster with ordinary headroom is one `-f` away.
+
 ## D20 — A worker that stands down is counted on the health row, not only in a log line
 
 **Date.** 2026-11-08. **Issue.** [#105](https://github.com/ensera-ai/taisce/issues/105).

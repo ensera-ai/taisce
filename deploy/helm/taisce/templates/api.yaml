@@ -48,8 +48,8 @@ spec:
             - name: TAISCE_BUNDLE_CHARACTERS
               value: {{ . | quote }}
             {{- end }}
-            {{- include "taisce.serviceEnv" . | nindent 12 }}
-            {{- include "taisce.registryEnv" . | nindent 12 }}
+            {{- include "taisce.serviceEnv" (dict "root" . "pool" .Values.api.memoryPool) | nindent 12 }}
+            {{- include "taisce.registryEnv" (dict "root" . "pool" .Values.api.registryPool) | nindent 12 }}
           readinessProbe:
             exec: {command: ["/taisce", "probe"]}
             periodSeconds: 10

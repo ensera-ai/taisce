@@ -1,0 +1,51 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# One instance of everything, sized for a cluster that is already carrying other work.
+#
+# The chart's defaults are large on purpose: a chart that is small by default is one somebody runs in
+# production believing it was the large one. The cost of that choice is that the default topology
+# asks for 6 CPUs and 750Gi of reservable capacity across three database instances, which an
+# ordinary cluster does not have spare — so trying the chart at all meant deriving PostgreSQL
+# settings by hand before the first pod could start. This file is that shape, kept in the repository
+# so it renders and is tested rather than being prose somebody retypes.
+#
+# It is for evaluation and for a cluster you are trying this on. It is not highly available: one
+# database instance, one API replica and one worker means every component is a single point of
+# failure, and one node is one failure domain. Use the defaults for anything that has to stay up.
+#
+# What it does not have to say is the interesting part. shared_buffers, effective_cache_size,
+# maintenance_work_mem, max_wal_size and the shared-memory volume are derived from the memory limit,
+# so lowering the limit lowers them and the two cannot disagree. Lowering the limit used to leave a
+# database configured to reserve more shared memory than its container allowed, which does not start.
+#
+#   helm install memory oci://ghcr.io/ensera-ai/charts/taisce -n taisce \
+#     -f deploy/helm/values-small.yaml \
+#     --set inference.endpoint=... --set inference.allowlist=... --set inference.apiKeySecret=...
+
+postgresql:
+  cnpg:
+    instances: 1
+    storage:
+      size: 10Gi
+    resources:
+      requests: {cpu: 250m, memory: 1Gi}
+      limits: {memory: 2Gi}
+    parameters:
+      # Fewer sorts in flight than the default topology serves, so less memory per sort.
+      work_mem: 8MB
+      # The pools below need 23 with headroom. The rest is for operators and migrations.
+      max_connections: "60"
+
+api:
+  replicas: 1
+  # One replica serving on its own: admission allows eleven requests at once, five per project.
+  memoryPool: 12
+  registryPool: 2
+
+worker:
+  replicas: 1
+  memoryPool: 4
+
+manage:
+  adminPool: 3
