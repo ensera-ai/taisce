@@ -77,8 +77,8 @@ func TestParkedPagesAreBoundedProjectScopedAndNeverContainProviderText(t *testin
 	}
 	// With a larger queue, the ordinary planner must stop at the offset index, not sort it all.
 	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.ingestion_budget SET max_pending_per_project=3000;
-INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,ingested_at,source_role,formation_attempts,parked_at)
-SELECT gen_random_uuid(),'p1',n,'turn',now(),now(),'user',1,now() FROM generate_series(5,2004) n;
+INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,ingested_at,source_role,formation_attempts,parked_at,content_characters)
+SELECT gen_random_uuid(),'p1',n,'turn',now(),now(),'user',1,now(),0 FROM generate_series(5,2004) n;
 ANALYZE {schema}.observation`)); err != nil {
 		t.Fatal(err)
 	}

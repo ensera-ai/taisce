@@ -117,7 +117,7 @@ func TestSubjectExpiryCannotRemoveAnInFlightSourcesMapping(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,source_role,data_subject_id) VALUES($1::uuid,'p1',100,'turn',now(),'user',$2)`), uuid.NewString(), first.ID); err != nil {
+	if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,source_role,data_subject_id,content_characters) VALUES($1::uuid,'p1',100,'turn',now(),'user',$2,0)`), uuid.NewString(), first.ID); err != nil {
 		t.Fatal(err)
 	}
 	sweep, err := pg.NewRetentionStore(pool, schema).Sweep(ctx, "p1", 100)

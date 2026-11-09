@@ -152,9 +152,13 @@ func (s *ArtifactStore) Put(ctx context.Context, scope, principal string, r Arti
 				return err
 			}
 			source := uuid.NewString()
-			tag, err := tx.Exec(ctx, s.schema.SQL(`INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,ingested_at,source_role,data_subject_id,formed_at,retention_until)
+			// content_characters is zero, and says so rather than being left to a default: an
+			// artifact is bytes an agent stored, not words anybody said, so it has no messages and
+			// nothing a context's budget spends on it. The column has no default precisely so that
+			// a path which has not thought about this cannot store a turn claiming no size.
+			tag, err := tx.Exec(ctx, s.schema.SQL(`INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,ingested_at,source_role,data_subject_id,formed_at,retention_until,content_characters)
                 SELECT $1::uuid,p.scope,$3,'artifact',clock_timestamp(),clock_timestamp(),'assistant',$4,clock_timestamp(),
-                    least(now()+make_interval(hours=>b.max_age_hours),now()+p.retention)
+                    least(now()+make_interval(hours=>b.max_age_hours),now()+p.retention),0
                 FROM {schema}.project p JOIN {schema}.agent_storage_policy b USING(scope) WHERE p.scope=$2 AND p.suspended_at IS NULL`), source, scope, offset, r.DataSubjectID)
 			if err != nil {
 				return err

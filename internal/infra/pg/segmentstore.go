@@ -71,12 +71,18 @@ func (s *SegmentStore) Subjects(ctx context.Context, scope string, limit int) ([
 
 // Formed reads the turns of one subject the compaction pass may summarise — formed, not parked — in
 // log order, each with its size in characters. It is the pass's reader; a context uses History.
+//
+// The size is read off the observation, where it was counted when the turn was written. Summing it
+// from the messages here meant joining a table that carries neither scope nor subject, so the
+// planner read every message row in the project to size the turns of one person in it: 1,699 of the
+// 1,982 buffers one subject's context touched on a project of 81 subjects, growing with the project
+// while the answer did not.
 func (s *SegmentStore) Formed(ctx context.Context, scope, subject string) ([]compaction.Turn, error) {
 	rows, err := s.pool.Query(ctx, s.schema.SQL(`
-		SELECT o.log_offset, coalesce(sum(length(m.role)+length(m.content)),0)::int
-		  FROM {schema}.observation o LEFT JOIN {schema}.turn_message m ON m.observation_id=o.observation_id
+		SELECT o.log_offset, o.content_characters
+		  FROM {schema}.observation o
 		 WHERE o.scope=$1 AND o.data_subject_id=$2 AND o.kind=$3 AND o.formed_at IS NOT NULL AND o.parked_at IS NULL
-		 GROUP BY o.log_offset ORDER BY o.log_offset`), scope, subject, KindTurn)
+		 ORDER BY o.log_offset`), scope, subject, KindTurn)
 	if err != nil {
 		return nil, fmt.Errorf("read formed turns: %w", err)
 	}
@@ -116,13 +122,13 @@ func (s *SegmentStore) Formed(ctx context.Context, scope, subject string) ([]com
 // be handed over as it was said — the direction that returns words rather than hiding them.
 func (s *SegmentStore) History(ctx context.Context, scope, subject string) ([]compaction.Turn, error) {
 	rows, err := s.pool.Query(ctx, s.schema.SQL(`
-		SELECT o.log_offset, coalesce(sum(length(m.role)+length(m.content)),0)::int,
+		SELECT o.log_offset, o.content_characters,
 		       EXISTS (SELECT 1 FROM {schema}.projection_dependency d
 		                WHERE d.source_observation_id=o.observation_id
 		                  AND d.scope=$1 AND d.data_subject_id=$2 AND d.projection_kind=$4)
-		  FROM {schema}.observation o LEFT JOIN {schema}.turn_message m ON m.observation_id=o.observation_id
+		  FROM {schema}.observation o
 		 WHERE o.scope=$1 AND o.data_subject_id=$2 AND o.kind=$3
-		 GROUP BY o.observation_id, o.log_offset ORDER BY o.log_offset`),
+		 ORDER BY o.log_offset`),
 		scope, subject, KindTurn, ProjectionSegment)
 	if err != nil {
 		return nil, fmt.Errorf("read history: %w", err)

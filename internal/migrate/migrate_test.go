@@ -367,12 +367,16 @@ func TestSalienceIsGoneAndConfidenceIsNot(t *testing.T) {
 }
 
 // A source root for synthetic index fixtures. It adds no extra chunks to the measured corpus.
+//
+// For a fully migrated schema. A test that applies only part of the history writes its own insert in
+// the shape that history had reached, because a column named here that does not exist there is a
+// failure about this helper rather than about the migration under test.
 func seedObservation(t *testing.T, pool *pgxpool.Pool, schema Schema, scope string) string {
 	t.Helper()
 	var id string
 	err := pool.QueryRow(context.Background(), schema.SQL(`INSERT INTO {schema}.observation
-        (observation_id,scope,log_offset,kind,occurred_at,source_role)
-        VALUES(gen_random_uuid(),$1,0,'turn',now(),'user') RETURNING observation_id::text`), scope).Scan(&id)
+        (observation_id,scope,log_offset,kind,occurred_at,source_role,content_characters)
+        VALUES(gen_random_uuid(),$1,0,'turn',now(),'user',0) RETURNING observation_id::text`), scope).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}

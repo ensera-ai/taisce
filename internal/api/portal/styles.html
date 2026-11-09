@@ -94,8 +94,12 @@ td.mono{white-space:nowrap}
 /* tiles */
 .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:14px}
 .tiles.six{grid-template-columns:repeat(3,minmax(0,1fr))}
+/* Seven tiles divide as four and three until there is room for one row of them. */
+.tiles.seven{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media (min-width:1380px){.tiles.six{grid-template-columns:repeat(6,minmax(0,1fr))}}
-@media (max-width:640px){.tiles,.tiles.six{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1560px){.tiles.seven{grid-template-columns:repeat(7,minmax(0,1fr))}}
+@media (max-width:980px){.tiles.seven{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:640px){.tiles,.tiles.six,.tiles.seven{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .tile{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px 18px;box-shadow:var(--shadow)}
 .tile::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--grad);opacity:.85}
 .tile.warn::before{background:var(--warn)}.tile.bad::before{background:var(--bad)}

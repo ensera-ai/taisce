@@ -169,6 +169,10 @@ func (d *Driver) Once(ctx context.Context) (Pass, error) {
 			d.log.Error("draining a scope failed", "scope", scope, "error", err)
 		}
 	}
+	// On the health row, with the pass that counted them. A stand-down is the only evidence this
+	// deployment produces that the per-scope lock is serialising several workers, and it existed for
+	// the length of this function and was then discarded.
+	d.recordStandDowns(ctx, pass.Busy)
 	if pass.Failed > 0 {
 		// Counts and a status, never the reason. The reason is the provider's response body, which
 		// is not bounded to the provider's own words: an endpoint may quote the request back, and the
@@ -304,6 +308,25 @@ func (d *Driver) SweepRetention(ctx context.Context) error {
 	return nil
 }
 
+// recordStandDowns puts a pass's stand-downs on the health row.
+//
+// Through the worker's pool, which the driver already holds: a stand-down is the absence of a drain,
+// so there is no held connection to write it on, and that is exactly the condition being recorded.
+//
+// A failure here is logged and dropped. This is the deployment reporting on itself, and a formation
+// pass that completed its work must not be turned into a failure because the row describing it could
+// not be updated — the same reasoning the per-drain health write already follows.
+func (d *Driver) recordStandDowns(ctx context.Context, busy int) {
+	if busy <= 0 || ctx.Err() != nil {
+		return
+	}
+	bounded, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := pg.RecordFormationStandDowns(bounded, d.worker.pool, d.schema, int64(busy)); err != nil && ctx.Err() == nil {
+		d.log.Warn("formation stand-downs could not be recorded", "busy", busy)
+	}
+}
+
 // Run drives passes until the context ends.
 //
 // It waits between passes rather than polling continuously, and the wait is the same whether the
@@ -333,7 +356,13 @@ func (d *Driver) Run(ctx context.Context) error {
 			// notice before memory starts forming again.
 			d.log.Error("formation pass failed", "error", err)
 		}
-		if pass.Formed > 0 || pass.Errored > 0 || pass.Reports > 0 || pass.Segments > 0 {
+		// Busy is in the gate, not only in the line. A pass whose every scope was held by another
+		// replica formed nothing, errored on nothing and wrote neither report nor segment — so
+		// without it here the replica doing exactly what the topology intends was the one that
+		// logged nothing at all. On a single-scope instance, which is the common case, that is
+		// every replica but one on every pass. One line per worker per interval is the same volume
+		// the holder already produces, and the count is also on the health row the ops centre reads.
+		if pass.Formed > 0 || pass.Busy > 0 || pass.Errored > 0 || pass.Reports > 0 || pass.Segments > 0 {
 			d.log.Info("formation pass",
 				"scopes", pass.Scopes, "formed", pass.Formed,
 				"busy", pass.Busy, "errored", pass.Errored,

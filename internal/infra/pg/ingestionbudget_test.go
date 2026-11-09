@@ -190,7 +190,7 @@ func TestAStaleRepeatableReadSnapshotCannotOversubscribeCapacity(t *testing.T) {
 		}
 	}
 	for i, tx := range []pgx.Tx{first, second} {
-		if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,ingested_at,source_role) VALUES($1,$2,0,'turn',now(),now(),'user')`), uuid.NewString(), fmt.Sprintf("p%d", i)); err != nil {
+		if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,ingested_at,source_role,content_characters) VALUES($1,$2,0,'turn',now(),now(),'user',0)`), uuid.NewString(), fmt.Sprintf("p%d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -249,7 +249,7 @@ func TestDeferredReservationsUseTheFinalObservationState(t *testing.T) {
 			t.Fatal(err)
 		}
 		id := uuid.NewString()
-		if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,ingested_at,source_role) VALUES($1,$2,0,'turn',now(),now(),'user')`), id, fmt.Sprintf("p%v", remove)); err != nil {
+		if _, err := tx.Exec(ctx, schema.SQL(`INSERT INTO {schema}.observation(observation_id,scope,log_offset,kind,occurred_at,ingested_at,source_role,content_characters) VALUES($1,$2,0,'turn',now(),now(),'user',0)`), id, fmt.Sprintf("p%v", remove)); err != nil {
 			tx.Rollback(ctx)
 			t.Fatal(err)
 		}

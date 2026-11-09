@@ -219,8 +219,8 @@ func seedReportableGraph(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	t.Helper()
 	var source string
 	if err := pool.QueryRow(ctx, `INSERT INTO `+schema+`.observation
-        (observation_id, scope, log_offset, kind, occurred_at, ingested_at, source_role, data_subject_id)
-        VALUES (gen_random_uuid(), 'p1', 0, 'turn', now(), now(), 'user', 'subject-1')
+        (observation_id, scope, log_offset, kind, occurred_at, ingested_at, source_role, data_subject_id, content_characters)
+        VALUES (gen_random_uuid(), 'p1', 0, 'turn', now(), now(), 'user', 'subject-1', 0)
         RETURNING observation_id::text`).Scan(&source); err != nil {
 		t.Fatal(err)
 	}

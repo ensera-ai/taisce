@@ -1004,3 +1004,282 @@ only to a deployment that has changed its limit.
 **Impact.** Operations: lowering the database's memory limit is one value and the deployment starts,
 where it previously needed five derived by hand and failed silently if any disagreed. Cost: trying
 the chart on a cluster with ordinary headroom is one `-f` away.
+
+## D20 — A worker that stands down is counted on the health row, not only in a log line
+
+**Date.** 2026-11-08. **Issue.** [#105](https://github.com/ensera-ai/taisce/issues/105).
+
+**Why it was open.** The chart runs two workers by default and invites more. What makes that safe is
+that each scope is drained under an advisory lock, so a second worker finds the scope busy and stands
+down instead of forming the same turn twice. The count of scopes that were busy existed for the
+length of one pass and was then discarded, and the one log line carrying it sat behind a gate the
+count was not in — so a pass whose every scope was held by another replica formed nothing, errored on
+nothing, wrote no report and no segment, and logged nothing at all. The replica doing exactly what
+the design intends was the silent one.
+
+On a single-scope instance, which is what the default project makes and what most deployments will
+be, every replica but one is busy on every pass. So on the most common topology, four healthy workers
+and one healthy worker beside three that were wedged, crash-looping on a schedule that hid it, or
+pointed at the wrong database produced identical evidence. Confirming the property the deployment is
+sold on meant sampling `pg_locks` on the primary for the lock key and reading `pg_stat_activity` to
+find which pod held it — not an answer an operator should reach for, and not available at all to
+anyone who cannot open a psql session.
+
+**Decided.**
+- `formation_health` gains `stood_down_count` and `last_stood_down_at`, written by the driver after
+  each pass that stood down. The ops centre shows both, because the instance page is where somebody
+  asks whether their replicas are working and this is the answer to exactly that question.
+- `Busy` joins the log gate as well. One line per worker per interval is the same volume the holder
+  already produces, and it is the half that reaches whoever is reading logs.
+- A pass that stood down for nothing writes nothing. The time means "a pass last stood down then";
+  touching it on a pass that did not would make it mean "a pass last ran then", which the heartbeat
+  already says.
+- No scope name and no replica identity on the row. An operator asking whether their workers are
+  serialising is asking about the instance, and a scope name would be the one piece of per-project
+  state on an aggregate record.
+- Not a judgement anywhere. Zero is normal on a single-replica deployment and expected on a
+  multi-replica one until two workers want the same scope, so nothing is marked on this number.
+- `TestAPassThatStoodDownOnEveryScopeStillReportsIt` holds both halves against a real deployment, and
+  each fails on its own when its half is reverted.
+
+**Rejected: the log line alone.** It is the cheaper half and it is in this change, but it answers
+only whoever is reading logs. The reader the portal exists for is an operator looking at a page, and
+a property the deployment is sold on should be visible to them.
+
+**Rejected: a log line per stand-down.** The reasoning already in the code is right about volume —
+in a deployment with several replicas this is the normal case — and wrong only in its conclusion.
+Frequent is a reason not to log per occurrence; it is not a reason for the number never to be
+reachable.
+
+**Rejected: a per-scope or per-replica record.** It would answer which worker stood down on which
+project, which sounds more useful and is a row per pass per scope on the formation path, written in
+the common case, to answer a question nobody has asked. The aggregate answers "are my replicas
+serialising", which is the question the issue was about.
+
+**Rejected: deriving it from `pg_locks`.** The information is there and needs no write at all. It
+needs a database session and a privilege the portal does not hold, and it reports the instant rather
+than the history: a page refreshed between two passes sees nothing.
+
+**What this does not cover.**
+- The count says stand-downs happened, not that every replica is healthy. A worker that is wedged
+  before it reaches the lock still contributes nothing, and the heartbeat is what speaks for that.
+- It is instance-wide, so it does not say which project replicas are contending on.
+- A single-replica deployment stays at zero forever, which is correct and indistinguishable from
+  several replicas that have never wanted the same scope at the same moment.
+
+**Undo cost.** Low. Two columns with defaults, one update statement, one gate condition and a tile.
+The columns are additive, so a rollback of the code leaves them unread rather than wrong.
+
+**Impact.** Operations: the mechanism the several-replica topology rests on is visible on the page an
+operator already reads, instead of requiring a psql session against the primary.
+
+## D21 — Whether a project's formation is failing is read from its backlog, not from a per-scope health row
+
+**Date.** 2026-11-08. **Issue.** [#99](https://github.com/ensera-ai/taisce/issues/99).
+
+**Why it was open.** `formation_health` is one row for the instance: one `last_progress_at`, one
+`last_failure_at`. The ops centre's **Formation is failing** status and its **Failed attempts** tile
+are read from it, so a turn forming in any project cleared the mark while another project failed
+every attempt. An instance with one busy project and one broken one read as healthy on the page an
+operator is told to watch. The evidence was present — the broken project's *Behind by* and *Parked*
+counts rising — and drew no eye, and a rising backlog looks the same as a slow model.
+
+**Decided.**
+- A project is failing now when its backlog holds a turn that has been tried and did not form:
+  unformed, not parked, and stamped with a failure. No second stamp and no window. A turn that formed
+  has left the backlog and a turn the driver gave up on is parked, so what remains stamped with a
+  failure is work still owed that has already gone wrong once — the backlog's own contents are the
+  state.
+- Counted from `observation` through `observation_backlog_idx`, a partial index holding exactly the
+  unformed, unparked turns of a scope, which in a healthy project is empty. **No schema change and
+  nothing on the formation path**: this adds no row, no counter and no stamp to the write path.
+- The instance status takes the worse of the two readings, so a page that says nothing needs
+  attention beside a failing project cannot happen.
+- The projects table carries the count of such turns per project, not a boolean. One failing turn is
+  a turn to park; every turn failing is an endpoint to look at, and a boolean loses the difference.
+- `TestTheOpsCentreShowsAProjectFailingOnItsOwnWhileTheInstanceReadsAsRecovered` holds it, including
+  that a parked turn is parked rather than failing and that a formed turn stops it with no stamp to
+  reset.
+
+**Rejected: a formation health row per scope.** The shape the issue reached for, and the one that
+would make the existing stamp comparison work per project. It is a schema change, a migration and a
+write on the formation path for every scope drained, to answer a question the rows already answer.
+It would also need a rule for what the instance status says when one of forty projects is failing,
+which this does not: the count is shown and the status is marked, and forty projects failing reads
+differently from one because the number is there.
+
+**Rejected: moving only the stamps per scope and leaving the counters instance-wide.** The middle
+option, and it keeps the write on the formation path while splitting one record into two shapes that
+have to be read together. The counters are lifetime totals nobody reads per project, which is the
+part of the original issue's reasoning that holds; the conclusion that follows is to leave the row
+alone entirely.
+
+**Rejected: a time window on `formation_failed_at`.** "Failed in the last N minutes" needs a duration
+nobody here has measured and is wrong in both directions on a quiet project — a project whose
+attempts are further apart than the window reads as healthy in the gaps. The backlog needs no
+duration.
+
+**What this does not cover.**
+- It says a project is failing, not why. The reason is on the turn, and the project page lists it.
+- A project whose every turn has already parked reads as not failing, which is correct — it is
+  reported as parked, a different thing to act on — but means a project that gave up entirely stops
+  being marked as failing. Parked is the louder signal at that point.
+- The instance-wide stamps are unchanged and still answer for the instance. They are not wrong; they
+  were being asked a question they cannot answer.
+- This is a count per project on a page, not an alert. Nothing notifies anybody.
+
+**Undo cost.** Very low: one query, one view-model field and a table column. Nothing is stored, so
+there is nothing to migrate back.
+
+**Impact.** Operations: a project failing on its own is visible on the instance page and in its own
+row, where before it was visible only as a backlog that looked like a slow model. Performance: one
+aggregate over a partial index per page load, which in a healthy instance reads an empty index.
+
+## D22 — A turn carries its own size, because sizing one subject's history was reading every message in the project
+
+**Date.** 2026-11-08. **Issue.** [#116](https://github.com/ensera-ai/taisce/issues/116).
+
+**Why it was open.** Both readers of a subject's history computed each turn's size in the query, by
+joining `turn_message` and summing the length of every role and content. That table carries neither
+scope nor subject — it is reached through the observation — so nothing narrowed the join, and the
+planner read every message row in the project to size the turns of one person in it.
+
+Measured on a project of 45,960 turns across 81 subjects. Asking for the 5,000-turn subject found its
+own rows through an index in 92 buffers and then spent 1,699 sizing them: 85% of the 1,982 the whole
+query touched, reading eighty other subjects' messages to answer a question about none of them. The
+scan grows with the project while the answer does not, so two subjects of the same length cost
+different amounts depending on who else the project holds, and every subject's context gets more
+expensive when a new subject is added. `POST /v1/contexts` is on the read path, paid for on every
+call.
+
+**Decided.**
+- `observation.content_characters` holds the characters of that turn's message roles and contents,
+  written when the turn is written. Both readers take it off the row they are already reading.
+- Counted in Go, from the turn in hand, rather than from the rows afterwards. The column is `NOT
+  NULL` with no default, and a `NOT NULL` column cannot be deferred to the end of a transaction — so
+  computing it after the messages were inserted would need either a nullable column or a default,
+  and both of those let a write path that forgets it store a turn a context values at nothing. This
+  way the substrate refuses such a path at the moment it tries.
+- Code points, not bytes. That is what the budget is documented in and what the readers computed
+  before this was stored; a Go `len()` would count bytes and quietly change what a budget buys for
+  anything but ASCII. A test holds a turn of multi-byte text against both counts.
+- Safe to store because a message's role and content are written once, in the transaction that
+  creates the turn, and never updated afterwards — the one write to `turn_message` outside that path
+  sets `occurred_at`.
+- `TestATurnCarriesTheSizeSummingItsMessagesWouldHaveGiven` holds that the stored value equals what
+  the join computed, for every turn in the schema rather than for the one just written, so a backfill
+  that missed rows fails there.
+
+**Measured, on the same project and the same question** (`EXPLAIN (ANALYZE, BUFFERS)`, read
+2026-11-08, after a vacuum):
+
+| Sizing | Buffers | What the cost follows |
+|---|---:|---|
+| Joining `turn_message`, as it stood | 1,985 | every message row in the project |
+| A correlated scalar subquery per turn | 20,283 | four buffers per turn of the subject |
+| On the observation row | **305** | the subject's own rows, and nothing else |
+
+The message table is not read at all, so the term that grew with the project is gone rather than
+reduced. These are plans and buffer counts; no latency figure is claimed, and none can be taken on a
+development machine.
+
+**Rejected: rewriting the query.** The issue's first candidate, and the one that needs no schema
+change. A correlated scalar subquery bounds the work by the subject and cannot be planned as a scan
+of the whole table — and costs four buffers a probe, which took the same answer to 20,283 buffers.
+On a 512-turn subject it was 2,060 against the join's 1,714. So the join wins on a project whose
+messages are few relative to the subject asked about, and the subquery wins on a large project with
+small subjects: each shape wins on a different shape of data, which is the plan that flips the issue
+warned about rather than a fix. Measured before being rejected, because the opposite was expected.
+
+**Rejected: an index that narrows the join.** `turn_message` carries no scope and no subject, so
+narrowing it needs a denormalised column on that table — which is the same stored value as this
+decision, written once per message instead of once per turn, and still joined on every read.
+
+**Rejected: a generated column.** A stored generated column would make the database compute it and
+remove the possibility of a write path forgetting. PostgreSQL's cannot reference another table, and
+the messages are in another table.
+
+**What this does not cover.**
+- The registration probe is now the larger half of the read, at 191 of the 305 buffers. It is bounded
+  by the subject's own history ([D16](#d16--a-context-carries-every-turn-the-subject-said-and-a-summary-stands-in-only-for-the-turns-it-was-written-from)),
+  so nothing here grows with the project, but it is where the next measurement should look.
+- The backfill rewrites every observation row once, so an upgrade on a large deployment pays a full
+  table rewrite and the table is twice its size until it is vacuumed. Measured here: the heap scan
+  read 380 buffers before a vacuum and 305 after.
+- Nothing is claimed about latency. The buffer counts are what a plan reports.
+
+**Undo cost.** Low for the code, moderate for the column. Reverting the readers to the join is two
+queries; the column would be dropped by a migration, and a deployment that had written turns with it
+would lose nothing, because the value is derivable from the messages it was computed from.
+
+**Impact.** Performance of the read path: sizing one subject's history stops reading the project, so
+`POST /v1/contexts` costs what the subject holds rather than what the instance holds. Operations: the
+cost of a context no longer rises when an unrelated subject is added.
+
+## D23 — The adapter conformance suite runs on each adapter's main, against a released deployment it stands up itself
+
+**Date.** 2026-11-08. **Issue.** [#109](https://github.com/ensera-ai/taisce/issues/109).
+
+**Why it was open.** The suite holds ten rules that are easy to get subtly wrong once per language
+and impossible to notice from inside one adapter. It is the only artefact in the project that holds
+them for all three adapters at once, and it executed only when a person ran `taisce conformance` by
+hand and looked at what it printed. Read on 2026-11-08, none of the three adapter repositories'
+`ci.yml` ran it: each mentions it in a header comment and runs deployment-free tests. So each
+adapter's own suite could stay green while its behaviour diverged from the other two, and the
+divergence that matters most is the quiet one — an adapter that swallows a store failure loses
+turns, and a lost turn is invisible until somebody asks what the system holds about them.
+
+**Decided.**
+- A `conformance` workflow in each adapter repository, on push to `main`, on demand, and callable
+  from a release workflow.
+- It stands up the quickstart's compose stack at a released version and runs that release's binary
+  as the suite runner, so an adapter is proven against what an operator actually installs rather than
+  against a build of the day.
+- **No model key.** The suite stubs the model inside each driver and seeds facts through the API, so
+  the stack is given a value that is not a key beside an allowlist naming no reachable host. That was
+  checked rather than assumed: the stack comes up and all ten cases pass with nothing a provider
+  could be reached through.
+- **The worker is not started.** Without a model it can never become healthy, and formation is not
+  what the suite tests. The workflow waits on the API, which is what an adapter talks to, and says in
+  its own text that a green run therefore proves nothing about extraction.
+- The binary is verified against the checksums published with the release. `compose.yaml` and
+  `cases.json` are fetched at the **commit** the release was cut from, not the tag: a commit cannot
+  be moved, which is the same reason every action in these workflows is pinned by SHA.
+- Each adapter is run through its own repository's documented entry point — the module for the
+  Python adapters, `scripts/conformance.sh` for the others — so what CI runs is what the README tells
+  a person to run, rather than a path nobody else takes.
+- The reference adapter runs first, so a failure afterwards is the adapter under test rather than the
+  stack it was run against.
+
+**Rejected: on every pull request.** A deployment per pull request costs runner minutes on every
+change, including the ones that touch a README. The rules it holds change slowly, and a divergence
+introduced in a branch is caught when that branch reaches `main`, before any release carries it.
+
+**Rejected: on release only.** Cheapest, and it lets a broken adapter sit on `main` between releases
+— so the failure is found by whoever cuts the release, at the moment it is most expensive to fix.
+
+**Rejected: publishing `compose.yaml` and `cases.json` as release assets.** Attempted first, so that
+one checksums file would cover everything a run trusts. They would exist only from the next release,
+so the workflows could not run until one was cut — and a commit SHA is already immutable and already
+the standard this project pins actions by. Built, measured against what it would buy, and removed.
+
+**Rejected: a reusable workflow shared from this repository.** One file instead of three near-copies.
+It makes every adapter's CI depend on a workflow in another repository resolving, and the three
+differ in toolchain and in how many drivers they run, which is most of the file.
+
+**What this does not cover.**
+- Extraction. The deployment under test reaches no model, so nothing here exercises forming a turn
+  into facts. `make test-inference` is what covers that, against a real provider.
+- The release workflows do not yet refuse to publish a version whose conformance run did not pass.
+  The workflow is `workflow_call`-able so that they can, which is a change in each adapter's
+  `release.yml` and is not in this one.
+- The version each adapter is tested against is pinned in its workflow and raised by hand. An adapter
+  proven against an old release is not proven against the newest one, and nothing here notices.
+
+**Undo cost.** Very low: one file per repository, deleting which returns each to deployment-free CI.
+Nothing in this repository changes except the suite's own README.
+
+**Impact.** Correctness across the adapters: the ten rules are exercised in three languages without
+anybody remembering to run them, and the evidence an adapter release carries stops being pasted
+terminal output nobody else can re-execute. Security: the run holds no credential of anybody's — the
+deployment is created and destroyed by the job, and the key it is given reaches nothing.
