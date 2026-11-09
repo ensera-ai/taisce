@@ -189,21 +189,26 @@ token starts with `tsk_`.
 
 | Kind | Reaches | Can |
 |---|---|---|
-| Read and write (`read_write`) | One project | Every memory operation: save turns, recall, inspect, correct, erase |
+| Agent (`agent`) | One project | Save turns, recall, inspect, correct, export, store artifacts: everything an agent process does. **Not** erase a person, purge an entity, or register a notification endpoint. The default for a key you issue |
+| Read and write (`read_write`) | One project | Every memory operation, erasure included. What your application's own erasure path holds, and what the project's first key from `bootstrap` carries |
 | Read only (`read_only`) | One project | Recall, inspect and export, but change nothing |
 | Operator | The management surface, no project | Everything in this guide, and no memory |
 
 ### Issue a key to hand to an application
 
-Use the CLI or the API: they show the token, **once**.
+Use the CLI or the API: they show the token, **once**. A key issued without naming its access is an
+`agent` key, which cannot erase anybody. That is the key to put in a process that runs a model: text
+other people wrote reaches it, and it is the key most likely to leak. Issue a `read_write` key only for
+the part of your application that handles erasure requests.
 
 ```bash
-taisce credential issue billing-app --project billing
-taisce credential issue billing-reader --project billing --read-only
+taisce credential issue billing-agent --project billing
+taisce credential issue billing-erasure --project billing --access read_write
+taisce credential issue billing-reader --project billing --access read_only
 ```
 
 ```text
-credential billing-app (…) reaches project billing with read_write access
+credential billing-agent (…) reaches project billing with agent access
 token: tsk_…
 
 This token is shown once and cannot be recovered.
@@ -212,7 +217,7 @@ This token is shown once and cannot be recovered.
 ```bash
 curl -sS -X POST http://127.0.0.1:8081/manage/v1/credentials/issue \
   -H "Authorization: Bearer $TAISCE_OPERATOR_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "billing-app", "project": "billing", "access": "read_write"}'
+  -d '{"name": "billing-agent", "project": "billing", "access": "agent"}'
 ```
 
 Put the token where the application reads its secrets, and pass it to the client or adapter in code.
@@ -232,7 +237,7 @@ Each project's page in the ops centre lists its keys, newest first, revoked ones
 |---|---|
 | Name | The name given when it was issued |
 | Prefix | The first 12 characters of the token (`tsk_` and 8 more). Match it against what a client holds without seeing the rest |
-| Access | `read_write` or `read_only` |
+| Access | `agent`, `read_write` or `read_only` |
 | Created | The day it was issued |
 | State | `live` or `revoked` |
 

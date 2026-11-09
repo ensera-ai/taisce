@@ -343,7 +343,8 @@ func (m *ManagementServer) setSuspended(w http.ResponseWriter, r *http.Request, 
 type credentialIssueRequest struct {
 	Name    string `json:"name"`
 	Project string `json:"project"`
-	// Access is read_only or read_write; omitted means read_write.
+	// Access is read_only, agent or read_write; omitted means agent, which does everything but erase
+	// a person or purge an entity (D26).
 	Access string `json:"access"`
 }
 
@@ -382,10 +383,10 @@ func (m *ManagementServer) issueCredential(w http.ResponseWriter, r *http.Reques
 	}
 	access := credential.Access(req.Access)
 	if req.Access == "" {
-		access = credential.ReadWrite
+		access = credential.Agent
 	}
-	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Project) == "" || (access != credential.ReadOnly && access != credential.ReadWrite) {
-		writeError(w, http.StatusBadRequest, codeInvalidCredential, "a credential needs a name, a project, and access read_only or read_write")
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Project) == "" || !access.Valid() {
+		writeError(w, http.StatusBadRequest, codeInvalidCredential, "a credential needs a name, a project, and access read_only, agent or read_write")
 		return
 	}
 	token, issued, err := m.issueProjectCredential(r.Context(), req.Name, req.Project, access)

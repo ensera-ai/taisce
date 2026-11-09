@@ -298,11 +298,13 @@ for `data_subject_id` is the usual cause.
 {"error":{"code":"forbidden","message":"the credential does not permit this operation"}}
 ```
 
-**Why.** You're using a read-only token for something that changes memory, such as saving a turn,
-correcting a record or erasing.
+**Why.** The token's access doesn't cover the operation. A `read_only` token can't change memory at
+all. An `agent` token, the default for a key you issue, can save and correct but can't erase a
+person, purge an entity or register a notification endpoint.
 
-**Fix.** Use a read-write token. Make one with `taisce credential issue <name> --project <project>`
-and leave off `--read-only`.
+**Fix.** To save or correct, use an `agent` token: `taisce credential issue <name> --project
+<project>`. To erase or purge, use a `read_write` token from the part of your application that handles
+erasure requests: add `--access read_write`.
 
 ### Questions about "I" return nothing
 

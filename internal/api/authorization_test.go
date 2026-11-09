@@ -137,3 +137,56 @@ func TestReadOnlyCredentialsCanInspectButCannotMutateEveryMemoryRoute(t *testing
 		t.Fatalf("revoked read-only key resolved: %d", status)
 	}
 }
+
+// An agent credential writes and reads memory as an agent process needs to, and is refused, before
+// anything is parsed, the two operations that destroy data irreversibly. The refusal is audited
+// against the agent key and nothing it asked for is deleted (D26).
+func TestAnAgentCredentialWritesMemoryAndCannotEraseOrPurge(t *testing.T) {
+	h := newHarness(t, "api_agent_access")
+	ctx := context.Background()
+	credentials := credential.NewStore(h.pool, string(migrate.ControlSchema))
+	token, agent, err := credentials.IssueWithAccess(ctx, "agent-process", "p1", credential.Agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Access != credential.Agent {
+		t.Fatalf("issued %q, asked for agent", agent.Access)
+	}
+	observe := map[string]any{"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "I work at Ensera and I live in Dublin."}}}
+	if status, raw := h.raw(t, http.MethodPost, "/v1/observations", observe, token); status != http.StatusCreated {
+		t.Fatalf("an agent key could not observe: %d %s", status, raw)
+	}
+	h.form(t)
+	if status, raw := h.raw(t, http.MethodPost, "/v1/recalls", map[string]any{"question": "Where does the user live?", "data_subject_id": "subject-1"}, token); status != http.StatusOK {
+		t.Fatalf("an agent key could not recall: %d %s", status, raw)
+	}
+	if status, raw := h.raw(t, http.MethodPost, "/v1/exports", map[string]any{"data_subject_id": "subject-1"}, token); status != http.StatusOK {
+		t.Fatalf("an agent key could not export: %d %s", status, raw)
+	}
+	if status, _ := h.raw(t, http.MethodPost, "/v1/erasures", map[string]any{"data_subject_id": "subject-1", "reason": "steered"}, token); status != http.StatusForbidden {
+		t.Fatalf("an agent key erased a person: %d", status)
+	}
+	if status, _ := h.raw(t, http.MethodPost, "/v1/entities/purge", map[string]any{"id": entityIDForInspection(t, h), "reason": "steered"}, token); status != http.StatusForbidden {
+		t.Fatalf("an agent key purged an entity: %d", status)
+	}
+	if status, _ := h.rawBody(t, http.MethodPost, "/v1/erasures", `{"data_subject_id":`, token); status != http.StatusForbidden {
+		t.Fatalf("a malformed erasure reached the parser before the permission gate: %d", status)
+	}
+	var observations int
+	if err := h.pool.QueryRow(ctx, h.schema.SQL(`SELECT count(*) FROM {schema}.observation`)).Scan(&observations); err != nil || observations != 1 {
+		t.Fatalf("a refused erasure changed memory: %d observations %v", observations, err)
+	}
+	entries, err := pg.NewAuditStore(h.pool, h.schema).Recent(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := map[string]int{}
+	for _, e := range entries {
+		if e.Principal == agent.CredentialID && e.Outcome == domain.OutcomeRefused {
+			refused[e.Operation]++
+		}
+	}
+	if refused[domain.AuditErase] != 2 || refused[domain.AuditEntityPurge] != 1 {
+		t.Fatalf("the agent key's refusals were not audited as asked: %v", refused)
+	}
+}

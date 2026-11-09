@@ -904,7 +904,7 @@ Branch on `code`. The `message` is for people reading logs, and its wording may 
 | `invalid_record_mutation`, `invalid_feedback`, `invalid_subject`, `invalid_artifact` | 400 | A bad change request | Fix the request |
 | `invalid_destination` | 400 or 409 | A notification URL the operator doesn't allow, or one already registered | Use an allowed HTTPS host |
 | `unauthenticated` | 401 | Missing, wrong or revoked token, an operator token, or a suspended project. One answer for all, on purpose | Check the token. Don't retry |
-| `forbidden` | 403 | A read-only token tried to change memory | Use a read-write token |
+| `forbidden` | 403 | The token's access doesn't cover the operation: a `read_only` token changing memory, or an `agent` token erasing, purging or registering a notification endpoint | Use a token with that access. Don't retry |
 | `not_found` | 404 | Unknown, another project's, or erased. One answer for all, on purpose | Treat it as gone |
 | `idempotency_conflict` | 409 | The key already names a different or erased turn | Fix the client. Never retry |
 | `record_conflict`, `subject_conflict`, `artifact_conflict` | 409 | Your `expected_version` is out of date | Read again, decide again |
