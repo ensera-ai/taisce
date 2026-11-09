@@ -22,7 +22,7 @@ set -euo pipefail
 top=$(git rev-parse --show-toplevel)
 sha=$(git -C "$top" rev-parse HEAD)
 short=${sha:0:7}
-image=${GATE_IMAGE:-taisce-gate:1.27.1}
+image=${GATE_IMAGE:-taisce-gate:1.27.3}
 substrate=${SUBSTRATE_IMAGE:-taisce-postgres:0.1.0}
 
 # Under the home directory, deliberately. colima shares the home directory with the VM and does not

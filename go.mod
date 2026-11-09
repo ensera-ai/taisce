@@ -1,10 +1,21 @@
 // Taisce — memory for agents.
 //
-// Go 1.27.1, pinned exactly: a `go` directive plus a `toolchain` line means the version this module
-// is built with is a decision recorded in the file rather than whatever the builder happens to have.
+// Go 1.27.3, pinned exactly. The `go` directive is the oldest release the source needs; the
+// `toolchain` line is the release that builds it, and it is what makes a build on any other version
+// fetch this one instead of proceeding. A `go` directive alone is a minimum, so without the second
+// line a machine holding something newer builds with that and reports success — which is how a local
+// run and a hosted run came to measure the same tree with two different compilers (#171).
+//
+// The version is 1.27.3 and not 1.27.1 because this code reaches twelve advisories in the 1.27.1
+// standard library — `html/template` through the operator portal's renderer, `http2` through the
+// server's own Serve, through `writeJSON` and through the notification sender. Measured with
+// govulncheck on 2026-11-09: thirteen reachable here, zero under 1.27.3 with #163 in (#162).
 module github.com/ensera-ai/taisce
 
 go 1.27.1
+
+toolchain go1.27.3
+
 
 require (
 	github.com/google/uuid v1.6.0
