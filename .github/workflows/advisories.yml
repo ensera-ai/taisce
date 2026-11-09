@@ -1,0 +1,44 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# An advisory published against a dependency that has not changed arrives with no commit behind it.
+# Every other check in this repository is triggered by somebody doing something, so the day a
+# reachable advisory lands against a module nobody is touching, nothing runs and nothing says so —
+# until the next unrelated pull request fails for a reason its author did not cause.
+#
+# This runs the same `make vuln` the build and the local gate run, on a schedule and on demand. A red
+# run is the signal: it shows on the Actions tab and reaches whoever watches the repository. It is
+# deliberately the same target rather than a second scanner with its own idea of reachability — two
+# checks that can disagree about whether the code is exposed is one more thing to adjudicate under
+# pressure.
+#
+# Dependabot alerts remain a second, independent signal. This is the one the build enforces.
+name: advisories
+
+on:
+  schedule:
+    # Daily. An advisory is not an incident in itself — what matters is that the gap between
+    # publication and knowing is a day rather than however long until the next change.
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # go-version-file so the standard library judged here is the one the build ships, which is the
+      # larger half of what this check finds: on 2026-11-09 the pinned toolchain's own library
+      # carried twelve reachable advisories against one in a module.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Reachable advisories
+        run: make vuln

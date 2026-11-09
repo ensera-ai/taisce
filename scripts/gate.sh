@@ -89,7 +89,8 @@ set +e
 docker run --rm --network "$net" -v "$work:/src" -w /src \
     -v taisce-gate-gomod:/go/pkg/mod -v taisce-gate-gobuild:/root/.cache/go-build \
     "$image" bash -c "make test TEST_DSN='$dsn' COVER_PROFILE=coverage.out \
-        && go vet ./..." 2>&1 | tee "$log"
+        && go vet ./... \
+        && make vuln" 2>&1 | tee "$log"
 code=${PIPESTATUS[0]}
 set -e
 elapsed=$(( $(date +%s) - started ))
