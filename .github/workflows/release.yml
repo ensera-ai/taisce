@@ -45,6 +45,26 @@ jobs:
             exit 1
           fi
           echo "tag $GITHUB_REF_NAME matches VERSION ${line}"
+      # The same pinned helm the build installs, for the same reason and with the same digest. Without
+      # it this job rendered the chart with whatever helm the runner image ships, and two tests that
+      # assert the content of NOTES.txt disagreed with it — at tag time, on a commit whose own run of
+      # this suite had just passed on main. That is #192. The job claimed above to run the complete
+      # gate the build runs, and did not.
+      #
+      # A release is the worst place to discover an environmental difference: a tag must not move, so
+      # a gate that fails for a reason the commit did not cause forces a choice between deleting a tag
+      # and shipping a version nobody can account for.
+      - name: Helm
+        env:
+          HELM_VERSION: v4.3.0
+          HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp linux-amd64/helm
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version --short
       - run: make db-up
       - run: make test COVER_PROFILE=coverage.out
       - run: go vet ./...
