@@ -296,7 +296,7 @@ infrastructure its operator controls: `docker compose up` on a machine, or a Hel
 no closed half and no paid tier, so the only reason to keep logic out of an adapter is that it belongs
 somewhere else.
 
-**Adapter focus: Python, Java and .NET.** The adapter is the product; the client underneath is plumbing
+**Adapter focus: Python, Java, .NET and Go** (Go since D27). The adapter is the product; the client underneath is plumbing
 sized to serve it.
 
 ## What is settled about the shape of it
