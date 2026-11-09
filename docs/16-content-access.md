@@ -39,6 +39,11 @@ body.
   Context both projects need has to be stored in both.
 - **Erasure is per project.** If you store one person in several projects, export and erase them in
   each one.
+- **An operator reaches every project's administration.** A project credential reaches one project.
+  An operator credential reaches no project's memory, but it administers all of them: it can issue a
+  read/write credential for any project, including a restricted one. So a restricted project is
+  restricted from applications, not from operators. Separation that has to hold against whoever holds
+  an operator token is a separate instance, and that is D34.
 - **Keep tokens out of prompts and logs.**
 
 ## How it works
