@@ -1497,3 +1497,100 @@ can no longer choose an outbound destination. That is the worst path #130 named,
 substrate (a column constraint and an allowlist), not by convention. Operations: an operator issuing a
 key for an erasure path now has to say `--access read_write`. That is deliberate friction, written
 into the CLI's help and the operator guide.
+
+## D27 — There is a Go adapter, on the Agent Framework's Go context provider, held to the same suite
+
+**Date.** 2026-11-09. **Issue.** [#128](https://github.com/ensera-ai/taisce/issues/128).
+
+**Why it was open.** The adapters existed for Python, Java and .NET. A Go application reached Taisce
+only through hand-written HTTP or the CLI, because every package in the service's module is under
+`internal/`. The Agent Framework has a Go implementation, `microsoft/agent-framework-go`, whose
+`ContextProvider` has the two hooks the other adapters use: `Invoking`, which returns the messages a
+run will send, and `Invoked`, which carries the run's error. But it was at `v0.3.0`, before 1.0, and
+the recommendation in #128 was to wait for 1.0. The owner chose to build it now.
+
+**Decided.**
+- A fourth adapter repository, `ensera-ai/taisce-go`, one module (`github.com/ensera-ai/taisce-go`)
+  with two packages. The root package `taisce` is the client: observe, freshness, recall, context,
+  citations, and the typed erasure and export of D24. `agentframework` is the adapter: a
+  `ContextProvider` that recalls before a run and observes after it, and a `Compaction` provider that
+  replaces a long loaded history with the deployment's context.
+- It keeps every rule the others keep, and it is proved the same way: its driver passes every
+  conformance case against a live deployment, its `conformance` workflow stands one up, and its live
+  tests run erasure and export against it. Its key is D25's derivation, checked against the suite's
+  vectors.
+- The client holds the same transport rule as the other clients. It refuses plaintext to a host
+  that is not loopback, and it follows no redirect, since Go's standard client would otherwise
+  resend the credential to the same host.
+- The framework is pinned at the version in `go.mod`, and CI tests that version and nothing newer.
+
+**Rejected: no Go adapter until the framework reaches 1.0.** It is the cheaper position, and it was
+the recommendation. It costs a Go developer on the Agent Framework an adapter that exists in three
+other languages, for a risk that can be contained: the upstream seam is two methods, and a break
+there is one file to change, found by the suite on the first run against a new version.
+
+**Rejected: a Go client with no adapter.** Typed access without a framework commitment. But a
+client is plumbing sized to serve an adapter, and one with no adapter serves nothing anybody has
+named.
+
+**Rejected: the client and the adapter as two modules.** A consumer of the client alone would not
+download the framework's dependencies, but it would mean two versions to tag and keep in step, for a
+client whose only reader is the adapter beside it. Go's module graph pruning already keeps the
+framework's code out of a build that does not import `agentframework`.
+
+**What this does not cover.**
+- An upstream release that changes the `ContextProvider` seam. Nothing here notices it until somebody
+  raises the pinned version.
+- Frameworks other than Microsoft's. The client is usable from any Go code; an adapter for another
+  framework would be its own decision.
+
+**Undo cost.** High once a version is tagged. The Go module proxy and checksum database keep every
+published version for good, and a `retract` directive can only warn about one. Before the first tag,
+it is one repository to archive.
+
+**Impact.** Operations: a fourth adapter repository to keep in step with every rule the suite holds,
+and a fourth CI to watch. Security: the same boundary as the other three: an untrusted user message
+in, the person's words and the final reply out, and no erasure or export reachable from a model.
+
+## D28 — Where CI runs: GitHub-hosted by default, own hardware only for trusted triggers, and only once a measurement says it pays
+
+**Date.** 2026-11-09. **Issue.** [#136](https://github.com/ensera-ai/taisce/issues/136).
+
+**Why it was open.** Runners on the project's own hardware, already serving a self-hosted GitLab, were
+proposed as faster or cheaper CI. Two shapes were on the table: GitHub Actions jobs on runners hosted
+on that hardware, or GitLab becoming the source of truth and push-mirroring to GitHub so CI could move
+to GitLab's runners. Nothing had been measured: not the wall-clock time `make gate` takes on that
+hardware, not Actions minutes, not variance.
+
+**Decided.**
+- **GitHub stays the source of truth.** The mirror stays one-way, from GitHub outwards.
+- **CI stays on GitHub-hosted runners until a measurement says otherwise.** That measurement is
+  `make gate` on one candidate host and on `ubuntu-latest`, three runs each, recording wall-clock
+  time and variance in a dated document. If the hardware is not clearly better, nothing changes.
+- **If own runners are adopted, they run trusted triggers only.** That means pushes to `main`, manual
+  runs, and benchmark jobs, chosen by a `runs-on` expression that depends on the trigger, in a runner
+  group limited to this organisation's repositories. A fork's pull request never runs on them: that
+  would be a stranger's code inside the project's network.
+- **The release never runs on them.** D6's Build Level 2 claim rests on a hosted build platform and
+  on keyless signing bound to GitHub's identity. Moving the release would reopen D6.
+
+**Rejected: GitLab as the source of truth, mirroring to GitHub.**
+- It needs a stored GitHub token able to write `main` and workflow files, and branch protection
+  would have to let that token past it. That ends "a pull request and a green build" on the public
+  repository.
+- A public GitHub repository cannot turn pull requests off. Contributors' pull requests would still
+  arrive there and would have to be re-applied by hand, or the mirror push would fail on divergence.
+- Every workflow in four repositories would be rewritten, and publishing would need stored registry
+  keys in place of the identity exchanged at the moment of use. Rule 8 prefers the second.
+
+**Rejected: adopting own runners now.** Rule 10: a second thing to operate has to beat the simpler
+thing with a number, and there is no number yet.
+
+**What this does not cover.** Performance evidence. If a held-still host is adopted for benchmarks,
+what it may claim is decided where those benchmarks are, not here.
+
+**Undo cost.** Low. Runner labels are a line in a workflow, and the default is the state that exists
+today.
+
+**Impact.** Security: no stored push credential anywhere, branch protection unchanged, and no
+untrusted code on the project's hardware. Cost: none until a measurement justifies one.
