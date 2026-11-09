@@ -60,7 +60,53 @@ out to search all three. An empty list, a repeat or an unknown name is refused.
 
 **`themes`** set to `true` also consults the report hierarchy when a name matched.
 
+**`explain`** set to `true` adds an `explain` object beside the bundle: which arm proposed each
+anchor, what each stage offered, and what the cuts dropped. Off by default, because it is a larger
+response and most recalls do not need it. It reports and changes nothing — the bundle you get with it
+is the bundle you would have got without it.
+
 Any other invalid control returns `400 invalid_recall_controls`.
+
+## Why a recall answered that way
+
+```json
+{
+  "explain": {
+    "anchors": [
+      {"entity_id": "7f…", "name": "Marta", "arm": "name", "matched": "marta", "score": 0, "kept": true, "facts": 2},
+      {"entity_id": "91…", "name": "Ensera", "arm": "meaning", "matched": "", "score": 0.77, "kept": false, "facts": 0}
+    ],
+    "stages": [
+      {"surface": "facts", "ran": true, "offered": 7, "kept": 2,
+       "dropped": [{"ref": "f3…", "cut": "budget", "characters": 180, "score": 0.9}]},
+      {"surface": "reports", "ran": false, "offered": 0, "kept": 0, "dropped": []},
+      {"surface": "passages", "ran": true, "offered": 3, "kept": 3, "dropped": []}
+    ]
+  }
+}
+```
+
+**`arm`** is how an anchor got in: `name` for a term in your question that matched a stored name or
+alias, `meaning` for the semantic surface's proposal. `score` is the meaning arm's similarity; the
+name arm matched exactly and has nothing to score. **`kept: false`** is an anchor that was proposed
+and then dropped — a name the meaning arm proposed that the person you asked about has no fact about.
+That row is the one the bundle cannot show you, because `anchors` lists only what survived.
+
+**`offered`** is what a stage produced before anything was cut; **`kept`** is what reached you;
+**`dropped`** is the difference, in the order the candidates were offered. **`cut`** says which cut
+took it: `rows` is the read's own row bound, which a larger `max_characters` does not change, and
+`budget` is your character allowance, which it does. **`characters`** is what the candidate would
+have cost — a first dropped candidate costing more than your whole remaining budget means ask for
+more characters rather than doubt the retrieval.
+
+**`ran: false`** is a stage that was selected and skipped: no anchor to walk from, no embedding model
+configured, or a subject filter that withholds reports. `degraded` says which. A stage you did not
+select is not in `stages` at all.
+
+**It carries no text.** A fact your budget cut is a fact you were not given, so a dropped candidate
+is a reference, a size and a score — never the statement, quote or passage. Resolve the reference
+with [citation resolution](08-citation-resolution.md) or
+[record inspection](11-record-inspection.md) if you need the words.
 
 ## How the budget is counted
 
