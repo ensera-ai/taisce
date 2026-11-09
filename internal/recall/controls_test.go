@@ -19,8 +19,8 @@ type controlStore struct{}
 func (controlStore) AnchorsForSubject(context.Context, []string, []string, string) ([]domain.Anchor, error) {
 	return []domain.Anchor{{Entity: domain.Entity{ID: "e1", CanonicalName: "Marta"}}}, nil
 }
-func (controlStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
-	return []domain.CitedFact{{ID: "f1", Subject: "م", Predicate: "p", Object: "🌍", Statement: "ع", SourceRole: "tool", Path: []string{"أ", "ب"}, Via: []string{"c"}, Evidence: domain.Evidence{Quote: "ح", Context: domain.Context{Text: "د"}}}}, nil
+func (controlStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, bool, error) {
+	return []domain.CitedFact{{ID: "f1", Subject: "م", Predicate: "p", Object: "🌍", Statement: "ع", SourceRole: "tool", Path: []string{"أ", "ب"}, Via: []string{"c"}, Evidence: domain.Evidence{Quote: "ح", Context: domain.Context{Text: "د"}}}}, false, nil
 }
 
 func TestRecallControlsAreIndependentAcrossConcurrentClients(t *testing.T) {

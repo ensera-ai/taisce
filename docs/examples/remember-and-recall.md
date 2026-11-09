@@ -150,7 +150,7 @@ print(bundle["facts"], bundle["reach"])
 You should see nothing:
 
 ```json
-{"facts": [], "reach": {"terms": …, "anchored": 0, "named_nothing_known": true, "facts_per_anchor": {}}}
+{"facts": [], "reach": {"terms": …, "anchored": 0, "named_nothing_known": true, "facts_per_anchor": {}, "neighbourhood_capped": false}}
 ```
 
 Without a subject, recall covers the whole project and starts from the names in the question. "I" is

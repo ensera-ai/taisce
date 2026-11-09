@@ -91,6 +91,17 @@ func (e *Embedder) Embed(ctx context.Context, inputs []string) ([][]float32, err
 		}
 	}
 
+	// After validation, never before it: a memo hit must refuse exactly what a miss would refuse,
+	// or a bad input becomes acceptable on its second use within one request. See questionmemo.go
+	// for why this is scoped to a request and keyed by the space.
+	memo, memoKey := questionMemoFrom(ctx), ""
+	if memo != nil && len(inputs) == 1 {
+		memoKey = e.questionMemoKeyFor(inputs[0])
+		if vector, ok := memo.lookup(memoKey); ok {
+			return [][]float32{vector}, nil
+		}
+	}
+
 	body, err := json.Marshal(embeddingRequest{Model: e.config.EmbeddingModel, Input: inputs})
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -176,6 +187,11 @@ func (e *Embedder) Embed(ctx context.Context, inputs []string) ([][]float32, err
 			return nil, fmt.Errorf("input %d embedded to %d dimensions and input 0 to %d",
 				i, len(v), len(out[0]))
 		}
+	}
+	// Only a vector that passed every check above is kept. A memo of something this function would
+	// have refused is a refusal that happens once.
+	if memoKey != "" {
+		memo.keep(memoKey, out[0])
 	}
 	return out, nil
 }

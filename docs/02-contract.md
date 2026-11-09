@@ -486,7 +486,7 @@ POST `/v1/recalls` → 200
 | `truncated` | boolean |
 | `characters` | integer |
 | `degraded` | array of string |
-| `reach` | {terms: integer, anchored: integer, named_nothing_known: boolean, facts_per_anchor: object of integer} |
+| `reach` | {terms: integer, anchored: integer, named_nothing_known: boolean, facts_per_anchor: object of integer, neighbourhood_capped: boolean} |
 
 
 ## `context.assemble`

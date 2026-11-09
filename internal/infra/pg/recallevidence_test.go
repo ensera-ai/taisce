@@ -39,7 +39,7 @@ func TestAFactWithSeveralSpansIsRecalledOnce(t *testing.T) {
 	if err := pool.QueryRow(ctx, schema.SQL(`SELECT entity_id::text FROM {schema}.entity WHERE normalized_name='atlas'`)).Scan(&atlas); err != nil {
 		t.Fatal(err)
 	}
-	got, err := pg.NewRecallStore(pool, schema).FactsAboutForSubject(ctx, []string{"p1"}, []string{atlas}, 50, []string{"user"}, domain.AsOf{}, 1, "")
+	got, _, err := pg.NewRecallStore(pool, schema).FactsAboutForSubject(ctx, []string{"p1"}, []string{atlas}, 50, []string{"user"}, domain.AsOf{}, 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}

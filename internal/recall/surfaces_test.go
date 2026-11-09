@@ -230,8 +230,8 @@ func (namedStore) AnchorsForSubject(context.Context, []string, []string, string)
 	return []domain.Anchor{{Entity: domain.Entity{ID: "e-marta", Scope: "p1", CanonicalName: "Marta"}, Matched: "marta"}}, nil
 }
 
-func (s namedStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
-	return s.facts, nil
+func (s namedStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, bool, error) {
+	return s.facts, false, nil
 }
 
 type semanticFactsStore struct{ facts []domain.CitedFact }
@@ -240,8 +240,8 @@ func (semanticFactsStore) AnchorsForSubject(context.Context, []string, []string,
 	return nil, nil
 }
 
-func (s semanticFactsStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
-	return s.facts, nil
+func (s semanticFactsStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, bool, error) {
+	return s.facts, false, nil
 }
 
 func holds(list []string, want string) bool {

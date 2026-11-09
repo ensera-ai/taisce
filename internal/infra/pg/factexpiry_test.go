@@ -60,7 +60,7 @@ func TestAnExpiredTurnStopsAnsweringBeforeItIsSwept(t *testing.T) {
 	citations := pg.NewCitationStore(pool, schema)
 	answers := func() (int, int, bool) {
 		t.Helper()
-		walked, err := recalls.FactsAbout(ctx, []string{"p1"}, []string{subjectEntity}, 10, []string{string(domain.RoleUser)}, domain.AsOf{}, 1)
+		walked, _, err := recalls.FactsAbout(ctx, []string{"p1"}, []string{subjectEntity}, 10, []string{string(domain.RoleUser)}, domain.AsOf{}, 1)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -75,11 +75,11 @@ func TestGenerationCutoverPreservesOldCitationsAndPublishesNewIdentities(t *test
 	if err != nil || current.Statement != f.claim.Statement || current.Evidence[0].ExtractorVersion != f.version || !current.Known.From.Equal(result.AppliedAt) {
 		t.Fatal("new provenance is not truthful", err)
 	}
-	got, err := pg.NewRecallStore(f.pool, f.schema).FactsAbout(ctx, []string{"p1"}, []string{*current.SubjectID}, 10, []string{"user"}, domain.AsOf{}, 1)
+	got, _, err := pg.NewRecallStore(f.pool, f.schema).FactsAbout(ctx, []string{"p1"}, []string{*current.SubjectID}, 10, []string{"user"}, domain.AsOf{}, 1)
 	if err != nil || len(got) != 1 || got[0].ID != fresh {
 		t.Fatal("current recall includes old interpretation", err)
 	}
-	historical, err := pg.NewRecallStore(f.pool, f.schema).FactsAbout(ctx, []string{"p1"}, []string{*current.SubjectID}, 10, []string{"user"}, domain.AsOf{Known: *before.Known.From}, 1)
+	historical, _, err := pg.NewRecallStore(f.pool, f.schema).FactsAbout(ctx, []string{"p1"}, []string{*current.SubjectID}, 10, []string{"user"}, domain.AsOf{Known: *before.Known.From}, 1)
 	if err != nil || len(historical) != 1 || historical[0].ID != f.original {
 		t.Fatal("historical recall changed", err)
 	}

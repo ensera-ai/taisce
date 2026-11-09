@@ -54,11 +54,11 @@ func TestCorrectionPreservesAttributionAndOneKnowledgeBoundary(t *testing.T) {
 				t.Fatalf("correction boundary or authorship lost: %+v", fresh)
 			}
 			recall := pg.NewRecallStore(pool, schema)
-			past, err := recall.FactsAbout(ctx, []string{"p1"}, []string{*old.SubjectID}, 10, []string{"user"}, domain.AsOf{Known: *old.Known.From}, 1)
+			past, _, err := recall.FactsAbout(ctx, []string{"p1"}, []string{*old.SubjectID}, 10, []string{"user"}, domain.AsOf{Known: *old.Known.From}, 1)
 			if err != nil || len(past) != 1 || past[0].ID != id {
 				t.Fatalf("past knowledge: %+v %v", past, err)
 			}
-			boundary, err := recall.FactsAbout(ctx, []string{"p1"}, []string{*old.SubjectID}, 10, []string{"user"}, domain.AsOf{Known: *fresh.Known.From}, 1)
+			boundary, _, err := recall.FactsAbout(ctx, []string{"p1"}, []string{*old.SubjectID}, 10, []string{"user"}, domain.AsOf{Known: *fresh.Known.From}, 1)
 			if err != nil || len(boundary) != 1 || boundary[0].ID != replacement.ID {
 				t.Fatalf("correction knowledge: %+v %v", boundary, err)
 			}

@@ -41,8 +41,12 @@ type Store interface {
 	//
 	// `hops` is how far from the anchors the traversal may go. One is the ordinary read: facts about
 	// what the question named. More is a chain, and it comes back with the relations it followed.
+	//
+	// The bool says the traversal's own fanout cap took facts off a busy entity. It is separate from
+	// the row limit above because the caller cannot see it coming and cannot raise it: a bigger
+	// budget returns the same bounded neighbourhood.
 	FactsAboutForSubject(ctx context.Context, scopes, entityIDs []string, limit int, sources []string,
-		at domain.AsOf, hops int, subject string) ([]domain.CitedFact, error)
+		at domain.AsOf, hops int, subject string) ([]domain.CitedFact, bool, error)
 }
 
 // Budget is how much a caller can afford to be given back.
@@ -284,7 +288,7 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	// One more than the row bound, so a full result is distinguishable from a truncated one without
 	// a second count query. The row bound is a guard on the QUERY — it stops an enormous budget
 	// asking the database for an unbounded read — and is not the unit the caller reasons in.
-	facts, err := r.store.FactsAboutForSubject(ctx, scopes, ids, r.budget.MaxRows+1, sources, at, hops, subject)
+	facts, capped, err := r.store.FactsAboutForSubject(ctx, scopes, ids, r.budget.MaxRows+1, sources, at, hops, subject)
 	if err != nil {
 		return domain.Bundle{}, err
 	}
@@ -293,6 +297,18 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	if len(facts) > r.budget.MaxRows {
 		facts = facts[:r.budget.MaxRows]
 		bundle.Truncated = true
+	}
+	// A neighbourhood the traversal had to cut is a cut like any other, so the bundle says it was
+	// cut — a caller that cannot tell a complete neighbourhood from a bounded one reads a short
+	// bundle as a verdict, which is the whole reason Truncated exists.
+	//
+	// And it is reported a second way, because the two cuts call for different responses. A budget
+	// cut is the caller's own allowance and asking again for more characters returns more facts; a
+	// capped neighbourhood is a property of how busy the entity is, and asking again for more
+	// characters returns exactly the same facts. Only one of those is worth a retry.
+	if capped {
+		bundle.Truncated = true
+		reach.NeighbourhoodCapped = true
 	}
 
 	// Cut by what the caller can afford. Nothing has ranked these, so the cut drops arbitrary

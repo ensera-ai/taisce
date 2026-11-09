@@ -39,7 +39,7 @@ func TestSupersessionAfterClockRollbackPreservesOrderedKnowledge(t *testing.T) {
 		known time.Time
 		id    string
 	}{{oldKnown, first}, {newKnown, second}} {
-		got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{*citation.SubjectID}, 10, []string{"user"}, domain.AsOf{Known: view.known}, 1)
+		got, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{*citation.SubjectID}, 10, []string{"user"}, domain.AsOf{Known: view.known}, 1)
 		if err != nil || len(got) != 1 || got[0].ID != view.id {
 			t.Fatalf("logical knowledge view: %+v %v", got, err)
 		}

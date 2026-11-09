@@ -54,7 +54,7 @@ func TestRetractionPreservesPastKnowledgeAndSuppressesSourceReextraction(t *test
 				t.Fatal("withdrawal rewrote evidence or valid time")
 			}
 			for _, at := range []domain.AsOf{{}, {Known: *before.Known.From}} {
-				got, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{*before.SubjectID}, 10, []string{"user"}, at, 1)
+				got, _, err := pg.NewRecallStore(pool, schema).FactsAbout(ctx, []string{"p1"}, []string{*before.SubjectID}, 10, []string{"user"}, at, 1)
 				if err != nil {
 					t.Fatal(err)
 				}

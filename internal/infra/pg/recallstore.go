@@ -125,20 +125,25 @@ ORDER BY length(term) DESC, canonical_name, entity_id`
 // and gets everything, in the same way there is no read that omits the authorised project set and
 // gets every project.
 func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string, limit int,
-	sources []string, at domain.AsOf, hops int) ([]domain.CitedFact, error) {
+	sources []string, at domain.AsOf, hops int) ([]domain.CitedFact, bool, error) {
 	return s.FactsAboutForSubject(ctx, scopes, entityIDs, limit, sources, at, hops, "")
 }
 
 // FactsAboutForSubject applies attribution before fanout at EVERY hop, including through shared
 // named entities. Filtering the final bundle would already have let other people's edges guide it.
+// The second return says whether any branch of the walk hit the fanout cap. It is not the same thing
+// as this query's row limit or the caller's budget: those are cuts the caller chose and can see the
+// size of, and this one is a property of how busy an entity happens to be. Reported rather than
+// inferred, because a neighbourhood that was cut and a neighbourhood that was small look identical
+// from the rows alone.
 func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityIDs []string, limit int,
-	sources []string, at domain.AsOf, hops int, subject string) ([]domain.CitedFact, error) {
+	sources []string, at domain.AsOf, hops int, subject string) ([]domain.CitedFact, bool, error) {
 
 	if len(sources) == 0 {
 		// An empty set returns nothing rather than everything. A caller that computed its source
 		// list and got nothing meant nothing; the alternative — treating empty as unrestricted — is
 		// the failure the whole mechanism exists to prevent.
-		return nil, nil
+		return nil, false, nil
 	}
 	// A statement per shape of the question, rather than one statement with an OR on the temporal
 	// predicate. `($6 IS NULL AND upper_inf(valid)) OR valid @> $6` is unindexable in both of its
@@ -158,11 +163,15 @@ func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityID
 	}
 	rows, err := s.pool.Query(ctx, s.schema.SQL(stmt), args...)
 	if err != nil {
-		return nil, fmt.Errorf("read facts: %w", err)
+		return nil, false, fmt.Errorf("read facts: %w", err)
 	}
 	defer rows.Close()
 
 	var out []domain.CitedFact
+	// False when the walk returned no rows at all, which is the one case this cannot speak for: a
+	// capped branch whose every row was then discarded upstream leaves nothing to carry the flag.
+	// Stated here because the limit belongs beside the mechanism.
+	var capped bool
 	for rows.Next() {
 		var f domain.CitedFact
 		var subject, object *string
@@ -173,8 +182,8 @@ func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityID
 			&f.Confidence, &f.ValidFrom, &f.ValidUntil, &f.AnchoredOn, &f.SourceRole,
 			&f.Evidence.SourceObservationID, &f.Evidence.SourceOrdinal, &f.Evidence.Quote,
 			&f.Evidence.ByteStart, &f.Evidence.ByteEnd, &f.Evidence.ExtractorVersion,
-			&window, &windowStart, &messageBytes, &f.Hops, &via, &path); err != nil {
-			return nil, err
+			&window, &windowStart, &messageBytes, &f.Hops, &via, &path, &capped); err != nil {
+			return nil, false, err
 		}
 		// No message means no context, and the fact still comes back. A message can be gone because
 		// it was erased, and a citation that lost its surrounding words has lost legibility rather
@@ -207,7 +216,7 @@ func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityID
 		}
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	return out, capped, rows.Err()
 }
 
 // `upper_inf(valid)` and `upper_inf(known)` — what is true now, as best we know now. "What was true
@@ -239,45 +248,64 @@ WITH RECURSIVE reachable AS (
            NULL::uuid AS fact_id, NULL::text AS scope, NULL::uuid AS subject_entity_id,
            NULL::text AS predicate, NULL::uuid AS object_entity_id, NULL::text AS statement,
            NULL::real AS confidence, NULL::timestamptz AS valid_from,
-           NULL::timestamptz AS valid_until, NULL::text AS source_role
+           NULL::timestamptz AS valid_until, NULL::text AS source_role, FALSE AS capped
       FROM unnest($2::uuid[]) AS a(entity_id)
     UNION ALL
     SELECT step.other, r.anchor, r.hops + 1,
            r.path || step.other, r.via || step.predicate,
            step.fact_id, step.scope, step.subject_entity_id, step.predicate,
            step.object_entity_id, step.statement, step.confidence, step.valid_from,
-           step.valid_until, step.source_role
+           step.valid_until, step.source_role, step.capped
       FROM reachable r
       CROSS JOIN LATERAL (
-          SELECT * FROM (
-              SELECT f.object_entity_id AS other, f.fact_id, f.scope, f.subject_entity_id,
-                     f.predicate, f.object_entity_id, f.statement, f.confidence,
-                     lower(f.valid) AS valid_from, upper(f.valid) AS valid_until, f.source_role
-                FROM {schema}.fact f
-               WHERE f.scope = ANY($1)
-                 AND f.subject_entity_id = r.entity_id
-                 AND f.source_role = ANY($4)
-                 AND ($8::text IS NULL OR f.data_subject_id=$8)
-                 AND (f.retention_until IS NULL OR f.retention_until > now())
-                 AND %[1]s
-               ORDER BY f.fact_id
-               LIMIT $7
-          ) forward
+          -- Each branch asks for one row more than the cap allows, so that reaching the cap is
+          -- distinguishable from exactly filling it. The extra row is never returned: it is read,
+          -- it sets the capped flag on the rows that are, and it is dropped. One row per branch per
+          -- hop is what an honest signal costs, and the alternative — counting the whole
+          -- neighbourhood — would give up the bounded read the cap exists to guarantee.
+          SELECT other, fact_id, scope, subject_entity_id, predicate, object_entity_id, statement,
+                 confidence, valid_from, valid_until, source_role, capped
+            FROM (
+              SELECT edge.*, bool_or(edge.ordinal > $7) OVER () AS capped
+                FROM (
+                  SELECT f.object_entity_id AS other, f.fact_id, f.scope, f.subject_entity_id,
+                         f.predicate, f.object_entity_id, f.statement, f.confidence,
+                         lower(f.valid) AS valid_from, upper(f.valid) AS valid_until, f.source_role,
+                         row_number() OVER (ORDER BY f.fact_id) AS ordinal
+                    FROM {schema}.fact f
+                   WHERE f.scope = ANY($1)
+                     AND f.subject_entity_id = r.entity_id
+                     AND f.source_role = ANY($4)
+                     AND ($8::text IS NULL OR f.data_subject_id=$8)
+                     AND (f.retention_until IS NULL OR f.retention_until > now())
+                     AND %[1]s
+                   ORDER BY f.fact_id
+                   LIMIT $7 + 1
+                ) edge
+            ) counted
+           WHERE ordinal <= $7
           UNION ALL
-          SELECT * FROM (
-              SELECT f.subject_entity_id AS other, f.fact_id, f.scope, f.subject_entity_id,
-                     f.predicate, f.object_entity_id, f.statement, f.confidence,
-                     lower(f.valid) AS valid_from, upper(f.valid) AS valid_until, f.source_role
-                FROM {schema}.fact f
-               WHERE f.scope = ANY($1)
-                 AND f.object_entity_id = r.entity_id
-                 AND f.source_role = ANY($4)
-                 AND ($8::text IS NULL OR f.data_subject_id=$8)
-                 AND (f.retention_until IS NULL OR f.retention_until > now())
-                 AND %[1]s
-               ORDER BY f.fact_id
-               LIMIT $7
-          ) backward
+          SELECT other, fact_id, scope, subject_entity_id, predicate, object_entity_id, statement,
+                 confidence, valid_from, valid_until, source_role, capped
+            FROM (
+              SELECT edge.*, bool_or(edge.ordinal > $7) OVER () AS capped
+                FROM (
+                  SELECT f.subject_entity_id AS other, f.fact_id, f.scope, f.subject_entity_id,
+                         f.predicate, f.object_entity_id, f.statement, f.confidence,
+                         lower(f.valid) AS valid_from, upper(f.valid) AS valid_until, f.source_role,
+                         row_number() OVER (ORDER BY f.fact_id) AS ordinal
+                    FROM {schema}.fact f
+                   WHERE f.scope = ANY($1)
+                     AND f.object_entity_id = r.entity_id
+                     AND f.source_role = ANY($4)
+                     AND ($8::text IS NULL OR f.data_subject_id=$8)
+                     AND (f.retention_until IS NULL OR f.retention_until > now())
+                     AND %[1]s
+                   ORDER BY f.fact_id
+                   LIMIT $7 + 1
+                ) edge
+            ) counted
+           WHERE ordinal <= $7
       ) step
      WHERE r.hops < $6
        AND step.other IS NOT NULL
@@ -301,7 +329,12 @@ SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name
        r.hops, r.via,
        (SELECT array_agg(coalesce(pe.canonical_name, '') ORDER BY p.ord)
           FROM unnest(r.path) WITH ORDINALITY AS p(id, ord)
-          LEFT JOIN {schema}.entity pe ON pe.entity_id = p.id AND pe.scope = ANY($1))
+          LEFT JOIN {schema}.entity pe ON pe.entity_id = p.id AND pe.scope = ANY($1)),
+       -- Whether any branch of this walk hit the fanout cap. Read from the traversal itself rather
+       -- than from what survives dedup or the row limit, because the question is what the TRAVERSAL
+       -- left behind, which is settled before this query's own cut and before the caller's budget.
+       -- Uncorrelated, so it is evaluated once for the statement rather than per row.
+       (SELECT coalesce(bool_or(walked.capped), FALSE) FROM reachable walked)
   FROM reached r
   -- One citation per fact: the earliest span in the log that the caller may see. A fact several
   -- spans support is still one fact, and joining every evidence row returned it once per span,

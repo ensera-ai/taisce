@@ -374,8 +374,8 @@ func (stubStore) AnchorsForSubject(context.Context, []string, []string, string) 
 	return nil, nil
 }
 
-func (stubStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
-	return nil, nil
+func (stubStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, bool, error) {
+	return nil, false, nil
 }
 
 // ── #81: facts from one sentence are not two sources ──────────────────────────────────────────
@@ -396,8 +396,8 @@ func (s stubFactStore) AnchorsForSubject(context.Context, []string, []string, st
 	return []domain.Anchor{{Entity: domain.Entity{ID: "e1", CanonicalName: "Marta"}, Matched: "marta"}}, nil
 }
 
-func (s stubFactStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
-	return s.facts, nil
+func (s stubFactStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, bool, error) {
+	return s.facts, false, nil
 }
 
 func TestFactsFromOneMessageAboutOneSubjectAreMarkedNotIndependent(t *testing.T) {
@@ -645,8 +645,8 @@ func (emptyAnchorStore) AnchorsForSubject(context.Context, []string, []string, s
 	return nil, nil
 }
 
-func (emptyAnchorStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
-	return nil, nil
+func (emptyAnchorStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, bool, error) {
+	return nil, false, nil
 }
 
 // ── #61: the bundle is cut in a unit a caller can convert ─────────────────────────────────────
@@ -842,10 +842,10 @@ func (s *recordingStore) AnchorsForSubject(context.Context, []string, []string, 
 }
 
 func (s *recordingStore) FactsAboutForSubject(_ context.Context, _, _ []string, _ int, _ []string,
-	at domain.AsOf, hops int, _ string) ([]domain.CitedFact, error) {
+	at domain.AsOf, hops int, _ string) ([]domain.CitedFact, bool, error) {
 	s.hops = hops
 	s.asked = at
-	return s.facts, nil
+	return s.facts, false, nil
 }
 
 // The ordinary recall asks about now, and "now" is the zero value rather than a timestamp this

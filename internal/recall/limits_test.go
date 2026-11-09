@@ -40,7 +40,7 @@ type overflowingAnchorStore struct{ stubStore }
 func (overflowingAnchorStore) AnchorsForSubject(context.Context, []string, []string, string) ([]domain.Anchor, error) {
 	return make([]domain.Anchor, domain.MaxRecallMatches+1), nil
 }
-func (overflowingAnchorStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, error) {
+func (overflowingAnchorStore) FactsAboutForSubject(context.Context, []string, []string, int, []string, domain.AsOf, int, string) ([]domain.CitedFact, bool, error) {
 	panic("over-limit anchors reached traversal")
 }
 
