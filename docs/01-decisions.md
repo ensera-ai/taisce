@@ -1594,3 +1594,176 @@ today.
 
 **Impact.** Security: no stored push credential anywhere, branch protection unchanged, and no
 untrusted code on the project's hardware. Cost: none until a measurement justifies one.
+
+## D29 — An operator extends the closed vocabulary over the management surface, and the vocabulary stays closed
+
+**Date.** 2026-11-09. **Issue.** [#141](https://github.com/ensera-ai/taisce/issues/141).
+
+**Why it was open.** The closed predicate vocabulary is what makes a relation queryable, a cardinality
+decidable and supersession possible, and a foreign key rather than a prompt enforces it. None of that
+was in question. What was in question is who may extend it: the rows were seeded by migration
+`0003_a_closed_predicate_vocabulary.sql`, and no route, command or portal path added one. So the single
+surface the design has for fitting a deployment to its own domain was reachable only by connecting to
+the database as an identity the running service does not hold. A deployment whose conversations are
+about clinical visits or shipments hits relations the vocabulary cannot name, every one is refused, and
+the operator can neither widen it nor easily discover it is happening.
+
+**The fact that decided it.** `internal/extract/identity.go` already folds `e.vocabulary.All()` into
+`PipelineVersion()`, noting that vocabulary order is significant because the model sees it in that
+order. So a vocabulary change *already* changes the extractor identity every fact carries, and a
+rebuild can *already* find what the change invalidated. The question this raised was whether that chain
+would have to be built; it exists. And the table bounds what an extension can be: `predicate` must
+match `^[a-z][a-z_]*[a-z]$`, `cardinality` is `one` or `many`, `object_kind` is one of six values and
+`semantic_type` one of eleven, each closed by a `CHECK`. An operator extending the vocabulary chooses a
+name inside three closed axes; they do not invent an ontology.
+
+**Decided.**
+- Add and list are management operations on `/manage/v1`, recorded on the ledger with the operator as
+  principal, with a CLI verb over the same operation.
+- **All five declarations are required, with no defaults.** `cardinality` especially: supersession rests
+  on it, it cannot be inferred later because by then all that is visible is two rows, and a guessed
+  value closes a fact that should have coexisted or keeps two that should have superseded. A default
+  here is a wrong answer months later.
+- **The refusals are the database's.** The handler does not restate the name pattern or the closed axes
+  in Go; it lets the `CHECK` constraints refuse and reports which one refused. A rule enforced in two
+  places is a rule that will disagree with itself.
+- **Nothing is removed and nothing is renamed.** The foreign key is `RESTRICT` by design, so retiring a
+  predicate facts still use fails loudly rather than deleting memory, and a rename is a second spelling
+  of one relation. A `description` correction is permitted by this entry but **is not exposed**: no
+  caller needs it yet, and an operation with no reader is not built.
+- **The authority did not widen, and not by a grant.** There is no `manage` database role. The
+  management surface serves over the administrative connection, which owns the namespace, so granting
+  it insert on one table would be a no-op and "nothing further" is already untrue of an owner. What
+  bounds this instead is the identity an agent's traffic actually reaches the database through: the
+  memory login holds `SELECT` on the vocabulary and nothing else, which
+  `TestTheMemoryIdentityReadsTheVocabularyAndCannotChangeIt` proves by watching `INSERT`, `UPDATE`,
+  `DELETE` and `TRUNCATE` all refused while `SELECT` works. The vocabulary is not in `memoryWrites` and
+  this entry is why it stays out.
+- **The project named on the operation is attribution, not a partition.** The vocabulary is one table
+  per tenant schema and every project in that instance shares it, which
+  `TestTheVocabularyIsSharedByEveryProjectInAnInstanceAndByNoOther` holds. The project is still
+  required and must be active, because the operation is recorded against it, but "a vocabulary per
+  project" is a wrong mental model and is written down here so nobody builds on it.
+- Adding a predicate changes the extractor identity, so facts formed afterwards carry a different one.
+  That is the record of what changed, not a side effect to hide.
+
+**What this does not cover.** A formation worker loads the vocabulary at startup, so a relation added
+while it runs is admitted by the foreign key and still refused as `unmapped_relation` until the worker
+restarts — [#164](https://github.com/ensera-ai/taisce/issues/164). And the cardinality constraint
+cascades on update, so a hand-written rename would rewrite every fact carrying it, which the delete
+side's reasoning already argues against — [#165](https://github.com/ensera-ai/taisce/issues/165).
+Neither is closed by this entry, and the limit belongs beside the mechanism.
+
+**Rejected: leave it to migrations.** The status quo, and it has the real virtue of putting no new write
+path near extraction. Rejected because it prices a vocabulary that fits the deployment at one release
+per deployment, and because "reachable only as an identity the service does not hold" is not a
+boundary, it is the absence of a mechanism.
+
+**Rejected: let the operator add a semantic type or an object kind.** Those are closed sets a `CHECK`
+enforces, the read path organises a bundle along `semantic_type`, and an unresolvable end is judged
+against `object_kind`. Opening either makes the axis mean nothing, which costs more than the relation it
+would admit.
+
+**Rejected: let a model propose predicates from the deployment's own corpus.** The closed set exists to
+keep that decision out of a model's judgement per message. It would also put sampled customer content
+into an artefact nobody reviewed, on the path where a planted instruction becomes a stored fact.
+
+**Rejected: deleting a predicate.** `RESTRICT` is the design. An operator who wants a relation gone
+wants the facts gone, and that is erasure or an entity purge, each of which already counts what it
+removed.
+
+**Undo cost.** Low for the operation: additive, the table already existed, and withdrawing the route
+leaves the data untouched. Not undoable for the data — a predicate that has been used is referenced by
+rows, and `RESTRICT` means it stays. The operation is cheap to reverse and its consequences are not,
+which is why the five declarations are mandatory.
+
+**Impact.** Operations: a deployment fits its domain without waiting for a release. Security: no new
+database authority — the operation runs on the connection that already owned the namespace, and the
+memory identity's reach is unchanged and now tested. Governance: no erasure or receipt guarantee moves;
+a predicate is not memory.
+## D30 — A retrieval result is published with its conditions, or no number is published at all
+
+**Date.** 2026-11-09. **Issue.** [#142](https://github.com/ensera-ai/taisce/issues/142).
+
+**Why it was open.** Every comparable product publishes a retrieval score and this one publishes none,
+so a developer evaluating it finds a blank where they expect a number. The question was whether to fill
+it.
+
+**What was read on 2026-11-09 decided it.** LoCoMo's answer key is wrong in 99 of 1,540 questions,
+putting the ceiling at 93.57%, and its judge accepted 62.81% of answers written to be vague and wrong.
+One system's LoCoMo score is reported as 65.99%, 75.14% and 58.44% by three parties who disagree about
+adversarial questions, timestamps and API version. Changing only the embedding model, with a pipeline
+otherwise identical, moved LongMemEval-S accuracy by 6.2 points. A study over planted facts with
+validity intervals found rankings invert with the time horizon, and full history tying or beating the
+best memory system at three weeks. And no product read publishes a p50 or p95 retrieval latency with
+its conditions stated. The sources are named in `docs/03-market.md` with the dates they were read.
+
+**Decided.**
+- **No bare score is published, ever.** A number without its conditions joins a pile whose conditions
+  nobody states, and it would be quoted back at a width it cannot carry.
+- If a retrieval number is published it is on **LongMemEval-S**, and it carries, beside the figure: the
+  embedding model, the answer model, the judge, the corpus and its size, the hardware, the number of
+  runs, and the write cost paid to produce the memory being read. The harness lives in the repository
+  so the figure can be re-run by whoever doubts it.
+- The figure is described as what it is — this system **and that answer model**, scored by **that
+  judge** — because LongMemEval-S scores answers rather than retrieval, and a reader told otherwise
+  would take it for a property of the storage.
+- Until such a run exists, the documentation says plainly that no comparable number exists and why,
+  rather than leaving the blank to be read as an oversight.
+- **Stating the conditions is the position**, not a disclaimer attached to one. It is the thing none of
+  the published figures above do.
+
+**Rejected: LoCoMo as the headline.** It is the most quoted benchmark in this market and that is its
+only advantage here. A benchmark whose answer key is 6.4% wrong and whose judge rewards vagueness
+cannot carry a claim, and quoting it would mean competing on a number this project would have to
+disown when asked how it was produced.
+
+**Rejected: publish nothing and say nothing.** Cheapest, and it leaves the one question every
+evaluation asks unanswered while the market answers it badly. Silence about a weakness reads as not
+having looked.
+
+**Rejected: a figure from a development machine.** A laptop runs the model, the database and the
+service at once, so the number measures that arrangement. This is the existing rule on measured claims,
+restated here because a benchmark is exactly where it would be bent.
+
+**Undo cost.** High in one direction only. Not publishing costs nothing and can be reversed any day.
+A published number cannot be unpublished, and a published number without conditions cannot be defended.
+
+**Impact.** How the project is evaluated, and nothing in the code. The work of actually running it
+needs hardware that can be held still, which is why the issue stays open after this entry.
+
+## D31 — There is no TypeScript client, and the absence is the decision
+
+**Date.** 2026-11-09. **Issue.** [#144](https://github.com/ensera-ai/taisce/issues/144).
+
+**Why it was open.** A TypeScript or JavaScript client is on this market's floor: of sixteen
+self-hostable projects read on 2026-11-09, five ship one, against eleven with a Python client. The
+adapters here are Python, Java and .NET. An absence on the floor is noticed, and this one was once
+worse than noticed — a page advertised a TypeScript client that did not exist.
+
+**Decided.**
+- **There is no TypeScript client, and the documentation says so.** Not as a roadmap item and not as
+  "coming soon", but as a position with its reason: the three adapters sit on the seams of the
+  frameworks where Java and .NET developers already are, and that is the part of this market nobody
+  else occupies.
+- If one is ever built it owes exactly what the other three owe — a conformance driver passing every
+  case against a live deployment, the session store, the passage seam, the compaction seam, and typed
+  erase and export surfacing the residual count. A client that is not held to the suite is a claim that
+  the bytes agree with nothing checking it.
+- Nothing anywhere in this project advertises a client that does not exist. That is already guarded for
+  the published copy, and this entry is why the guard matters.
+
+**Rejected: build one now.** It is the floor capability, and reach is a real argument. It was rejected
+on cost against position: a fourth language is a quarter more surface on every contract change,
+forever, and it is spent in the ecosystem where every competitor already is rather than the two where
+none of them is. The frameworks where TypeScript is first-class also mostly ship their own session
+seam, so what would be built is a client against a seam shaped differently from the three that exist.
+
+**Rejected: a thin client with no conformance driver.** Cheap, and it would make "one contract for every
+adapter" false the day it shipped.
+
+**Undo cost.** None. Recording an absence is free to reverse, and the day the argument from reach wins,
+the only thing this entry cost was writing it down.
+
+**Impact.** Reach, against the cost of keeping four contracts in step. No security or governance
+impact: nothing is built, and no authority moves.
