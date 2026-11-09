@@ -48,6 +48,7 @@ func newManaged(t *testing.T, tenant string) *managed {
 		Audit:        pg.NewAuditStore(h.pool, h.schema),
 		Refusals:     pg.NewRefusalStore(h.pool, h.schema),
 		Eraser:       pg.NewEraser(h.pool),
+		Vocabulary:   pg.NewVocabularyStore(h.pool, h.schema),
 		Health: func(ctx context.Context) (pg.OperationalHealth, error) {
 			return pg.ReadOperationalHealth(ctx, h.pool, h.schema)
 		},

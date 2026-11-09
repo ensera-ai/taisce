@@ -52,6 +52,12 @@ type ManagementStores struct {
 	Audit        *pg.AuditStore
 	Refusals     *pg.RefusalStore
 	Eraser       *pg.Eraser
+	// Vocabulary is the relation vocabulary: the one policy catalogue an operator may extend, and
+	// the only write authority this surface holds over what extraction is allowed to emit. It is
+	// here rather than on the memory server because the memory identity holds no write on that
+	// table at all, and nothing on the memory path should be able to widen what the next statement
+	// may store.
+	Vocabulary *pg.VocabularyStore
 	// Health is the instance's operational snapshot: the formation backlog, whether a worker is
 	// answering, and how many connections the deployment holds against the server's ceiling. A
 	// function for the same reason Provision is — it reads catalogue views the operator connection
@@ -104,6 +110,8 @@ var managementOperations = []managementRoute{
 	{Operation{domain.AuditFormationStatus, http.MethodPost, "/formation/status", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.formationStatus }, nil, formationStatusResponse{}},
 	{Operation{domain.AuditFormationParked, http.MethodPost, "/formation/parked", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.listParked }, parkedRequest{}, pg.ParkedPage{}},
 	{Operation{domain.AuditFormationUnpark, http.MethodPost, "/formation/unpark", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.unpark }, unparkRequest{}, unparkResponse{}},
+	{Operation{domain.AuditVocabularyAdd, http.MethodPost, "/vocabulary/add", http.StatusCreated}, func(m *ManagementServer) grantedHandler { return m.addPredicate }, vocabularyAddRequest{}, vocabularyAddResponse{}},
+	{Operation{domain.AuditVocabularyList, http.MethodPost, "/vocabulary/list", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.listPredicates }, vocabularyListRequest{}, vocabularyListResponse{}},
 	{Operation{domain.AuditAuditSeal, http.MethodPost, "/audit/seal", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.sealAudit }, nil, domain.AuditSeal{}},
 	{Operation{domain.AuditAuditVerify, http.MethodPost, "/audit/verify", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.verifyAudit }, nil, domain.AuditVerification{}},
 }

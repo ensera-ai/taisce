@@ -167,7 +167,7 @@ func renderHelp(t cliTheme) string {
 		{"Run", []string{"serve              API and formation worker", "bootstrap          provision the instance", "health             operational status", "probe              readiness/liveness", "version            what this binary is"}},
 		{"Memory", []string{"project            create, list, suspend, resume", "formation          inspect or retry parked turns", "recover            restore facts or chunks", "rebuild            reinterpret retained sources", "ingest             load documents as turns"}},
 		{"Semantic", []string{"embeddings         source-message generations", "entity-embeddings  entity candidate generations", "report-embeddings  thematic report generations"}},
-		{"Govern", []string{"credential         issue, list or revoke access", "operator           mint a management credential", "artifact           inspect storage limits", "audit              verify or seal the ledger"}},
+		{"Govern", []string{"credential         issue, list or revoke access", "operator           mint a management credential", "artifact           inspect storage limits", "vocabulary         add or list admitted relations", "audit              verify or seal the ledger"}},
 		{"Check", []string{"conformance        run the adapter suite", "help               this list"}},
 	}
 	for _, group := range groups {

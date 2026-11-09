@@ -230,6 +230,102 @@ func (c *manageClient) credential(ctx context.Context, args []string) error {
 	}
 }
 
+// vocabulary extends the relation vocabulary and reads what the instance admits.
+//
+// # Why this verb has no direct path over the administrative connection
+//
+// `project`, `credential` and `audit` each fall back to the database when the management surface is
+// not configured, because bootstrap has to create a project and mint the first credential before
+// any surface can be spoken to. Nothing is like that here: extending the vocabulary is a change to
+// what every later extraction may emit, and it is recorded with the operator credential as its
+// principal. Over the administrative connection there is no operator to name, so the row would say
+// the instance did it to itself. A verb that cannot be attributed is one this surface does not
+// offer, and the refusal says which two variables to set.
+//
+// Nothing here checks a declaration. The name's shape and the closed axes are constraints on the
+// table; sending a declaration the table refuses is how an operator is told, by name, which
+// constraint refused it.
+func (c *manageClient) vocabulary(ctx context.Context, args []string) error {
+	const usageLine = "usage: taisce vocabulary add <predicate> -project <name> -semantic-type <type> " +
+		"-cardinality <one|many> -object-kind <kind> -description <text> | list -project <name>"
+	if len(args) == 0 {
+		return errors.New(usageLine)
+	}
+	switch args[0] {
+	case "add":
+		if len(args) < 2 {
+			return errors.New(usageLine)
+		}
+		flags := flag.NewFlagSet("add", flag.ContinueOnError)
+		project := flags.String("project", "default", "the project this operation is recorded against")
+		semanticType := flags.String("semantic-type", "", "the kind of question the relation answers")
+		cardinality := flags.String("cardinality", "", "one, if a new fact closes the previous one; many, if they coexist")
+		objectKind := flags.String("object-kind", "", "what the object end of the relation should be")
+		description := flags.String("description", "", "what the relation means, for whoever reads it next")
+		if err := flags.Parse(args[2:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 {
+			return errors.New("unexpected vocabulary arguments; flags must follow the relation name")
+		}
+		var added struct {
+			Predicate vocabularyLine `json:"predicate"`
+		}
+		if err := c.post(ctx, "/vocabulary/add", map[string]any{
+			"project": *project, "predicate": args[1], "semantic_type": *semanticType,
+			"cardinality": *cardinality, "object_kind": *objectKind, "description": *description,
+		}, &added); err != nil {
+			return fmt.Errorf("add relation %q: %w", args[1], err)
+		}
+		printPredicate(added.Predicate)
+		fmt.Print("\nFacts formed from now on carry a different extractor identity, because the " +
+			"vocabulary is part of it.\n")
+		return nil
+	case "list":
+		flags := flag.NewFlagSet("list", flag.ContinueOnError)
+		project := flags.String("project", "default", "the project this operation is recorded against")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		var out struct {
+			Predicates []vocabularyLine `json:"predicates"`
+		}
+		if err := c.post(ctx, "/vocabulary/list", map[string]any{"project": *project}, &out); err != nil {
+			return fmt.Errorf("list relations: %w", err)
+		}
+		for _, p := range out.Predicates {
+			printPredicate(p)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown vocabulary command %q", args[0])
+	}
+}
+
+// vocabularyLine is one relation as the surface reports it. Declared here rather than shared with
+// the surface's own type because this is the CLI's view of an answer: a client of this API decodes
+// what it prints, and nothing more.
+type vocabularyLine struct {
+	Predicate    string `json:"predicate"`
+	SemanticType string `json:"semantic_type"`
+	Cardinality  string `json:"cardinality"`
+	ObjectKind   string `json:"object_kind"`
+	Description  string `json:"description"`
+	Event        bool   `json:"event"`
+}
+
+func printPredicate(p vocabularyLine) {
+	// An event relation is marked rather than given a column of its own: it is true of five of the
+	// thirty-nine seeded relations, and a column that is nearly always blank costs every other line
+	// its width.
+	event := ""
+	if p.Event {
+		event = "  [event]"
+	}
+	fmt.Printf("%-22s %-11s %-5s %-13s %s%s\n", p.Predicate, p.SemanticType, p.Cardinality,
+		p.ObjectKind, p.Description, event)
+}
+
 // retentionArgument reads a retention the same way on both paths: whole days, or the word
 // indefinite. Nil means indefinite, which is what a project starts with.
 func retentionArgument(args []string) (*int, error) {

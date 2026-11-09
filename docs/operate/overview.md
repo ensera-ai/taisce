@@ -5,8 +5,8 @@
 
 This guide is for whoever runs a Taisce instance. It covers the whole job, in the order you meet it:
 getting an operator token, creating projects, handing out API keys, watching the instance, dealing
-with turns that failed, reading what extraction refused and what was erased, and keeping the ledger
-honest.
+with turns that failed, reading what extraction refused and what was erased, fitting the relation
+vocabulary to your own domain, and keeping the ledger honest.
 
 ![The ops centre overview: activity, instance health and every project](../../site/static/img/ops-centre/overview.png)
 
@@ -364,6 +364,106 @@ project's token through [the memory API](../11-record-inspection.md).
 
 From the API: `POST /manage/v1/refusals/summary` with `{"project": "billing"}`.
 
+A steady stream of `unmapped_relation` is the refusal that points at something you can change here:
+it means your conversations are about relations this instance does not admit. See
+[the relation vocabulary](#the-relation-vocabulary).
+
+## The relation vocabulary
+
+Taisce stores a fact as a **relation** between two things, and the set of relations it admits is
+closed. That is what makes a fact findable: without it one relation arrives as `works_at`,
+`employed_by` and `has_employer`, and a question about where somebody works finds a third of what was
+extracted and misses the rest without anything looking wrong.
+
+The set is seeded with thirty-nine relations. A deployment whose conversations are about clinical
+visits, shipments or claims will meet relations it does not name, and each one is refused as
+`unmapped_relation` — the message is still stored, but no fact is formed from it. Adding the relation
+is how you fix that, and you do not need a release to do it.
+
+### What you declare, and why all five are required
+
+```bash
+taisce vocabulary add contracted_to \
+  -project billing \
+  -semantic-type identity \
+  -cardinality many \
+  -object-kind organisation \
+  -description 'An organisation the subject is contracted to.'
+```
+
+| Declaration | What it decides |
+|---|---|
+| The name | What the model is told to emit and what a query filters by. Lower-case letters and `_`, starting and ending with a letter |
+| `-cardinality` | `one` if a new fact closes the previous one; `many` if they coexist |
+| `-object-kind` | What the far end of the relation should be: `person`, `organisation`, `place`, `time`, `value` or `thing` |
+| `-semantic-type` | Which kind of question the relation answers; it is how a bundle about somebody is organised |
+| `-description` | What the relation means, for whoever reads it next |
+
+None of them has a default, and the one to think hardest about is `-cardinality`. It decides whether
+a later fact supersedes this one or sits beside it, and it cannot be worked out afterwards: by then
+all anybody can see is two facts, and a wrong answer either closes a fact that should have remained
+or keeps two that contradict each other.
+
+`-semantic-type` is one of `identity`, `preference`, `capability`, `intent`, `social`, `possession`,
+`structure`, `authorship`, `temporal`, `state`, `constraint`.
+
+The three sets above are closed, and extending them is not offered: the read path organises a bundle
+along the semantic type and judges an implausible extraction against the object kind, so a value
+outside either one would make that axis mean nothing.
+
+### See what this instance admits
+
+```bash
+taisce vocabulary list -project billing
+```
+
+```text
+contracted_to          identity    many  organisation  An organisation the subject is contracted to.
+occurred_on            temporal    one   time          When the subject happened.  [event]
+works_at               identity    many  organisation  An organisation the subject works for.
+```
+
+It is in the order the model is told them, which is by name — the same list on every deployment, so
+two extractions are never asked a differently ordered question.
+
+`[event]` marks a relation that reports something completed and stays true, so its past tense is
+admitted rather than refused as no longer current. It is not one of the five declarations and a
+relation you add is never marked: a past-tense assertion of it is read as a relation that has ended,
+which is the safe reading. Marking one is a schema change, not an operator action.
+
+From the API: `POST /manage/v1/vocabulary/add` and `/vocabulary/list`, each with a `project`. Both
+commands go through the management surface — `TAISCE_MANAGE_API` and `TAISCE_OPERATOR_TOKEN` — and
+there is no path for them over the database connection, because the change is recorded against the
+operator who made it and over that connection there would be no operator to name.
+
+### Four things to know before you add one
+
+**Restart the worker before extraction uses it.** A formation worker reads the vocabulary once, when
+it starts, and is then told the same list for every turn — which is what makes two extractions
+comparable. So a relation added while a worker is running is admitted by the database immediately and
+is not yet in the list the model is given: turns keep being refused as `unmapped_relation` until the
+worker restarts. Add the relations you need, then restart the worker (in Compose,
+`docker compose restart worker`), and use `taisce vocabulary list` to confirm what the next worker
+will load.
+
+**Facts formed afterwards carry a different extractor identity.** The vocabulary is part of what
+identifies the extractor, so every fact formed after a change is stamped differently from the ones
+before it. That is deliberate: it is the record of what changed, and it is what a rebuild reads to
+find the facts formed under the older vocabulary. Nothing already stored is altered, and nothing is
+re-read until you ask for it (see [rebuilds](#recovery-rebuilds-and-storage)).
+
+**The vocabulary belongs to the instance, not to the project.** The `project` you name is what the
+ledger records the change against; the relation itself is admitted for every project on this
+instance, immediately. If that is not what you want, it needs a second instance.
+
+**Nothing is removed and nothing is renamed.** A relation facts already use cannot be retired —
+attempting it fails rather than deleting the facts — and renaming one would leave a single relation
+with two spellings in its history, which is the split the closed set exists to prevent. If you want a
+relation gone, what you want is the facts gone, and that is an erasure.
+
+Both operations are on the ledger with your operator credential as the principal, and so is an
+attempt that was refused — which is how a typo in a project name is found later.
+
 ## Erasures
 
 Erasing a person is a memory operation: the application does it with a project token
@@ -444,6 +544,8 @@ These are deliberate, and each holds on all three surfaces:
 - **Purge an entity or erase a person.** Both are memory operations and need a project token.
 - **See a token after it was issued.** Only its digest is stored.
 - **Delete a project.** An erasure removes what was said, with a receipt; a deletion would not.
+- **Remove or rename a relation.** The vocabulary is added to, never edited (see
+  [the relation vocabulary](#the-relation-vocabulary)).
 - **See why a turn failed**, beyond the fact that it did. The worker's log has the error.
 - **See what the model cost.** Nothing records it.
 
