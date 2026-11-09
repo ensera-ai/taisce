@@ -31,6 +31,12 @@ import (
 // is a decision, it is D33, and it is re-argued when an advisory or a toolchain release says so. This
 // test asserts consistency, not correctness, and a reader who wants the second should read the
 // register.
+//
+// What it also cannot cover: whether the compiler that actually ran honoured the pin. The `toolchain`
+// line binds `GOTOOLCHAIN=auto`, the default, and an environment that sets GOTOOLCHAIN to `local` or
+// to a version has chosen its own compiler — which is the override that measured both toolchains
+// against one tree, so it is wanted rather than closed off. A test cannot assert what the next build
+// elsewhere will use; it can only make the files agree about what was asked for.
 func TestEveryPlaceThatNamesTheGoToolchainNamesTheOnePinnedInGoMod(t *testing.T) {
 	pinned := toolchainFromGoMod(t)
 

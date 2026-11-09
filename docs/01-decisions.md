@@ -1867,7 +1867,10 @@ figures: `research/2026-11-09-toolchain-advisories.md`.
 **Decided.** `coverage.floor` records the percentage; the `toolchain` line in `go.mod` records what
 produced it, and the two move in the same commit or neither moves. The floor is re-measured whenever
 the pin moves, from the lowest of at least three full runs under the new toolchain, and the register
-entry for a pin move carries those runs. D7 stands unchanged in everything it decided: the floor is
+entry for a pin move carries those runs. The floor is then placed below what the **hosted runner**
+reads, not below what a development machine reads: the platform moves the number as well as the
+toolchain does, and the runner is the one that fails pull requests. Local runs are evidence about the
+size of a change in the meter; they are not the basis for the number. D7 stands unchanged in everything it decided: the floor is
 absolute, it is a ratchet, and a change that only deletes covered code still fails it. What D7 did not
 anticipate is a change of instrument, which is not a change in what the suite covers and cannot be
 answered by covering more.
@@ -1903,9 +1906,21 @@ one substrate container of its own, no test failures in any run:
 | 2 | 11,645 / 12,641 | 92.1209% |
 | 3 | 11,646 / 12,641 | 92.1288% |
 
-The floor moves from 92.3 to **92.0**: 0.097 below the lowest of the three, about three times the
-0.032 spread between them. The same code under 1.27.1 measured 92.5% in CI run 42633642119, which is
-the gap this entry exists to account for.
+Those are darwin/arm64 figures, and they are not what the gate reads. CI run 42637282343, on
+linux/amd64 under the same pinned toolchain, reports **92.0%** for the same commits — lower than every
+local run. `go tool cover -func` prints one decimal and `scripts/coverage-gate.sh` compares that
+string, so the runner's true value is somewhere in [91.95, 92.05) and the gate can only ever place a
+floor to a tenth of a point.
+
+So the meter is the toolchain **and the platform**, and the basis for the floor is the runner's figure,
+because the runner is what enforces it. A floor set from the local reading is a floor the hosted build
+sits on: 92.0 against a reading of 92.0 passes as "at the floor" with no headroom, and the next
+ordinary run that lands a tenth lower fails a gate nobody changed — the failure
+`scripts/coverage-gate.sh` says costs more than the tenth it protects.
+
+The floor moves from 92.3 to **91.9**: one step below what the enforcing runner reads, 0.2 below the
+lowest local run. The same code under 1.27.1 measured 92.5% in CI run 42633642119, which is the gap
+this entry exists to account for.
 
 One observation recorded rather than acted on: six runs across two trees spread by less than 0.04 of a
 point, while `scripts/coverage-gate.sh` says the range across consecutive runs of an unchanged tree is
