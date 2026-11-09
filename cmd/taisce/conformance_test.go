@@ -23,8 +23,8 @@ func TestConformanceCommandRunsTheSuiteAgainstALiveDeployment(t *testing.T) {
 	if err := conformanceCommand(context.Background(), []string{"--api", h.server.URL, "--cases", "../../conformance/cases.json", "--reference"}, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	if strings.Count(out.String(), `"passed":true`) != 10 || !strings.Contains(out.String(), `"failed":0`) {
-		t.Fatalf("expected ten passing cases and a clean summary, got\n%s", out.String())
+	if strings.Count(out.String(), `"passed":true`) != 12 || !strings.Contains(out.String(), `"failed":0`) {
+		t.Fatalf("expected twelve passing cases and a clean summary, got\n%s", out.String())
 	}
 	for _, refused := range [][]string{
 		{"--api", h.server.URL, "--cases", "../../conformance/cases.json"},

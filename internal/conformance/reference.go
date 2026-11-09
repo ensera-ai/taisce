@@ -39,11 +39,20 @@ type Reference struct {
 	FreshKeyEachRun    bool   // mint a new idempotency key on every store, so a retry is a second turn
 	CollapseGroups     bool   // observe every message under one group ordinal, as though the turn were indivisible
 	ContextFatal       bool   // raise a context failure to the application
+	LineJoinedKey      bool   // derive the key from fields joined by newlines, whose boundaries content can forge
+	ClaimErasure       bool   // report a clean receipt without asking the deployment to erase anything
 }
 
 func (r *Reference) Run(ctx context.Context, in Instruction) (Report, error) {
 	client := &apiClient{base: strings.TrimRight(in.API, "/"), token: in.Token, http: &http.Client{Timeout: 10 * time.Second}}
 	var report Report
+	if in.Action == ActionErase {
+		report.Erasure = r.erase(ctx, client, in.DataSubjectID)
+		return report, nil
+	}
+	if in.Action != "" {
+		return report, fmt.Errorf("unknown action %q", in.Action)
+	}
 
 	// Provide: freshness and recall, both non-fatal. Nothing is injected when there is nothing
 	// to say; an empty memory message spends the model's attention on nothing.
@@ -223,7 +232,10 @@ func (r *Reference) store(ctx context.Context, client *apiClient, in Instruction
 			messages[i].GroupOrdinal = 0
 		}
 	}
-	key := turnKey(in.DataSubjectID, in.Case, messages)
+	key := TurnKey(in.DataSubjectID, in.Case, keyMessages(messages))
+	if r.LineJoinedKey {
+		key = lineJoinedKey(in.DataSubjectID, in.Case, messages)
+	}
 	if r.FreshKeyEachRun {
 		key = uuid.NewString()
 	}
@@ -242,20 +254,46 @@ func (r *Reference) store(ctx context.Context, client *apiClient, in Instruction
 	return true, nil
 }
 
-// turnKey is a version-5-shaped UUID over the subject, the run and the messages, in that order,
-// each line-terminated so that no arrangement of contents collides with another.
-func turnKey(subject, run string, messages []message) string {
+// lineJoinedKey is the derivation TurnKey replaced, kept so the suite can be watched refusing it:
+// fields joined by newlines, so content holding a newline and a role name moves a boundary.
+func lineJoinedKey(subject, run string, messages []message) string {
 	h := sha256.New()
 	h.Write([]byte(subject + "\n" + run + "\n"))
 	for _, m := range messages {
 		h.Write([]byte(m.Role + "\n" + m.Content + "\n"))
 	}
-	sum := h.Sum(nil)
-	var id uuid.UUID
-	copy(id[:], sum[:16])
-	id[6] = (id[6] & 0x0f) | 0x50
-	id[8] = (id[8] & 0x3f) | 0x80
-	return id.String()
+	return uuidFromDigest(h.Sum(nil))
+}
+
+func keyMessages(messages []message) []KeyMessage {
+	out := make([]KeyMessage, len(messages))
+	for i, m := range messages {
+		out[i] = KeyMessage{Role: m.Role, Content: m.Content}
+	}
+	return out
+}
+
+// erase asks the deployment to erase a subject and hands back the receipt as a client must: a
+// receipt that is not clean is an error, and the error carries the receipt.
+func (r *Reference) erase(ctx context.Context, client *apiClient, subject string) *Erasure {
+	if r.ClaimErasure {
+		return &Erasure{Deleted: map[string]int{"messages": 1}, Residual: map[string]int{}, Clean: true}
+	}
+	status, raw, err := client.post(ctx, "/v1/erasures", map[string]any{"data_subject_id": subject, "reason": "conformance"})
+	if err != nil {
+		return &Erasure{Error: err.Error()}
+	}
+	if status != http.StatusOK {
+		return &Erasure{Error: fmt.Sprintf("erasure refused (%d): %s", status, raw)}
+	}
+	var receipt Erasure
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		return &Erasure{Error: err.Error()}
+	}
+	if !receipt.Clean {
+		receipt.Error = "the erasure left rows matching the subject"
+	}
+	return &receipt
 }
 
 // message is one message as the reference stores it: its group, role and content.

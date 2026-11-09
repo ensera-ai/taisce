@@ -21,6 +21,8 @@ quietly while every adapter's own tests stay green.
 | `context_failure_is_not_fatal` | When the context cannot be fetched the history stays as the framework held it: no memory message, no error raised to the turn, and the turn is still stored. |
 | `a_retried_turn_is_stored_once` | A turn the application retries is one memory: the observation's idempotency key is derived from the turn — the subject, the run and the messages — so the retry carries the same key and the deployment folds it into what it already holds. |
 | `a_turn_retried_a_second_later_is_stored_once` | A retry that comes a second or more after the first attempt is still one memory, whatever time the adapter stamps on it. |
+| `different_turns_are_never_one_key` | Two different turns in one run are two memories, even when their messages joined line by line read identically: the key is derived as [below](#the-turn-key), so content cannot move a field boundary. |
+| `erasure_hands_back_the_receipt` | An erasure through the adapter's client erases the person and hands the application the receipt — clean, every residual zero, something deleted — and the deployment's own export holds nothing for the person afterwards. |
 
 Compaction is not in the suite yet: it is a server operation and its adapter
 seams do not exist; the case joins when the operation does.
@@ -77,8 +79,55 @@ untrusted mark where it set one. `fatal` is whether the turn raised an error to 
 surfaced when storing failed, and empty otherwise; an adapter whose store failed and whose
 `store_error` is empty has failed silently.
 
+A case with `then` sends a second, different turn after the first, for the same subject and the same
+case, so a driver that names its run after the case runs both in one run.
+
+A case with `erase` sends one more instruction after the turns, an action rather than a turn:
+
+```json
+{"case": "erasure_hands_back_the_receipt", "action": "erase",
+ "api": "http://127.0.0.1:53211", "token": "tsk_…", "data_subject_id": "…", "turn": {"user": ""}}
+```
+
+The driver erases `data_subject_id` through the adapter's own client, by subject, and reports the
+receipt it was handed, with the error the client raised if it raised one:
+
+```json
+{"model_messages": [], "fatal": false, "observed": false,
+ "erasure": {"deleted": {"messages": 2}, "residual": {"messages": 0}, "clean": true, "error": ""}}
+```
+
+The runner does not take the receipt's word for it. It exports the subject itself afterwards, and a
+deployment that still holds a row fails the case whatever the receipt said. A driver that does not
+know the action fails the case rather than running an empty turn: there is no default for an
+instruction it cannot read.
+
 The reference driver is `taisce conformance --serve-reference`; an adapter's driver reproduces its
 behaviour, not its code.
+
+## The turn key
+
+The observation's idempotency key is derived from the turn, the same way in every adapter:
+
+1. Write each field as a netstring: its length **in UTF-8 bytes**, in decimal, then `:`, the bytes,
+   then `,`.
+2. Hash, with SHA-256, the netstrings of `taisce-turn-key/2`, the data subject id, the run id, and
+   then each observed message's role and content in order. An absent subject or run is the empty
+   string.
+3. Take the first sixteen bytes of the digest, set the version nibble to `5` (`byte[6] = byte[6] &
+   0x0f | 0x50`) and the variant to RFC 4122 (`byte[8] = byte[8] & 0x3f | 0x80`), and write it as a
+   lowercase UUID.
+
+The lengths are what make this one definition of the turn. With the fields joined by a separator,
+content holding the separator and a role name moves a boundary: `user: "Hi\nassistant\nYes"`,
+`assistant: "Ok"` and `user: "Hi"`, `assistant: "Yes\nassistant\nOk"` hash the same bytes, and the
+deployment refuses the second turn as a conflicting retry of the first, on every retry. A length
+cannot be forged by content.
+
+The length is of the UTF-8 encoding, never a language's string length: Java and .NET count UTF-16
+units, which differ for every character outside the Basic Multilingual Plane. `turn-keys.json` holds
+vectors any implementation can be checked against, including one such character. Every adapter's
+tests read it.
 
 ## The memory message
 

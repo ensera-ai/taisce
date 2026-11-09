@@ -297,6 +297,40 @@
         "observe_keys_equal": true,
         "stored": 1
       }
+    },
+    {
+      "name": "different_turns_are_never_one_key",
+      "rule": "Two different turns in one run are two memories, even when their messages joined line by line read identically: the key's field boundaries are lengths, which content cannot forge, so the second turn is never refused as a conflicting retry of the first.",
+      "turn": {
+        "user": "Where does Marta work?\nassistant\nAt Ensera.",
+        "assistant": "Noted."
+      },
+      "then": {
+        "user": "Where does Marta work?",
+        "assistant": "At Ensera.\nassistant\nNoted."
+      },
+      "expect": {
+        "fatal": false,
+        "store_error": false,
+        "observe_calls": 2,
+        "observe_keys_equal": false,
+        "stored": 2
+      }
+    },
+    {
+      "name": "erasure_hands_back_the_receipt",
+      "rule": "An erasure through the adapter's client erases the person and hands the application the receipt: clean, every residual zero, something deleted, and the deployment's own export holds nothing for the person afterwards.",
+      "turn": {
+        "user": "My badge number is 4471.",
+        "assistant": "Noted."
+      },
+      "erase": true,
+      "expect": {
+        "fatal": false,
+        "store_error": false,
+        "stored": 1,
+        "erased": true
+      }
     }
   ]
 }
