@@ -18,7 +18,7 @@ PERF_COMPOSE = TAISCE_PORT=$(PERF_PORT) TAISCE_PERF_POSTGRES_PORT=$(PERF_POSTGRE
 	TAISCE_INFERENCE_API_KEY=perf-forms-nothing TAISCE_INFERENCE_ALLOWLIST=forms-nothing.invalid \
 	docker compose --project-name $(PERF_PROJECT) -f compose.yaml -f compose.perf.yaml
 
-.PHONY: substrate db-up db-down test gate gate-image licence signoff version test-inference golden build contract freeze-contract \
+.PHONY: substrate db-up db-down test vuln gate gate-image licence signoff version test-inference golden build contract freeze-contract \
 	perf-config perf-up perf-down perf-reset-stats perf-workload perf-stats site site-serve
 
 substrate:
@@ -86,7 +86,7 @@ test: licence
 	./scripts/coverage-gate.sh $(COVER_PROFILE)
 
 # The gate a change passes before it merges: the same checks the hosted workflow ran —
-# licence, the full suite with the coverage floor, and vet — in a Linux
+# licence, the full suite with the coverage floor, vet, and the reachable-advisory check — in a Linux
 # container under colima, against a fresh substrate and a clean clone of the commit. The hosted
 # workflow is kept, run by hand only, for when the account's Actions minutes are available.
 GATE_IMAGE ?= taisce-gate:1.27.3
@@ -96,6 +96,28 @@ gate-image:
 
 gate: substrate gate-image
 	GATE_IMAGE=$(GATE_IMAGE) SUBSTRATE_IMAGE=taisce-postgres:$(SUBSTRATE_VERSION) ./scripts/gate.sh
+
+# A published advisory this code can reach fails the build.
+#
+# Reachability rather than presence. govulncheck reads the call graph, so an advisory in a function
+# nothing here calls is reported and does not fail. That is the whole of why this can be a gate: a
+# check that fails on every advisory anywhere in the module graph fails constantly for things nobody
+# can act on, and a gate that cries wolf is one people learn to skip — which costs more than the
+# advisories it was meant to catch.
+#
+# The standard library is judged too, and it is not a small part. On 2026-11-09 this code reached
+# twelve advisories in the 1.27.1 standard library and one in a module; the pin at 1.27.3 cleared all
+# twelve, which is why this gate could not be switched on before the toolchain moved.
+#
+# govulncheck is pinned as a tool in go.mod, so the version that judges a commit is part of the
+# commit. A scanner installed at run time changes its verdict without anything in the diff, which
+# makes a red build impossible to attribute and a green one impossible to trust.
+#
+# Not part of `make test`: this reads the advisory database over the network, and a test target that
+# needs the network is one that fails on a train. `make gate` and the hosted build run it; a
+# developer runs it when they change a dependency.
+vuln:
+	go tool govulncheck ./...
 
 # Every published file carries a copyright header. Checked rather than documented, because a licence
 # stated once at the root is one file move from a package published without one — and publishing is

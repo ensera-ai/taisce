@@ -92,6 +92,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Reachability, not presence: an advisory in code nothing here calls is reported and does not
+      # fail. The scanner is pinned in go.mod, so this commit is judged by a version this commit names.
+      - name: Reachable advisories
+        run: make vuln
+
       - name: Stop the substrate
         if: always()
         run: make db-down
