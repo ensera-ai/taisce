@@ -234,14 +234,32 @@ question did not name is only believable if you can read the route to it.
 evidence:
 
 - Evidence is an **inner** join: a fact whose receipt cannot be produced is not returned.
-- The message behind the evidence is a **left** join. An erased message leaves a fact whose quote and
-  span are unchanged, so the fact comes back with an empty context rather than disappearing, and the
-  bundle lists `citation_context` in `degraded`.
+- The message behind the evidence is a **left** join, and **no column of its text is selected**. An
+  erased message leaves a fact whose quote and span are unchanged, so the fact comes back with an
+  empty context rather than disappearing, and the bundle lists `citation_context` in `degraded`.
 
-The words around each quote are cut **in the database**: 160 bytes either side of the span
-(`domain.ContextWindow`), clamped at the message edges. A large message never crosses the wire just
-so a few hundred bytes of it can be shown. The join that reads message text repeats the project
-filter, because it is the one join on this path that returns text nobody cited.
+The words around each quote are read from the evidence row, where they were cut when it was written:
+160 bytes either side of the span (`domain.ContextWindow`), clamped at the message edges
+(migration 0074). Quote, span and message are immutable once stored, so the window cannot drift — and
+cutting it per returned row meant converting the whole message to bytes once per fact per read, at a
+cost that depended on how long the message was rather than on how much context is shown. The join
+that remains finds the message's row by index and never detoasts its content.
+
+The join is kept because the window is only honest while the message it came from is still in this
+project. `src.scope = r.scope` is the cross-project guard, and the evidence row's own scope cannot
+stand in for it: a row repointed at another project's observation keeps its own scope, and the
+question is whether the observation it names is one this project holds. The message's presence is the
+other half: a fact whose message is gone has a quote it still cites and three hundred bytes of
+surrounding words nobody cited, and only the first should survive. Either join missing makes the
+window null.
+
+The stored window is a copy of message text, and it goes when the message goes:
+`evidence_message_fk` refuses to remove a message while an evidence row cites it, so the evidence row
+— and the window on it — is removed first or the deletion fails.
+
+Citation resolution (`POST /v1/citations/resolve`) still cuts from the message, deliberately: its job
+is to prove the stored span resolves against the stored bytes, and a stored copy answering for itself
+would prove nothing. That cost is paid once per inspection by a caller who asked for exactly it.
 
 **Order.** Results are ordered by hop count, relation, then fact id. That order carries no judgement:
 not recency, confidence or importance. Each of those would be a ranking step that has to be justified

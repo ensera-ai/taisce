@@ -152,7 +152,9 @@ func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityID
 		hops = 1
 	}
 	stmt := selectFactsAboutSQL
-	args := []any{scopes, entityIDs, limit, sources, domain.ContextWindow, hops, domain.Fanout, nullIfEmpty(subject)}
+	// No window size among them: the window is cut when the evidence is written, not here. The
+	// constant it was cut at is domain.ContextWindow, and a test holds the stored width against it.
+	args := []any{scopes, entityIDs, limit, sources, hops, domain.Fanout, nullIfEmpty(subject)}
 	switch {
 	case at.HasValid() && at.HasKnown():
 		stmt, args = selectFactsBitemporalSQL, append(args, at.Valid.UTC(), at.Known.UTC())
@@ -226,21 +228,31 @@ func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityID
 // The anchor id is carried through both arms, so a reader can see which entity brought a fact into
 // the bundle rather than having to work it out from the ends.
 //
-// # The context window is cut in the database, and the scope predicate is on the join that cuts it
+// # The context window is read, not cut, and the message is still joined
 //
-// The span is bytes, so the window is byte arithmetic — and doing it here rather than in the server
-// is what stops a hundred-kilobyte message crossing the wire so that three hundred bytes of it can
-// be shown. `substring` clamps at both ends, so a span near either edge of a message returns a
-// shorter window rather than failing.
+// `e.citation_window` is the bytes around the quote, cut once when the evidence row was written
+// (migration 0074). So this read converts no message to bytes: the cost of showing three hundred
+// bytes of context no longer depends on how long the message was, which is what it depended on when
+// `convert_to(m.content,'UTF8')` ran once per fact per read.
 //
-// The join reaches the message through its observation with `src.scope = r.scope` written on it. The
-// fact has already passed the scope predicate and the evidence names an observation that produced
-// it, so a cross-scope reach would need a defect upstream — which is exactly why the predicate is
-// here as well. Text is the thing a boundary failure leaks, and this is the one join in the read
-// path that returns text nobody has cited.
+// The two joins stay, and no column of the message's text is selected through them. They are not
+// there for the words any more; they are there because the window is only honest while the message
+// it was cut from is still in this project:
 //
-// Both joins are LEFT: an erased message leaves a fact whose quote and span are still what they
-// were, and dropping the row would make an erasure elsewhere in the turn look like memory loss.
+//   - `src.scope = r.scope` is the cross-project guard. The evidence row's own scope cannot stand in
+//     for it: a row repointed at another project's observation keeps its own scope, and the question
+//     is whether the observation it names is one this project holds.
+//   - the message join is the existence check. A fact whose message is gone has a quote it still
+//     cites and three hundred bytes of surrounding words that nobody cited, and only the first of
+//     those should survive the message.
+//
+// Either join missing makes the window NULL, which is the same answer as before: the fact comes back
+// with its quote and span unchanged and no words around them, and the bundle says `citation_context`
+// is degraded. Dropping the row instead would make an erasure elsewhere in the turn look like memory
+// loss.
+//
+// Selecting nothing from `m` but joining it is deliberate rather than clumsy: the row is found by
+// index and its content is never detoasted, so the check costs a lookup and not a message.
 const factsAboutTemplate = `
 WITH RECURSIVE reachable AS (
     SELECT a.entity_id, a.entity_id AS anchor, 0 AS hops,
@@ -266,7 +278,7 @@ WITH RECURSIVE reachable AS (
           SELECT other, fact_id, scope, subject_entity_id, predicate, object_entity_id, statement,
                  confidence, valid_from, valid_until, source_role, capped
             FROM (
-              SELECT edge.*, bool_or(edge.ordinal > $7) OVER () AS capped
+              SELECT edge.*, bool_or(edge.ordinal > $6) OVER () AS capped
                 FROM (
                   SELECT f.object_entity_id AS other, f.fact_id, f.scope, f.subject_entity_id,
                          f.predicate, f.object_entity_id, f.statement, f.confidence,
@@ -276,19 +288,19 @@ WITH RECURSIVE reachable AS (
                    WHERE f.scope = ANY($1)
                      AND f.subject_entity_id = r.entity_id
                      AND f.source_role = ANY($4)
-                     AND ($8::text IS NULL OR f.data_subject_id=$8)
+                     AND ($7::text IS NULL OR f.data_subject_id=$7)
                      AND (f.retention_until IS NULL OR f.retention_until > now())
                      AND %[1]s
                    ORDER BY f.fact_id
-                   LIMIT $7 + 1
+                   LIMIT $6 + 1
                 ) edge
             ) counted
-           WHERE ordinal <= $7
+           WHERE ordinal <= $6
           UNION ALL
           SELECT other, fact_id, scope, subject_entity_id, predicate, object_entity_id, statement,
                  confidence, valid_from, valid_until, source_role, capped
             FROM (
-              SELECT edge.*, bool_or(edge.ordinal > $7) OVER () AS capped
+              SELECT edge.*, bool_or(edge.ordinal > $6) OVER () AS capped
                 FROM (
                   SELECT f.subject_entity_id AS other, f.fact_id, f.scope, f.subject_entity_id,
                          f.predicate, f.object_entity_id, f.statement, f.confidence,
@@ -298,16 +310,16 @@ WITH RECURSIVE reachable AS (
                    WHERE f.scope = ANY($1)
                      AND f.object_entity_id = r.entity_id
                      AND f.source_role = ANY($4)
-                     AND ($8::text IS NULL OR f.data_subject_id=$8)
+                     AND ($7::text IS NULL OR f.data_subject_id=$7)
                      AND (f.retention_until IS NULL OR f.retention_until > now())
                      AND %[1]s
                    ORDER BY f.fact_id
-                   LIMIT $7 + 1
+                   LIMIT $6 + 1
                 ) edge
             ) counted
-           WHERE ordinal <= $7
+           WHERE ordinal <= $6
       ) step
-     WHERE r.hops < $6
+     WHERE r.hops < $5
        AND step.other IS NOT NULL
        AND NOT (step.other = ANY(r.path))
 ),
@@ -321,11 +333,9 @@ SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name
        r.confidence, r.valid_from, r.valid_until, r.anchor::text, r.source_role,
        e.source_observation_id::text, e.source_ordinal, e.quote, e.byte_start, e.byte_end,
        e.extractor_version,
-       substring(convert_to(m.content, 'UTF8')
-                 from greatest(0, e.byte_start - $5) + 1
-                 for  (e.byte_end + $5) - greatest(0, e.byte_start - $5)),
-       greatest(0, e.byte_start - $5),
-       octet_length(m.content),
+       CASE WHEN m.observation_id IS NOT NULL THEN e.citation_window END,
+       CASE WHEN m.observation_id IS NOT NULL THEN e.citation_window_start END,
+       CASE WHEN m.observation_id IS NOT NULL THEN e.citation_message_bytes END,
        r.hops, r.via,
        (SELECT array_agg(coalesce(pe.canonical_name, '') ORDER BY p.ord)
           FROM unnest(r.path) WITH ORDINALITY AS p(id, ord)
@@ -349,7 +359,7 @@ SELECT r.fact_id::text, r.scope, s.canonical_name, r.predicate, o.canonical_name
         LEFT JOIN {schema}.observation source
           ON source.observation_id = ev.source_observation_id AND source.scope = r.scope
        WHERE ev.fact_id = r.fact_id
-         AND ($8::text IS NULL OR source.data_subject_id = $8)
+         AND ($7::text IS NULL OR source.data_subject_id = $7)
        ORDER BY source.log_offset NULLS LAST, ev.source_ordinal, ev.byte_start
        LIMIT 1
   ) e ON true
@@ -395,9 +405,9 @@ var (
 	selectFactsAboutSQL = fmt.Sprintf(factsAboutTemplate,
 		"upper_inf(f.valid) AND upper_inf(f.known)")
 	selectFactsValidAtSQL = fmt.Sprintf(factsAboutTemplate,
-		"f.valid @> $9::timestamptz AND upper_inf(f.known)")
-	selectFactsKnownAtSQL    = historicalFactsSQL(9, "upper_inf(state.valid)")
-	selectFactsBitemporalSQL = historicalFactsSQL(10, "state.valid @> $9::timestamptz")
+		"f.valid @> $8::timestamptz AND upper_inf(f.known)")
+	selectFactsKnownAtSQL    = historicalFactsSQL(8, "upper_inf(state.valid)")
+	selectFactsBitemporalSQL = historicalFactsSQL(9, "state.valid @> $8::timestamptz")
 )
 
 // Historical statements retain the indexed endpoint arms and add a per-fact range lookup. Ordinary
