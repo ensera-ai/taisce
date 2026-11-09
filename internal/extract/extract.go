@@ -352,3 +352,23 @@ func normalise(s string) normalised {
 	}
 	return normalised{text: b.String(), start: starts, end: ends}
 }
+
+// Vocabularies is where the closed sets are read from when they are read per unit of work.
+//
+// A port rather than the store, because this package holds the argument about what a vocabulary
+// admits and must not also know how a tenant's tables are reached. One method, returning both sets
+// together for the same reason the loader reads them together: a caller that refreshed the relations
+// and not the unresolvable terms would get an extractor whose refusals silently stopped happening.
+type Vocabularies interface {
+	Vocabulary(ctx context.Context) (domain.Vocabulary, error)
+}
+
+// WithVocabulary returns the same extractor bound to a different vocabulary.
+//
+// A new value rather than a mutation, and that is the whole point of the method. The vocabulary an
+// extraction ran under is what its pinned identity names, so a vocabulary that could change under a
+// turn would make that identity a claim about something that was no longer true. A caller that wants
+// a newer vocabulary gets a second extractor; the one a turn is running under cannot move.
+func (e *Extractor) WithVocabulary(v domain.Vocabulary) *Extractor {
+	return &Extractor{model: e.model, vocabulary: v.Ontology, unresolvable: v.Unresolvable}
+}
