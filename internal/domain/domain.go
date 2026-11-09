@@ -601,6 +601,20 @@ const (
 	// verbatim quote and an exact span. Every check in the path is about form, and this one is about
 	// whether there is anything to be about.
 	ReasonUnresolvableSubject = "unresolvable_subject"
+	// ReasonUnresolvableObject — the relation names no other end. The object was blank, so there is
+	// nothing for the fact to be about on the far side.
+	//
+	// Refused rather than stored, and this one was found by reading rather than measured. A blank
+	// object resolved to no entity, the write kept the fact with a null object end, and the
+	// traversal behind a recall skips an edge with no other end — so the fact existed, carried its
+	// evidence, was counted by an erasure and exported, and no question could ever return it.
+	//
+	// Of the three states a claim can be in, that is the worst. A refusal is visible: it has a
+	// reason and a count. A stored fact is readable. This was neither, so nothing said it was lost
+	// and nothing said it was there. The vocabulary already decided which it should be: every
+	// predicate carries an object kind, and D29 kept the vocabulary closed, so a relation with no
+	// other end is a failed extraction rather than a unary fact this system holds.
+	ReasonUnresolvableObject = "unresolvable_object"
 	// ReasonNotCurrent — the message asserts the relation and puts it in the past. "I used to live
 	// in Amman."
 	//

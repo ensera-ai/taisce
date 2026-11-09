@@ -137,6 +137,24 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 			continue
 		}
 
+		// An end that is blank rather than merely unresolvable, which is a different failure and was
+		// not refused at all. Both ends are nullable in the store and the traversal skips an edge
+		// with no other end, so a blank object used to be kept as a fact no question could reach:
+		// present, cited, erasable, exportable, unreadable. The vocabulary says every relation has
+		// an object end, so this is extraction failing rather than a unary fact.
+		//
+		// Here, with the pronoun check and before the quote is located, because an end that is not
+		// there is wrong whether or not its quote can be found — and reporting it as uncitable would
+		// send whoever reads the refusals looking at the model's quoting.
+		if domain.NormalizeName(p.Subject) == "" {
+			out.Rejected = append(out.Rejected, reject(p, domain.ReasonUnresolvableSubject, message.Ordinal))
+			continue
+		}
+		if domain.NormalizeName(p.Object) == "" {
+			out.Rejected = append(out.Rejected, reject(p, domain.ReasonUnresolvableObject, message.Ordinal))
+			continue
+		}
+
 		start, end, found := Locate(message.Content, p.Quote)
 		if !found {
 			out.Rejected = append(out.Rejected, reject(p, domain.ReasonUnlocatableQuote, message.Ordinal))

@@ -287,8 +287,17 @@ func resolveEntity(ctx context.Context, tx pgx.Tx, schema Schema, scope, observa
 		return "", ErrEntityNameLimit
 	}
 	if normalized == "" {
-		// A blank end is not an entity. Empty rather than an error: the fact is still worth
-		// storing, it simply has an unresolvable end, and traversal skips it.
+		// A blank end is not an entity, and no caller should now reach this with one. Extraction
+		// refuses a blank subject as unresolvable_subject and a blank object as
+		// unresolvable_object, and an authored assertion refuses both in validAssertionText with
+		// optional false. This branch is what is left of the behaviour that made #159: it used to
+		// return empty so the fact was stored with a null end, which the traversal then skipped —
+		// a fact with evidence that no question could ever return.
+		//
+		// It stays as a defensive empty rather than an error because this runs inside the caller's
+		// write transaction and a third path added later should not fail a whole turn here; it
+		// should be refused where the other two are, with a reason somebody can count. If a null
+		// end ever appears in the store again, this is the line that allowed it.
 		return "", nil
 	}
 	if entityType == "" {
