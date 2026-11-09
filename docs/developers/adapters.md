@@ -98,6 +98,35 @@ Taisce for the person's context: summaries of older turns that Taisce wrote in t
 the newest turns word for word. The model gets that instead of the old history. The adapter never
 writes a summary of its own.
 
+## The seam each adapter implements
+
+*Written 2026-11-09. This section is a statement about this project's own surface as of that date.*
+
+"Plugs into a hook the framework already offers" is checkable, so here is the hook, adapter by
+adapter. The names are the ones the language pages use. Where a page says less than a class name,
+this table says what the page says.
+
+| Language | Framework (see the table above) | The extension point the adapter implements | How the page describes it |
+|---|---|---|---|
+| Python | Microsoft Agent Framework | `TaisceContextProvider`, a context provider | Listed in the agent's `context_providers`, after the history provider. Recalls once per run. |
+| Python | LangGraph | `TaisceMemory`, agent middleware | Listed in `middleware=[...]` on `create_agent`. Async only. Recalls before every model call. |
+| Java | LangChain4j | `TaisceChatModel`, a wrapper around your `ChatModel` | The model is the one place that sees the whole request and the whole answer. |
+| Java | Spring AI | `TaisceMemoryAdvisor`, an advisor on the `ChatClient` | Runs after the chat-memory advisor, so it sees the history that advisor adds. |
+| .NET | Microsoft Agent Framework | `TaisceContextProvider`, an `AIContextProvider` | Listed in the agent's `AIContextProviders`. |
+
+Two of these are a decorator on the model rather than a hook the framework hands you. That is a
+choice made for a reason, not a gap: the LangChain4j chat memory is read before the new message is
+added, so a memory component cannot add anything for the current turn.
+
+The five rows have different shapes in three languages. What they share
+is what they do on a turn: one untrusted `user` message before the model, a save after it.
+
+**What holds them to that is the conformance suite.** It is one set of cases, in one file, run
+against a live deployment, and every adapter in every language above is driven through the same
+cases. The cases are listed in [the next section](#the-conformance-suite). An adapter that
+implements its seam but breaks one of them does not pass. The suite checks behaviour on a turn, not
+the choice of seam, and it covers the five adapters in the table, not any other framework.
+
 ## The conformance suite
 
 The conformance suite is one set of test cases that every adapter must pass against a real Taisce
