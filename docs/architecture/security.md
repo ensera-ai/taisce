@@ -154,7 +154,8 @@ What remains after all three is listed in [what this does not cover](#what-this-
 
 | Kind | Access | Opens | Constraint |
 |---|---|---|---|
-| `project` | `read_write` | Every memory operation on its one project | Names exactly one project |
+| `project` | `read_write` | Every memory operation on its one project, erasure and entity purge included | Names exactly one project |
+| `project` | `agent` | Every memory operation on its one project except erasure, entity purge and notification endpoints (D26) | Names exactly one project |
 | `project` | `read_only` | Reads, inspection and export on its one project | Names exactly one project |
 | `operator` | stored as `read_write`, not consulted | The management surface and the portal | Names no project |
 
@@ -189,7 +190,10 @@ random bits; the other 208 are what a thief of the table would have to guess.
 
 Resolution trims the presented value, refuses anything without the prefix before touching the
 database, and then selects the row whose `token_digest` matches and whose `revoked_at` is null. An
-access mode other than `read_only` or `read_write` is refused, so an unknown value fails closed.
+access mode other than `read_only`, `agent` or `read_write` is refused, so an unknown value fails
+closed. The registry's own constraint holds the same set
+([migration 0006](../../internal/migrate/control/0006_an_agent_credential_writes_memory_and_cannot_destroy_it.sql)),
+so a value written by hand is refused before a resolve ever reads it.
 
 ### Issuance and revocation
 

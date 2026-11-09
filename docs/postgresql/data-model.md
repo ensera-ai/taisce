@@ -897,8 +897,10 @@ memory namespace's.
   request and defend against nothing.
 - **A project credential names exactly one project**
   ([control 0003](../../internal/migrate/control/0003_a_credential_belongs_to_one_project.sql)) and
-  declares `read_only` or `read_write` access
-  ([control 0004](../../internal/migrate/control/0004_credentials_declare_read_or_write_access.sql)).
+  declares `read_only`, `agent` or `read_write` access
+  ([control 0004](../../internal/migrate/control/0004_credentials_declare_read_or_write_access.sql),
+  [control 0006](../../internal/migrate/control/0006_an_agent_credential_writes_memory_and_cannot_destroy_it.sql)).
+  A row inserted without naming one is `agent`.
 - **An operator credential reaches the management surface and no project.** `credential_project_chk`
   makes "is an operator credential" and "names no project" the same statement
   ([control 0005](../../internal/migrate/control/0005_an_operator_credential_reaches_the_management_surface_and_no_project.sql)).
