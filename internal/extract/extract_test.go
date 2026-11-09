@@ -710,3 +710,54 @@ func TestAPastTenseEventIsAFactWhileAPastTenseStateIsNot(t *testing.T) {
 		}
 	}
 }
+
+// A relation with no other end is refused rather than stored, under its own reason.
+//
+// This is the one refusal in the path whose alternative was not a false fact or a missing one but an
+// unreadable one. A blank end resolved to no entity, the write kept the fact with that end null, and
+// the traversal behind a recall skips an edge with no other end — so the fact was present, carried
+// its evidence, was counted by an erasure and exported, and no question could return it, for the
+// life of the instance. Nothing said it was lost and nothing said it was there.
+//
+// Both ends are covered because both were nullable and only one was checked: extraction refused a
+// subject that named something the message did not establish, which is a pronoun, and said nothing
+// about a subject that was simply blank. The object had no check at all.
+//
+// Whitespace-only counts as blank, because resolution normalises before it compares and a space is
+// not an entity. The reasons are distinct on purpose: a count that merged them would not say which
+// end the extractor failed to produce, and those are different failures to go and look at.
+func TestARelationWithNoOtherEndIsRefusedRatherThanStored(t *testing.T) {
+	content := "I work at Ensera and I live in Dublin."
+	v := domain.Vocabulary{Ontology: vocabulary(t), Unresolvable: map[string]struct{}{"that": {}}}
+
+	for _, c := range []struct {
+		name            string
+		subject, object string
+		want            string
+	}{
+		{"a blank object", "Marta", "", domain.ReasonUnresolvableObject},
+		{"an object of spaces", "Marta", "   ", domain.ReasonUnresolvableObject},
+		{"a blank subject", "", "Dublin", domain.ReasonUnresolvableSubject},
+		{"a subject of spaces", "  ", "Dublin", domain.ReasonUnresolvableSubject},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			result, err := extract.NewWith(&stubModel{proposals: []extract.Proposal{
+				{Subject: c.subject, Predicate: "lives_in", Object: c.object,
+					Statement: "Marta lives in Dublin.", Quote: "I live in Dublin",
+					Polarity: domain.PolarityAsserted, Tense: domain.TensePresent},
+			}}, v).Extract(context.Background(), message(content))
+			if err != nil {
+				t.Fatalf("extract: %v", err)
+			}
+			if len(result.Claims) != 0 {
+				t.Fatalf("%s became a fact, which no recall could ever return", c.name)
+			}
+			if len(result.Rejected) != 1 {
+				t.Fatalf("%s produced %d refusals, so nothing counts it", c.name, len(result.Rejected))
+			}
+			if result.Rejected[0].Reason != c.want {
+				t.Fatalf("%s was refused as %q, want %q", c.name, result.Rejected[0].Reason, c.want)
+			}
+		})
+	}
+}
