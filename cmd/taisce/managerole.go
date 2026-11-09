@@ -59,6 +59,7 @@ func runManage(ctx context.Context, log *slog.Logger) error {
 		Audit:        pg.NewAuditStore(admin, schema),
 		Refusals:     pg.NewRefusalStore(admin, schema),
 		Eraser:       pg.NewEraser(admin),
+		Vocabulary:   pg.NewVocabularyStore(admin, schema),
 		Health: func(ctx context.Context) (pg.OperationalHealth, error) {
 			return pg.ReadOperationalHealth(ctx, admin, schema)
 		},

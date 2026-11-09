@@ -1137,6 +1137,14 @@ const (
 	// The management surface's refusals.
 	codeInvalidProject    errorCode = "invalid_project"
 	codeInvalidCredential errorCode = "invalid_credential"
+	// codeInvalidPredicate is a relation the vocabulary's constraints refused: a name outside the
+	// spelling the set keeps, a value outside one of the closed axes, or a declaration left out.
+	// The message names the constraint, because that is what says which of the five to fix.
+	codeInvalidPredicate errorCode = "invalid_predicate"
+	// codePredicateConflict is a relation the vocabulary already admits. Separate from
+	// invalid_predicate on purpose: nothing about the declaration is wrong, and the caller's
+	// correct response is to use the relation rather than to correct and retry.
+	codePredicateConflict errorCode = "predicate_conflict"
 )
 
 // errorCodes is the declared set, in the order the contract publishes them.
@@ -1154,7 +1162,7 @@ var errorCodes = []errorCode{
 	codeUnauthenticated, codeInvalidBody, codeInvalidTurn,
 	codeInvalidQuestion, codeNoSubject, codeInvalidErasure, codeInternal, codeIdempotencyConflict, codeRateLimited, codeNoCapacity,
 	codeInvalidCitation, codeCitationLimit, codeInvalidExport, codeExportTooLarge, codeNotFound, codeInvalidDestination, codeNotificationsOff, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidContext, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidFeedback, codeFeedbackPromoted, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity, codeInvalidSubject, codeSubjectConflict,
-	codeInvalidProject, codeInvalidCredential,
+	codeInvalidProject, codeInvalidCredential, codeInvalidPredicate, codePredicateConflict,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

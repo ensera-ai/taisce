@@ -1098,6 +1098,12 @@ const (
 	// AuditProjectRetention is an operator setting how long a project keeps what it is told, which
 	// is a governance decision and belongs on the ledger beside suspension.
 	AuditProjectRetention = "project.retention"
+	// AuditVocabularyAdd is an operator extending the closed relation vocabulary, and
+	// AuditVocabularyList is reading what the instance admits. Two names rather than one, because
+	// an addition changes what every later extraction may emit and an inspection changes nothing,
+	// and a single name would make them indistinguishable in the account of what happened.
+	AuditVocabularyAdd  = "vocabulary.add"
+	AuditVocabularyList = "vocabulary.list"
 	// AuditAuthenticate records a credential being refused. A successful authentication is recorded
 	// as the operation it went on to perform, because a row for every accepted request twice over
 	// would double the ledger and say nothing the operation's own row does not.
@@ -1123,6 +1129,8 @@ func RecordableOperation(name string) bool {
 	case AuditRebuildStart, AuditRebuildCancel:
 		return true
 	case AuditProjectList, AuditCredentialList, AuditRefusalSummary, AuditErasureList, AuditFormationStatus, AuditFormationParked, AuditAuditSeal, AuditAuditVerify, AuditAuditActivity:
+		return true
+	case AuditVocabularyAdd, AuditVocabularyList:
 		return true
 	case AuditRetentionSweep, AuditProjectRetention:
 		return true

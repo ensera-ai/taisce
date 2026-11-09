@@ -44,6 +44,8 @@ const usage = `taisce — memory for agents
   taisce credential list           list credentials (--project; without it, the operator credentials)
   taisce credential revoke <id>    stop a credential resolving
   taisce operator issue <name>     mint an operator credential for the management surface; shown once
+  taisce vocabulary add <name>     admit one relation (-project and four declarations, none optional)
+  taisce vocabulary list           the relations this instance admits (-project)
   taisce audit verify              recompute the ledger's chain and report what it covers
   taisce audit seal                seal everything written since the last seal
   taisce formation parked          inspect a bounded page of parked turn metadata (--project required)
@@ -70,7 +72,8 @@ Configuration is read from the environment. TAISCE_MEMORY_DSN and TAISCE_REGISTR
 database connections, and they are separate so that a memory query cannot read a credential.
 TAISCE_SCHEMA optionally selects this instance's memory namespace (default: memory). With
 TAISCE_MANAGE_API and TAISCE_OPERATOR_TOKEN set, project, credential, audit and formation speak the
-management surface instead of the database.
+management surface instead of the database; vocabulary speaks it always, because the change it makes
+is recorded against the operator who made it.
 `
 
 // wantsHelp reports whether a command's arguments ask for help. An argument after "--" is a value,
@@ -132,6 +135,15 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 			return c.credential(ctx, args[1:])
 		}
 		return credentialCommand(ctx, args[1:])
+	case "vocabulary":
+		// The one operator verb with no path over the administrative connection: see
+		// manageClient.vocabulary for why an unattributable vocabulary change is not offered.
+		c, ok := managementFromEnv()
+		if !ok {
+			return fmt.Errorf("extending the relation vocabulary is recorded against an operator, "+
+				"so it goes through the management surface: set %s and %s", envManageAPI, envOperatorToken)
+		}
+		return c.vocabulary(ctx, args[1:])
 	case "operator":
 		return operatorCommand(ctx, args[1:])
 	case "audit":

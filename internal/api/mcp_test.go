@@ -5,10 +5,12 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ensera-ai/taisce/internal/api"
@@ -218,4 +220,113 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+// /mcp is a public interface, and the protocol revision a host negotiates is part of it: a
+// dependency bump that moves the SDK to a newer revision changes what every connected host sees
+// without a line of this repository changing. The literals below are the revision the surface was
+// reviewed against, so a bump fails here and is read rather than absorbed.
+//
+// The caching hints that revision adds are asserted too: ttlMs is the SDK's 0, inherited because
+// the list is static and no lifetime has been measured as needed, and cacheScope is "private"
+// because the SDK's "public" would let an intermediary share a credential-scoped answer (#150).
+func TestTheMCPSurfaceNegotiatesTheProtocolRevisionItWasReviewedAgainst(t *testing.T) {
+	const reviewed = "2026-07-28"
+	h := newHarness(t, "api_mcp_revision")
+	session := connectMCP(t, h, h.token)
+
+	init := session.InitializeResult()
+	if init == nil {
+		t.Fatal("the session carries no initialize result, so no revision was negotiated")
+	}
+	if init.ProtocolVersion != reviewed {
+		t.Fatalf("the /mcp surface now negotiates protocol revision %q; it was reviewed against %q. "+
+			"A new revision changes what every connected host sees: review its changes to tools/list, "+
+			"tools/call and caching, then update this test and the revision recorded in docs/developers/mcp.md.",
+			init.ProtocolVersion, reviewed)
+	}
+
+	listed, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed.TTLMs != 0 || listed.CacheScope != "private" {
+		t.Fatalf("tools/list now carries ttlMs=%d cacheScope=%q; reviewed as ttlMs=0 (SDK default, deliberately inherited) and cacheScope=\"private\" (set by MCPPrivateCacheScope, #150). Update this test and docs/developers/mcp.md if either is changed on purpose.",
+			listed.TTLMs, listed.CacheScope)
+	}
+}
+
+// The point of the middleware is that a result type registered later does not silently inherit the
+// SDK's "public", so the property is held against every cacheable result, including the ones this
+// server does not serve. A throwaway prompt, resource and template exist only here, and a spy
+// outside the middleware records what actually leaves the chain, so the assertion is on what a
+// host would receive rather than on what the test hopes the middleware did.
+func TestEveryCacheableMCPResultCarriesAPrivateScopeWhateverIsRegisteredLater(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "throwaway", Version: "0"}, nil)
+	server.AddPrompt(&mcp.Prompt{Name: "p"}, func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return &mcp.GetPromptResult{}, nil
+	})
+	server.AddResource(&mcp.Resource{Name: "r", URI: "test://r"}, func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: "test://r", Text: "x"}}}, nil
+	})
+	server.AddResourceTemplate(&mcp.ResourceTemplate{Name: "t", URITemplate: "test://t/{id}"}, func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		return &mcp.ReadResourceResult{}, nil
+	})
+	server.AddTool(&mcp.Tool{Name: "x", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{}, nil
+	})
+	server.AddReceivingMiddleware(api.MCPPrivateCacheScope)
+	seen := map[string]string{}
+	var mu sync.Mutex
+	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			res, err := next(ctx, method, req)
+			if c, ok := res.(mcp.CacheableResult); ok {
+				mu.Lock()
+				seen[fmt.Sprintf("%T", res)] = c.GetCacheScope()
+				mu.Unlock()
+			}
+			return res, err
+		}
+	})
+
+	ct, st := mcp.NewInMemoryTransports()
+	ss, err := server.Connect(context.Background(), st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ss.Close() })
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "0"}, nil).Connect(context.Background(), ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	ctx := context.Background()
+	if _, err := cs.ListTools(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.ListPrompts(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.ListResources(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.ListResourceTemplates(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cs.ReadResource(ctx, &mcp.ReadResourceParams{URI: "test://r"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("observed: %v", seen)
+	for _, typ := range []string{"*mcp.ListToolsResult", "*mcp.ListPromptsResult", "*mcp.ListResourcesResult",
+		"*mcp.ListResourceTemplatesResult", "*mcp.ReadResourceResult", "*mcp.DiscoverResult"} {
+		scope, ok := seen[typ]
+		if !ok {
+			t.Errorf("%s was never produced by the test client, so its scope was not observed", typ)
+			continue
+		}
+		if scope != "private" {
+			t.Errorf("%s carries cacheScope %q; every cacheable result must be private", typ, scope)
+		}
+	}
 }

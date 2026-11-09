@@ -881,6 +881,8 @@ The management surface is served by the `manage` role on its own listener and re
 | `formation.status` | POST | `/manage/v1/formation/status` | 200 |
 | `formation.parked` | POST | `/manage/v1/formation/parked` | 200 |
 | `formation.unpark` | POST | `/manage/v1/formation/unpark` | 200 |
+| `vocabulary.add` | POST | `/manage/v1/vocabulary/add` | 201 |
+| `vocabulary.list` | POST | `/manage/v1/vocabulary/list` | 200 |
 | `audit.seal` | POST | `/manage/v1/audit/seal` | 200 |
 | `audit.verify` | POST | `/manage/v1/audit/verify` | 200 |
 
@@ -1119,6 +1121,47 @@ POST `/manage/v1/formation/unpark` → 200
 | `unparked` | boolean |
 
 
+## `vocabulary.add`
+
+POST `/manage/v1/vocabulary/add` → 201
+
+### Request
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `predicate` | string |
+| `semantic_type` | string |
+| `cardinality` | string |
+| `object_kind` | string |
+| `description` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `predicate` | {predicate: string, semantic_type: string, cardinality: string, object_kind: string, description: string, event: boolean} |
+
+
+## `vocabulary.list`
+
+POST `/manage/v1/vocabulary/list` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `project` | string |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `project` | string |
+| `predicates` | array of {predicate: string, semantic_type: string, cardinality: string, object_kind: string, description: string, event: boolean} |
+
+
 ## `audit.seal`
 
 POST `/manage/v1/audit/seal` → 200
@@ -1203,6 +1246,8 @@ Any operation may answer with any of these.
 | `subject_conflict` |
 | `invalid_project` |
 | `invalid_credential` |
+| `invalid_predicate` |
+| `predicate_conflict` |
 
 ## Liveness
 

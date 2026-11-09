@@ -204,6 +204,7 @@ func (s *Server) mcpHandler(mux *http.ServeMux) http.Handler {
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: !t.Write, DestructiveHint: new(bool), IdempotentHint: true},
 		}, s.mcpDispatch(mux, t))
 	}
+	server.AddReceivingMiddleware(MCPPrivateCacheScope)
 	streamable := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server },
 		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	// The credential is checked at the door, so a stranger is refused before the protocol is
@@ -280,3 +281,31 @@ type loopbackRecorder struct {
 func (r *loopbackRecorder) Header() http.Header         { return r.header }
 func (r *loopbackRecorder) WriteHeader(status int)      { r.status = status }
 func (r *loopbackRecorder) Write(p []byte) (int, error) { return r.body.Write(p) }
+
+// MCPPrivateCacheScope is exported so a test can hold it against result types this server does not
+// register. It marks every cacheable result private. The SDK stamps "public" on them, which
+// lets an intermediary serve one caller's answer to another; /mcp is reached with a project
+// credential, and if the list is ever filtered by what that credential may do a shared cache stops
+// being only a wrong default and becomes a wrong behaviour. ttlMs stays at the SDK's 0: the list
+// is static for a build, but a deliberate lifetime is a number nobody has measured a need for,
+// and 0 only costs a host one cheap re-fetch.
+func MCPPrivateCacheScope(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		res, err := next(ctx, method, req)
+		switch r := res.(type) {
+		case *mcp.DiscoverResult:
+			r.CacheScope = "private"
+		case *mcp.ListToolsResult:
+			r.CacheScope = "private"
+		case *mcp.ListPromptsResult:
+			r.CacheScope = "private"
+		case *mcp.ListResourcesResult:
+			r.CacheScope = "private"
+		case *mcp.ListResourceTemplatesResult:
+			r.CacheScope = "private"
+		case *mcp.ReadResourceResult:
+			r.CacheScope = "private"
+		}
+		return res, err
+	}
+}
