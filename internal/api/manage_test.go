@@ -157,10 +157,10 @@ func TestAnOperatorRunsTheProjectAndCredentialLifecycleOverTheAPI(t *testing.T) 
 		t.Fatalf("expected a read-only token for p2, got %+v", issued)
 	}
 	// Naming no authority is agent, not read_write: a key minted without a word is the one that
-	// cannot erase anybody (D26).
+	// cannot erase anybody (D26). Issued in p1, so the lifecycle below still counts one key here.
 	var unnamed, writer struct{ Access string }
-	m.manageDo(t, "/credentials/issue", map[string]any{"name": "agent-app", "project": project}, m.operator, http.StatusCreated, &unnamed)
-	m.manageDo(t, "/credentials/issue", map[string]any{"name": "erasure-path", "project": project, "access": "read_write"}, m.operator, http.StatusCreated, &writer)
+	m.manageDo(t, "/credentials/issue", map[string]any{"name": "agent-app", "project": "p1"}, m.operator, http.StatusCreated, &unnamed)
+	m.manageDo(t, "/credentials/issue", map[string]any{"name": "erasure-path", "project": "p1", "access": "read_write"}, m.operator, http.StatusCreated, &writer)
 	if unnamed.Access != "agent" || writer.Access != "read_write" {
 		t.Fatalf("expected agent by default and read_write when named, got %q and %q", unnamed.Access, writer.Access)
 	}
