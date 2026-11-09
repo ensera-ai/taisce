@@ -4,7 +4,7 @@
 # module cache inside the thing that serves memory. What runs is a static binary and nothing else:
 # no shell, no package manager, and no interpreter for anything that gets in to use.
 
-FROM golang:1.27.1-alpine AS build
+FROM golang:1.27.3-alpine AS build
 WORKDIR /src
 
 # Modules first, so a change to the code does not re-download the module graph on every build. This
