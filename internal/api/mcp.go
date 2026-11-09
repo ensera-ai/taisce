@@ -16,7 +16,8 @@
 //
 // # What is exposed, and what is deliberately not
 //
-// Four tools: observe, recall, freshness and resolve_citation. Erasure and export are not tools,
+// Six tools: recall, observe, freshness, context, resolve_citation and report_feedback. Erasure and
+// export are not tools,
 // and their absence is a statement rather than an omission: a tool list is a menu the model reads,
 // and an agent must not be able to erase or export a person because a sentence in its context told
 // it to. Forgetting a person is an administrative act with a receipt, and it stays on the surface

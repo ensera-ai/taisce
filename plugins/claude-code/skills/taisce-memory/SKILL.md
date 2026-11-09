@@ -6,8 +6,14 @@ description: Use when the user refers to a past decision, asks "what did we deci
 # Memory that outlives the session
 
 A session forgets everything when it ends. `CLAUDE.md` holds what somebody remembered to write down.
-This plugin holds what was actually said, with the words attached, and it is reached through four
-tools on the `taisce` MCP server: `recall`, `observe`, `freshness`, `context` and `resolve_citation`.
+This plugin holds what was actually said, with the words attached, and it is reached through six
+tools on the `taisce` MCP server: `recall`, `observe`, `freshness`, `context`, `resolve_citation` and
+`report_feedback`.
+
+This skill answers one question: **is memory the right move here at all.** Each tool has a skill of
+its own that says how to use it and what it must not be used for — `taisce-recall`,
+`taisce-observe`, `taisce-freshness`, `taisce-context`, `taisce-resolve-citation` and
+`taisce-report-feedback`. Read the one you need rather than all six.
 
 ## When to recall, without being asked
 

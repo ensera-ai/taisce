@@ -47,8 +47,13 @@ already; `/taisce-memory:remember <thing>` records a decision in the user's own 
 `/taisce-memory:memory-status`
 says how far behind memory is and whether anything is parked.
 
-**A skill** that tells Claude when to reach for memory without being asked, and when not to: the
-repository answers what the code is; memory answers what people decided.
+**Seven skills.** One says when to reach for memory without being asked, and when not to: the
+repository answers what the code is; memory answers what people decided. The other six are one per
+tool — `taisce-recall`, `taisce-observe`, `taisce-freshness`, `taisce-context`,
+`taisce-resolve-citation`, `taisce-report-feedback` — each naming the tool it calls, when to reach
+for it, what comes back, and what it must not be used for. A description is how a skill gets chosen,
+so six narrow ones put that choice where the information is; one description covering six functions
+is matched on the union of their triggers.
 
 **Two hooks.** At session start, one line saying that memory exists and whether it is current. On
 every completed turn, when `auto_capture` is on and only then, the user's message is recorded under a
