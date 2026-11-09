@@ -27,7 +27,15 @@ import (
 // the file is satisfied by a comment, and a comment installs nothing.
 func helmStep(t *testing.T) (version, digest, script string) {
 	t.Helper()
-	raw, err := os.ReadFile("../../.github/workflows/test.yml")
+	return helmStepIn(t, "../../.github/workflows/test.yml", "test")
+}
+
+// helmStepIn reads the Helm install step out of one job in one workflow. Both the build and the
+// release gate render the chart, so both have to install the same engine, and the two files are
+// edited months apart by somebody changing something else.
+func helmStepIn(t *testing.T, path, job string) (string, string, string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,18 +49,19 @@ func helmStep(t *testing.T) (version, digest, script string) {
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(raw, &workflow); err != nil {
-		t.Fatalf("test.yml does not parse: %v", err)
+		t.Fatalf("%s does not parse: %v", path, err)
 	}
-	job, ok := workflow.Jobs["test"]
+	found, ok := workflow.Jobs[job]
 	if !ok {
-		t.Fatal("test.yml has no test job")
+		t.Fatalf("%s has no %s job", path, job)
 	}
-	for _, step := range job.Steps {
+	for _, step := range found.Steps {
 		if step.Name == "Helm" {
 			return step.Env["HELM_VERSION"], step.Env["HELM_SHA256"], step.Run
 		}
 	}
-	t.Fatal("the test job installs no helm, so the chart tests render with whatever the runner ships")
+	t.Fatalf("the %s job in %s installs no helm, so the chart tests there render with whatever the "+
+		"runner image ships — which is #192, and it failed a release", job, path)
 	return "", "", ""
 }
 
@@ -102,5 +111,44 @@ func TestTheBuildVerifiesTheHelmItDownloads(t *testing.T) {
 	}
 	if !strings.HasPrefix(version, "v") {
 		t.Errorf("helm's archives are named with the leading v; %q would not resolve", version)
+	}
+}
+
+// The release gate installs the same helm the build does.
+//
+// It did not, and the way that surfaced is the argument for this test. v0.6.0 was tagged at a commit
+// whose own run of this suite had just passed on main; the release gate failed two tests that assert
+// the content of NOTES.txt, because it rendered the chart with whatever helm the runner image ships
+// while the build renders it with v4.3.0 (#192). The commit was fine. The gate job's own comment
+// claimed it ran the complete gate the build runs.
+//
+// A release is the worst place for an environmental difference to appear. A tag must not move — a
+// moved tag is different bytes under a name somebody may already hold — so a gate that fails for a
+// reason the commit did not cause forces a choice between deleting a tag and shipping a version
+// nobody can account for. This repository already carries one unpublished tag on the wrong commit
+// from a related mess.
+//
+// So three places pin helm now: the build workflow, the release workflow, and the gate image's
+// Dockerfile. TestTheBuildAndTheGateInstallTheSameHelm holds the first and third together; this
+// holds the second to the first, digest included, because a matching version fetched from a different
+// tarball is not the same engine.
+func TestTheReleaseGateInstallsTheSameHelmAsTheBuild(t *testing.T) {
+	version, digest, _ := helmStep(t)
+	releaseVersion, releaseDigest, script := helmStepIn(t, "../../.github/workflows/release.yml", "gate")
+
+	if releaseVersion != version {
+		t.Errorf("the build installs helm %q and the release gate installs %q; a release would be "+
+			"gated by a rendering nobody has checked", version, releaseVersion)
+	}
+	if releaseDigest != digest {
+		t.Errorf("the release gate verifies helm against %q and the build against %q; the same "+
+			"version from a different tarball is not the same engine", releaseDigest, digest)
+	}
+	// Verified rather than fetched: a pipe into a shell is a release gated by whatever a host served
+	// that morning.
+	for _, want := range []string{"sha256sum -c", "${HELM_SHA256}", "${HELM_VERSION}", "set -euo pipefail"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("the release gate's helm install does not contain %q", want)
+		}
 	}
 }
