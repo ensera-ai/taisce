@@ -1,0 +1,128 @@
+{
+  "derivation": "taisce-turn-key/2",
+  "vectors": [
+    {
+      "name": "two turns whose line-joined text is identical: the first",
+      "data_subject_id": "alice",
+      "run": "run-1",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Where does Marta work?\nassistant\nAt Ensera."
+        },
+        {
+          "role": "assistant",
+          "content": "Noted."
+        }
+      ],
+      "key": "6b5f7aba-52c8-5404-b4d8-3ddf39f29a88"
+    },
+    {
+      "name": "two turns whose line-joined text is identical: the second",
+      "data_subject_id": "alice",
+      "run": "run-1",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Where does Marta work?"
+        },
+        {
+          "role": "assistant",
+          "content": "At Ensera.\nassistant\nNoted."
+        }
+      ],
+      "key": "9b5dce0c-5d94-5661-bc2f-31ae52cafe47"
+    },
+    {
+      "name": "no subject and no run",
+      "data_subject_id": "",
+      "run": "",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "key": "bb67f52d-ac1e-54de-9708-82f4ad492773"
+    },
+    {
+      "name": "no messages",
+      "data_subject_id": "alice",
+      "run": "run-1",
+      "messages": [],
+      "key": "dbb4a952-ae36-582f-bcfa-33afc2c3f53f"
+    },
+    {
+      "name": "content that looks like a netstring",
+      "data_subject_id": "alice",
+      "run": "run-1",
+      "messages": [
+        {
+          "role": "user",
+          "content": "5:alice,5:run-1,"
+        },
+        {
+          "role": "assistant",
+          "content": "4:user,"
+        }
+      ],
+      "key": "5fd87d89-a439-519d-8a78-945bc95773f8"
+    },
+    {
+      "name": "an empty content between two messages",
+      "data_subject_id": "alice",
+      "run": "run-1",
+      "messages": [
+        {
+          "role": "user",
+          "content": ""
+        },
+        {
+          "role": "assistant",
+          "content": "ok"
+        }
+      ],
+      "key": "2641ee17-c54e-5ae0-9151-66da99a24add"
+    },
+    {
+      "name": "characters outside the Basic Multilingual Plane, counted in UTF-8 bytes",
+      "data_subject_id": "علي",
+      "run": "run-é",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Launch at 09:00 🚀 — مرحبا"
+        },
+        {
+          "role": "assistant",
+          "content": "Ça coûte 5 €."
+        }
+      ],
+      "key": "3ba534fe-e832-5eb9-a9b4-e3b0e10f7a0a"
+    },
+    {
+      "name": "a tool exchange",
+      "data_subject_id": "bob",
+      "run": "thread-42",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Weather?"
+        },
+        {
+          "role": "assistant",
+          "content": "call:weather(Oslo)"
+        },
+        {
+          "role": "tool",
+          "content": "-3C"
+        },
+        {
+          "role": "assistant",
+          "content": "It is -3C in Oslo."
+        }
+      ],
+      "key": "27ee5ef4-692c-5f1c-b6b5-fbd8ecf462f7"
+    }
+  ]
+}

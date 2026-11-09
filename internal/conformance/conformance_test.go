@@ -100,8 +100,8 @@ func TestTheReferenceAdapterPassesEveryCase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 10 {
-		t.Fatalf("expected ten cases, got %d", len(results))
+	if len(results) != 12 {
+		t.Fatalf("expected twelve cases, got %d", len(results))
 	}
 	for _, r := range results {
 		if !r.Passed {
@@ -137,6 +137,8 @@ func TestTheSuiteRefusesEachBrokenRule(t *testing.T) {
 		{"context failure raised", &conformance.Reference{ContextFatal: true}, "context_failure_is_not_fatal", "fatal=true"},
 		{"a fresh key on every store", &conformance.Reference{FreshKeyEachRun: true}, "a_retried_turn_is_stored_once", "different idempotency keys"},
 		{"every message under one group", &conformance.Reference{CollapseGroups: true}, "filters_default_to_external_messages", "must not be observed as one"},
+		{"a key from line-joined fields", &conformance.Reference{LineJoinedKey: true}, "different_turns_are_never_one_key", "distinct turns were sent with one idempotency key"},
+		{"an erasure claimed and never asked for", &conformance.Reference{ClaimErasure: true}, "erasure_hands_back_the_receipt", "still exports"},
 	}
 	for _, m := range mutants {
 		results, err := conformance.Run(context.Background(), dep, m.driver, s)
