@@ -92,11 +92,36 @@ func TestThePluginNamesThisRouteAndOnlyToolsThatExist(t *testing.T) {
 		tools[name] = true
 	}
 	commands, _ := filepath.Glob(filepath.Join(pluginRoot, "commands", "*.md"))
-	skill, _ := filepath.Glob(filepath.Join(pluginRoot, "skills", "*", "SKILL.md"))
-	if len(commands) != 3 || len(skill) != 1 {
-		t.Fatalf("expected three commands and one skill, got %d and %d", len(commands), len(skill))
+	skills, _ := filepath.Glob(filepath.Join(pluginRoot, "skills", "*", "SKILL.md"))
+	if len(commands) != 3 {
+		t.Fatalf("expected three commands, got %d", len(commands))
 	}
-	for _, path := range append(commands, skill...) {
+	// Every tool has a skill naming it, plus the router that says when memory is the right move at
+	// all. Counted rather than listed: a tool added to the server with no skill is a function
+	// nothing will ever reach on purpose, and the count is what notices. The router is the one skill
+	// that names no single tool, which is why the expected number is one more than the tools.
+	if len(skills) != len(api.MCPToolNames())+1 {
+		t.Fatalf("expected a skill per tool plus the router, %d in all, got %d",
+			len(api.MCPToolNames())+1, len(skills))
+	}
+	named := map[string]string{}
+	for _, path := range skills {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range api.MCPToolNames() {
+			if strings.Contains(string(body), "`"+name+"` is the tool") {
+				named[name] = path
+			}
+		}
+	}
+	for _, name := range api.MCPToolNames() {
+		if named[name] == "" {
+			t.Errorf("no skill says it calls the %s tool, so nothing will reach it on purpose", name)
+		}
+	}
+	for _, path := range append(commands, skills...) {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
