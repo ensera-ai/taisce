@@ -44,7 +44,10 @@ func TestEveryPinnedReleaseVersionMatchesTheVersionLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := strings.TrimSpace(string(line)) + ".0"
+	// The line, not a whole version: the patch is decided when a release is cut, and a release that
+	// fails its gate must be retried under a later patch because tags here are immutable (#194). A
+	// test demanding .0 would fail every tree that shipped a retry.
+	want := strings.TrimSpace(string(line))
 
 	pin := regexp.MustCompile(`v[0-9]+\.[0-9]+\.[0-9]+`)
 	for _, name := range []string{"compose.yaml", "README.md", "CONTRIBUTING.md"} {
@@ -59,10 +62,10 @@ func TestEveryPinnedReleaseVersionMatchesTheVersionLine(t *testing.T) {
 			continue
 		}
 		for _, got := range found {
-			if got != "v"+want {
-				t.Errorf("%s pins %s; VERSION says the line is %s, so the release is v%s. "+
+			if !strings.HasPrefix(got, "v"+want+".") {
+				t.Errorf("%s pins %s, which is not on the line VERSION names (%s). "+
 					"Either the pin was not bumped with VERSION, or VERSION is wrong.",
-					name, got, strings.TrimSpace(string(line)), want)
+					name, got, want)
 			}
 		}
 	}
