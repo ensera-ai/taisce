@@ -284,12 +284,14 @@ then a test that kills a replica and a database and measures against them.
 
 - **Pin the MCP protocol revision** (#146). A public interface whose shape is decided by an SDK
   default is one dependency bump from changing silently.
-- **Refuse a predicate with no object kind** (#159). Every seeded predicate has one, so nothing is broken
-  today. But D25 lets an operator add a predicate, `object_kind` is nullable, and the traversal's
-  `step.other IS NOT NULL` means a fact with no object entity is never returned at all. An operator
-  can therefore add a relation that extracts, stores, and is invisible to recall. Fail closed: refuse
-  the predicate, or make the walk return objectless facts. The first is one constraint; the second is
-  a change to the traversal.
+- **Refuse a blank object end, or return it** (#159). `predicate.object_kind` is `NOT NULL` with a
+  CHECK over six kinds, so the vocabulary fails closed and an operator cannot add a relation without
+  an object end. What is open is one step later: `resolveEntity` returns an empty id for a blank
+  end — "the fact is still worth storing, it simply has an unresolvable end, and traversal skips
+  it" — and the traversal's `step.other IS NOT NULL` does not skip the hop, it drops the row. So a
+  claim with a blank object is stored with its quote, counted by erasure, and unreadable by any
+  recall, with no refusal recorded. Either refuse it at extraction beside `unresolvable_subject`, or
+  separate "a fact to return" from "an end to walk to" and return it.
 - **Decide whether 29 person-centric predicates is the ceiling.** The vocabulary was written for what
   an agent learns about a person in conversation, and the AP run measured what that costs on other
   text. With `#141` opening operator-added predicates, the question of whether the shipped list grows
