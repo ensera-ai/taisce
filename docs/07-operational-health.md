@@ -144,6 +144,126 @@ seconds.
 - **No numbers have been measured.** The one-second cache and the 330-second window are defaults,
   not a measured service level.
 
+## Metrics a monitoring system can scrape
+
+The report above answers a question you asked. Metrics answer the one you are not there to ask. The
+management surface serves the exposition format Prometheus and everything compatible with it reads:
+
+```sh
+curl -s -H "Authorization: Bearer $TAISCE_OPERATOR_TOKEN" \
+  http://127.0.0.1:8081/manage/v1/metrics
+```
+
+```
+# HELP taisce_formation_backlog Turns stored across every project and not yet formed.
+# TYPE taisce_formation_backlog gauge
+taisce_formation_backlog 12
+```
+
+A scrape presents the operator credential like any other management call. It is on the management
+listener, not the memory port, because these are the operator's numbers: on the memory port every
+agent holding a project credential could read how far behind the instance is and how much capacity
+is left. A project credential, an unknown token and a revoked operator credential all get the same
+`401` a stranger gets, and the memory port has no `/metrics` to find.
+
+In Prometheus:
+
+```yaml
+scrape_configs:
+  - job_name: taisce
+    metrics_path: /manage/v1/metrics
+    authorization:
+      credentials_file: /etc/prometheus/taisce-operator-token
+    static_configs:
+      - targets: ["taisce-manage:8081"]
+```
+
+### What it serves
+
+| Metric | What it is |
+|---|---|
+| `taisce_formation_backlog` | Turns stored and not yet formed, across every project |
+| `taisce_formation_backlog_limit` | Unfinished turns the instance accepts before refusing a write |
+| `taisce_formation_parked` | Turns the driver gave up on |
+| `taisce_formation_failing_projects` | How many projects hold a turn that has been tried and did not form |
+| `taisce_worker_responsive` | `1` when a worker reported inside the heartbeat window, `0` otherwise |
+| `taisce_formation_heartbeat_timestamp_seconds` | When a worker last reported, or `NaN` if none ever has |
+| `taisce_formation_oldest_pending_timestamp_seconds` | When the oldest unformed turn was stored, or `NaN` if the backlog is empty |
+| `taisce_database_connections` | Client sessions open against this instance's database |
+| `taisce_cluster_connections` | Client sessions open against the whole database server |
+| `taisce_connection_limit` | Sessions the server permits in total |
+| `taisce_connection_reserved` | Sessions the server holds back for superuser recovery |
+| `taisce_connection_headroom` | Sessions that could still be opened before the server refuses |
+| `taisce_operations_allowed` | Operations the ledger recorded as allowed in the recent window |
+| `taisce_operations_refused` | Operations the ledger recorded as refused in the recent window |
+| `taisce_operations_window_seconds` | How far back the two counts above look |
+
+Every value is read from the same place the health report and the ops centre read it: the
+operational snapshot, and the ledger's own counts. Nothing here is measured for the metrics, so a
+number on a dashboard cannot disagree with the page you were looking at a moment ago.
+
+Allowed and refused are counted apart because the ratio is the signal. A run of refusals against
+steady traffic is what an attack looks like from the outside, and a single total hides it.
+
+`taisce_formation_failing_projects` is a count and no names. The instance's own stamps cannot answer
+the question it answers, because any project forming turns moves them while another fails every
+attempt — and it is the number the ops centre marks its tile on, so a rule written against it fires
+on the same thing the page would have shown you.
+
+The two timestamps are there so you can pick your own staleness window instead of inheriting ours.
+`taisce_worker_responsive` has 330 seconds baked into it; `time() - taisce_formation_heartbeat_timestamp_seconds`
+has whatever you decide. The same for the backlog: its depth says how much is waiting and
+`time() - taisce_formation_oldest_pending_timestamp_seconds` says how long the oldest of it has been
+waiting, which is usually the one you want to be woken for.
+
+Both are `NaN` when there is nothing to report — no worker has ever reported, or the backlog is
+empty. `NaN` rather than a zero, because a zero is 1970: an empty backlog would read as fifty-six
+years behind and fire the rule you wrote. Every comparison against `NaN` is false, so an absent
+moment raises nothing.
+
+### What it deliberately does not expose
+
+**No project label, and no label at all.** Every series is an instance-wide aggregate. A scrape does
+not stay where it is taken — it goes to a monitoring system whose access and retention are a
+different trust domain from an operator token — and a per-project label set would turn every scrape
+into an enumeration of who this instance's customers are. Per-project detail stays on the management
+API and the ops centre, behind this same credential, where you ask for it one project at a time.
+There is no subject, no predicate, no credential identifier and nothing derived from stored
+content: the ledger holds no words and neither does this.
+
+**No tracing and no spans.** Metrics only, and no OpenTelemetry dependency in the tree. There is no
+settled convention for a memory span to emit against, so anything named now would be renamed later,
+and nothing you alert on needs it.
+
+**No durations and no latencies.** Nothing here times anything, because adding timing to the read
+path is a cost paid on every call and no latency target has been agreed to justify it. See
+[the decision register](01-decisions.md) for what is settled.
+
+### Limits of these numbers
+
+- **The counts are a window, not a total.** `taisce_operations_allowed` and
+  `taisce_operations_refused` cover the last `taisce_operations_window_seconds` and go down as well
+  as up, which is why neither is named `_total` and both are gauges. Alert on the value; do not take
+  a `rate()` of it. They are a window rather than an all-time count because an all-time count is a
+  full pass over a ledger that only ever grows, and this endpoint is read by an unattended timer
+  forever.
+- **`taisce_worker_responsive` carries one threshold, and it is not yours.** It is `1` when a worker
+  reported within 330 seconds. Use `taisce_formation_heartbeat_timestamp_seconds` to alert at a
+  threshold of your own.
+- **A heartbeat is a worker reporting in, not formation having happened.** It is written by the
+  driver that runs the passes. A turn that formed without a pass behind it — in a test, say — moves
+  the backlog and leaves the worker series exactly where they were.
+- **A partial scrape is a failed scrape.** If either the snapshot or the ledger cannot be read, the
+  whole scrape answers `503` and nothing is served. A series that quietly stopped being published
+  reads as a condition that stopped happening; a target marked down cannot be mistaken for good
+  news. The same `503` is the answer from a deployment wired without the operational reader.
+- **The scrape is not on the ledger.** Every other management operation is. This one is not: it
+  arrives on a timer thousands of times a day, the ledger has no delete, and recording it would grow
+  the table whose rows it counts. A refused scrape *is* recorded, under the same sampling budget as
+  any other refused authentication.
+- **No numbers have been measured.** The five-minute window and the 330-second heartbeat are
+  defaults, not a measured service level, and nothing here is a latency or throughput figure.
+
 ## How it works
 
 The API checks the memory schema and the credential registry using the same separate database
@@ -153,3 +273,14 @@ a probe that disconnects can't cancel or poison the shared result.
 Worker readiness is tied to the worker's own processing loop, not to a separate timer, so a stuck
 loop can't keep reporting healthy. The health report reads one instance-level row for the formation
 counters and uses partial indexes for the oldest pending turn and the parked count.
+
+The scrape reads the same instance-level row and the same partial indexes, plus one bounded count of
+the ledger over its window. The failing-project count is taken from the backlog rather than from a
+per-project row: a turn that formed has left the backlog and one the driver gave up on is parked, so
+a waiting turn stamped with a failure is work still owed that has already gone wrong once, and the
+backlog index holds exactly those rows. It writes the exposition format directly, with no client library: the
+format is a name, a space and an integer, and a dependency in the write path's process buys nothing
+back. The window's end is pushed five seconds past this process's clock, because a ledger row is
+stamped by the database and the two clocks disagree — without the tolerance every scrape would be
+missing the operations that had just happened, which are the ones a run of refusals shows up in
+first.
