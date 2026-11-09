@@ -461,10 +461,14 @@ re-read until you ask for it (see [rebuilds](#recovery-rebuilds-and-storage)).
 ledger records the change against; the relation itself is admitted for every project on this
 instance, immediately. If that is not what you want, it needs a second instance.
 
-**Nothing is removed and nothing is renamed.** A relation facts already use cannot be retired —
+**Nothing is removed, renamed or redeclared.** A relation facts already use cannot be retired —
 attempting it fails rather than deleting the facts — and renaming one would leave a single relation
-with two spellings in its history, which is the split the closed set exists to prevent. If you want a
-relation gone, what you want is the facts gone, and that is an erasure.
+with two spellings in its history, which is the split the closed set exists to prevent. Neither is
+offered, and neither is reachable by a statement either: the database refuses both while any fact
+carries the relation, and it refuses a change to its cardinality for the same reason. Cardinality is
+what decides whether a later fact closed an earlier one, so changing it would change what facts
+already stored had meant, without deleting one or changing a count. If you want a relation gone, what
+you want is the facts gone, and that is an erasure.
 
 Both operations are on the ledger with your operator credential as the principal, and so is an
 attempt that was refused — which is how a typo in a project name is found later.
