@@ -92,10 +92,11 @@ Correcting a record isn't a tool either. An agent can flag one with `report_feed
 decides what to do about it.
 
 > [!WARNING]
-> The tool list limits what the agent is offered. It doesn't limit the token. If a read-write token
-> leaks, it can still erase over the HTTP API. Give an agent that only needs to ask a read-only
-> token. Also treat what an agent saves with `observe` as input to review, since it can record
-> anything under any role.
+> The tool list limits what the agent is offered. It doesn't limit the token. If a `read_write`
+> token leaks, it can still erase over the HTTP API. Give an agent an `agent` token, the default
+> from `taisce credential issue`, which can save and ask but can't erase; give one that only needs to
+> ask a read-only token. Also treat what an agent saves with `observe` as input to review, since it
+> can record anything under any role.
 
 ## The Claude Code plugin
 
@@ -109,7 +110,8 @@ its own.
 1. **Check what you need.** You need a running Taisce deployment, `python3` on your machine (the
    hooks use only its standard library), and a clone of this repository.
 
-2. **Make a read-write token.** The plugin saves with `observe`, so a read-only token won't do.
+2. **Make an agent token.** The plugin saves with `observe`, so a read-only token won't do, and it
+   never erases, so it doesn't need `read_write`. A key issued without `--access` is `agent`.
 
    ```bash
    taisce credential issue claude-code --project default

@@ -178,9 +178,10 @@ func (c *manageClient) credential(ctx context.Context, args []string) error {
 	case "issue":
 		flags := flag.NewFlagSet("issue", flag.ContinueOnError)
 		project := flags.String("project", "default", "the project this credential reaches")
-		readOnly := flags.Bool("read-only", false, "allow reads and exports, but no memory mutations")
+		accessFlag := flags.String("access", "", accessFlagHelp)
+		readOnly := flags.Bool("read-only", false, "the same as --access read_only")
 		if len(args) < 2 {
-			return errors.New("usage: taisce credential issue <name> [-project <name>] [--read-only]")
+			return errors.New("usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write]")
 		}
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
@@ -188,9 +189,9 @@ func (c *manageClient) credential(ctx context.Context, args []string) error {
 		if flags.NArg() != 0 {
 			return errors.New("unexpected credential arguments; flags must follow the credential name")
 		}
-		access := credential.ReadWrite
-		if *readOnly {
-			access = credential.ReadOnly
+		access, err := issuedAccess(*accessFlag, *readOnly)
+		if err != nil {
+			return err
 		}
 		var issued struct {
 			ID, Name, Project, Access, Token string

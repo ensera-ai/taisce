@@ -24,12 +24,45 @@ func (s *Server) authorized(operation string, next grantedHandler) grantedHandle
 }
 
 func permitted(access credential.Access, operation string) bool {
-	if access == credential.ReadWrite {
+	switch access {
+	case credential.ReadWrite:
 		return true
-	}
-	if access != credential.ReadOnly {
+	case credential.Agent:
+		return agentPermitted(operation)
+	case credential.ReadOnly:
+		return readOnlyPermitted(operation)
+	default:
 		return false
 	}
+}
+
+// agentPermitted is an allowlist, not "everything except erasure", for the reason the read-only list
+// is: a new operation is refused to an agent key until somebody decides it belongs there. A
+// destructive operation added later and forgotten here is refused, which is the failure that can
+// be noticed; admitted by default, it would be the failure nobody notices until it is used.
+//
+// What is left out is the point of the level (D26): erasing a person and purging an entity delete
+// data with no way back, and an agent process is where a key is most exposed to text written by
+// somebody else. Retraction, correction and artifact deletion stay in: each is an agent's ordinary
+// work, and a retraction keeps the history it withdraws from. Registering or disabling a
+// notification endpoint is out too, though it destroys nothing: it chooses where this deployment
+// makes outbound requests, which is the operator's decision and no agent's work.
+func agentPermitted(operation string) bool {
+	if readOnlyPermitted(operation) {
+		return true
+	}
+	switch operation {
+	case domain.AuditObserve, domain.AuditRecordAssert, domain.AuditRecordCorrect, domain.AuditRecordRetract,
+		domain.AuditFeedbackRecord, domain.AuditFeedbackPromote,
+		domain.AuditArtifactPut, domain.AuditArtifactDelete,
+		domain.AuditSubjectRegister, domain.AuditSubjectUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+func readOnlyPermitted(operation string) bool {
 	switch operation {
 	case domain.AuditEntityList, domain.AuditEntityGet, domain.AuditEmbeddingSearch, domain.AuditEntityEmbeddingSearch, domain.AuditReportEmbeddingSearch, domain.AuditMessageGet:
 		return true

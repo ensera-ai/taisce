@@ -1367,3 +1367,71 @@ accident. Work: [#131](https://github.com/ensera-ai/taisce/issues/131) Python,
 [#132](https://github.com/ensera-ai/taisce/issues/132) .NET,
 [#133](https://github.com/ensera-ai/taisce/issues/133) Java,
 [#134](https://github.com/ensera-ai/taisce/issues/134) conformance.
+
+## D26 — An agent key writes memory and cannot destroy it, and is what a key is issued as by default
+
+**Date.** 2026-11-09. **Issue.** [#130](https://github.com/ensera-ai/taisce/issues/130).
+
+**Why it was open.** A project credential was `read_only` or `read_write`, and `read_write` permitted
+every operation. An agent process has to write turns, so every key in an agent process could erase
+any person in its project, by subject or by up to ten thousand sources, and purge any entity. The
+erasure leaves an audit row and a receipt, so it is not invisible, but it cannot be undone. And the
+key in an agent process is the one most exposed: it sits beside a model that reads text other people
+wrote, in a process that is often not the application's most guarded. D24 made erasure reachable
+from the clients' typed methods without widening this; this entry narrows it.
+
+**Decided.**
+- **A third access level, `agent`**, between the two. It holds every read `read_only` holds, plus
+  an explicit list of writes: observe, assert, correct and retract records, record and promote
+  feedback, put and delete artifacts, register and update subjects. It is refused **erasure** and
+  **entity purge**, the two operations that destroy data with no way back. It is also refused
+  **registering or disabling a notification endpoint**, which destroys nothing but chooses where this
+  deployment makes outbound requests: the operator's decision, and no agent's work.
+- The list is an allowlist, like `read_only`'s. A new operation is refused to an agent key until
+  somebody classifies it, and a test that walks every declared operation fails until they do.
+- **A key issued without naming its access is `agent`**: from `taisce credential issue`, from the
+  management surface with `access` omitted, and from the ops centre's form, whose first option it is.
+  The registry column's default is `agent` too, and its constraint holds the set of three.
+- **The bootstrap's first key stays `read_write`.** It is the project owner's key, printed once, and
+  it is what the application's erasure path is set up with. The quickstart's erasure step uses it.
+- **Existing keys keep the access they were issued with.** Nothing here narrows a key somebody is
+  using.
+- `--read-only` keeps working and means `--access read_only`. Given beside a different `--access`, it
+  is refused rather than one of the two winning.
+
+**Rejected: leave it, and record that an agent key is a project key.** It costs nothing to build.
+But it leaves the irreversible operation in the least guarded place, the process whose inputs are
+written by strangers, for no reason an agent ever needs it.
+
+**Rejected: take erasure out of `read_write`, and add a new level that has it.** It is the same set of
+levels with a cleaner name for the narrow one. It would silently remove erasure from every key
+already issued, and an application whose erasure path suddenly answers `403` fails a person's request
+for erasure. That is the failure this whole area exists to prevent.
+
+**Rejected: per-operation grants on each credential.** It is the most general, and it means a grant
+set to design, store, migrate and show in the ops centre for every key. Three ordered levels answer
+the question that was actually asked: which key may destroy data. A fourth question would be the
+second use case that shows whether grants are needed.
+
+**Rejected: the bootstrap key as `agent` too.** It is the more uniform default, and it would leave a
+fresh project with no key able to honour an erasure request, unless the operator first learns to issue
+a second one. The first key is the owner's, and the owner is who answers for erasure.
+
+**What this does not cover.**
+- An `agent` key can still write any turn under any subject and any role, until it is revoked. It
+  cannot destroy memory, but it can write memory that recall returns. Formation's speaker rule and
+  the operator's review are what bound that, not this.
+- An `agent` key can retract and correct records. A retraction keeps the history it withdraws from,
+  so it is reversible by a correction. It is not an erasure.
+- The level is only as good as where the keys go. An application that hands its `read_write` key to
+  its agent process has the old exposure back, and nothing here can tell.
+
+**Undo cost.** Low to add, awkward to remove. Taking the level away means deciding what every key
+issued as `agent` becomes, and both answers are wrong for somebody. Changing the default back is one
+line in three places.
+
+**Impact.** Security: the key most likely to leak can no longer erase a person or purge an entity, and
+can no longer choose an outbound destination. That is the worst path #130 named, closed in the
+substrate (a column constraint and an allowlist), not by convention. Operations: an operator issuing a
+key for an erasure path now has to say `--access read_write`. That is deliberate friction, written
+into the CLI's help and the operator guide.

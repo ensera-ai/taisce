@@ -156,6 +156,14 @@ func TestAnOperatorRunsTheProjectAndCredentialLifecycleOverTheAPI(t *testing.T) 
 	if issued.Token == "" || issued.Project != project || issued.Access != "read_only" {
 		t.Fatalf("expected a read-only token for p2, got %+v", issued)
 	}
+	// Naming no authority is agent, not read_write: a key minted without a word is the one that
+	// cannot erase anybody (D26).
+	var unnamed, writer struct{ Access string }
+	m.manageDo(t, "/credentials/issue", map[string]any{"name": "agent-app", "project": project}, m.operator, http.StatusCreated, &unnamed)
+	m.manageDo(t, "/credentials/issue", map[string]any{"name": "erasure-path", "project": project, "access": "read_write"}, m.operator, http.StatusCreated, &writer)
+	if unnamed.Access != "agent" || writer.Access != "read_write" {
+		t.Fatalf("expected agent by default and read_write when named, got %q and %q", unnamed.Access, writer.Access)
+	}
 	if status, _ := m.raw(t, http.MethodGet, "/v1/freshness", nil, issued.Token); status != http.StatusOK {
 		t.Fatalf("the minted credential must open the project's memory routes, got %d", status)
 	}

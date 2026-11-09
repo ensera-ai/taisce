@@ -108,21 +108,25 @@ erasure, with a receipt.
 ### Make a key
 
 ```bash
-taisce credential issue research-app --project research
-taisce credential issue research-reader --project research --read-only
+taisce credential issue research-agent --project research
+taisce credential issue research-erasure --project research --access read_write
+taisce credential issue research-reader --project research --access read_only
 ```
 
 You'll see something like this:
 
 ```text
-credential research-app (…) reaches project research with read_write access
+credential research-agent (…) reaches project research with agent access
 token: tsk_…
 
 This token is shown once and cannot be recovered.
 ```
 
-Put flags **after** the name. `--project` defaults to `default`. A `--read-only` key can ask,
-inspect and export, but can't change memory. Each run makes a new key.
+Put flags **after** the name. `--project` defaults to `default`. `--access` defaults to `agent`: the
+key can save turns, ask, correct and export, but can't erase a person or purge an entity. Give the
+agent process that key. Only the part of your application that handles erasure requests needs
+`--access read_write`. A `read_only` key can ask, inspect and export, but can't change memory, and
+`--read-only` is the same as `--access read_only`. Each run makes a new key.
 
 To see and revoke keys (listing works only over the management API):
 
@@ -135,7 +139,8 @@ You'll see something like this:
 
 ```text
 …  research-reader          tsk_…… project research read_only
-…  research-app             tsk_…… project research read_write
+…  research-erasure         tsk_…… project research read_write
+…  research-agent           tsk_…… project research agent
 credential … revoked
 ```
 
