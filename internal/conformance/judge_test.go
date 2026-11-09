@@ -219,3 +219,114 @@ func TestTheJudgeHoldsGroupsRetriesAndKeysToTheirRules(t *testing.T) {
 		t.Fatalf("omitted ordinals are standalone messages and must pass, got %v", f)
 	}
 }
+
+// Every refusal the erasure judge can make is watched being made: no receipt, a receipt the client
+// raised on, a receipt that is not clean, one that deleted nothing, one with a residual, and a
+// deployment that still exports the person after a receipt said otherwise.
+func TestTheErasureJudgeRefusesEachBrokenReceipt(t *testing.T) {
+	clean := &Erasure{Deleted: map[string]int{"messages": 2}, Residual: map[string]int{"messages": 0}, Clean: true}
+	if f := judgeErasure(Expect{Erased: ptr(true)}, clean, 0); len(f) != 0 {
+		t.Fatalf("a clean receipt and an empty export failed: %v", f)
+	}
+	if f := judgeErasure(Expect{}, nil, 9); f != nil {
+		t.Fatalf("an unasked erasure was judged: %v", f)
+	}
+	for _, c := range []struct {
+		name    string
+		receipt *Erasure
+		left    int
+		reason  string
+	}{
+		{"no receipt", nil, 0, "no erasure receipt"},
+		{"the client raised", &Erasure{Deleted: map[string]int{"messages": 1}, Clean: true, Error: "boom"}, 0, "raised"},
+		{"not clean", &Erasure{Deleted: map[string]int{"messages": 1}, Residual: map[string]int{"messages": 1}}, 0, "not clean"},
+		{"nothing deleted", &Erasure{Deleted: map[string]int{}, Clean: true}, 0, "deleted nothing"},
+		{"a residual", &Erasure{Deleted: map[string]int{"messages": 1}, Residual: map[string]int{"facts": 3}, Clean: true}, 0, "3 facts still matching"},
+		{"rows left behind", clean, 4, "still exports 4 row(s)"},
+	} {
+		f := judgeErasure(Expect{Erased: ptr(true)}, c.receipt, c.left)
+		if !strings.Contains(strings.Join(f, " "), c.reason) {
+			t.Errorf("%s: expected a failure naming %q, got %v", c.name, c.reason, f)
+		}
+	}
+}
+
+// The reference driver's erasure is what a client must do with each answer: a refusal and a body
+// that does not parse become the receipt's error, a receipt that is not clean is an error that still
+// carries it, and an action the protocol does not define is refused rather than run as a turn.
+func TestTheReferenceErasureTurnsEveryAnswerIntoAReceiptOrAnError(t *testing.T) {
+	answers := map[string]func(http.ResponseWriter){
+		"refused": func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"code":"forbidden"}`)
+		},
+		"garbled": func(w http.ResponseWriter) { _, _ = io.WriteString(w, `{`) },
+		"not clean": func(w http.ResponseWriter) {
+			_, _ = io.WriteString(w, `{"deleted":{"messages":1},"residual":{"messages":1},"clean":false}`)
+		},
+	}
+	for name, answer := range answers {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { answer(w) }))
+		report, err := (&Reference{}).Run(context.Background(), Instruction{Action: ActionErase, API: server.URL, Token: "t", DataSubjectID: "s"})
+		server.Close()
+		if err != nil || report.Erasure == nil || report.Erasure.Error == "" {
+			t.Errorf("%s: expected a receipt carrying an error, got %+v %v", name, report.Erasure, err)
+		}
+	}
+	report, err := (&Reference{}).Run(context.Background(), Instruction{Action: ActionErase, API: "http://127.0.0.1:1", Token: "t", DataSubjectID: "s"})
+	if err != nil || report.Erasure == nil || report.Erasure.Error == "" {
+		t.Errorf("an unreachable deployment: expected a receipt carrying an error, got %+v %v", report.Erasure, err)
+	}
+	if _, err := (&Reference{}).Run(context.Background(), Instruction{Action: "purge", API: "http://127.0.0.1:1"}); err == nil {
+		t.Error("an unknown action was not refused")
+	}
+}
+
+// Every vector in conformance/turn-keys.json is what TurnKey derives, under the derivation the file
+// names. The vectors were written by an implementation of the specification outside this package, so
+// agreement is two readings of one rule rather than a function checked against its own output; every
+// adapter's tests read the same file.
+func TestTurnKeyDerivesEveryPublishedVector(t *testing.T) {
+	raw, err := os.ReadFile("../../conformance/turn-keys.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Derivation string `json:"derivation"`
+		Vectors    []struct {
+			Name     string       `json:"name"`
+			Subject  string       `json:"data_subject_id"`
+			Run      string       `json:"run"`
+			Messages []KeyMessage `json:"messages"`
+			Key      string       `json:"key"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.Derivation != TurnKeyDerivation {
+		t.Fatalf("the vectors are for %q and this runner derives %q", file.Derivation, TurnKeyDerivation)
+	}
+	seen := map[string]string{}
+	for _, v := range file.Vectors {
+		if got := TurnKey(v.Subject, v.Run, v.Messages); got != v.Key {
+			t.Errorf("%s: derived %s, the vector says %s", v.Name, got, v.Key)
+		}
+		if other, dup := seen[v.Key]; dup {
+			t.Errorf("%s and %s share a key", v.Name, other)
+		}
+		seen[v.Key] = v.Name
+	}
+	// The pair the vectors open with is the pair the line-joined derivation could not tell apart.
+	a, b := file.Vectors[0], file.Vectors[1]
+	toMessages := func(ms []KeyMessage) []message {
+		out := make([]message, len(ms))
+		for i, m := range ms {
+			out[i] = message{Role: m.Role, Content: m.Content}
+		}
+		return out
+	}
+	if lineJoinedKey(a.Subject, a.Run, toMessages(a.Messages)) != lineJoinedKey(b.Subject, b.Run, toMessages(b.Messages)) {
+		t.Fatal("the vectors' opening pair no longer collides under the line-joined derivation, so it no longer shows why the derivation changed")
+	}
+}

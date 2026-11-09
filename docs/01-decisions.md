@@ -1368,6 +1368,68 @@ accident. Work: [#131](https://github.com/ensera-ai/taisce/issues/131) Python,
 [#133](https://github.com/ensera-ai/taisce/issues/133) Java,
 [#134](https://github.com/ensera-ai/taisce/issues/134) conformance.
 
+## D25 — A turn's key is a digest of length-prefixed fields, and one duplicate per in-flight retry is accepted at the change
+
+**Date.** 2026-11-09. **Issue.** [#121](https://github.com/ensera-ai/taisce/issues/121).
+
+**Why it was open.** Every adapter derives an observation's idempotency key from the turn, so that a
+retry carries the same key and the deployment folds it into what it already holds. The derivation
+joined the subject, the run and each message's role and content with newlines. Content can hold a
+newline followed by a role name, so where one field ended could not be recovered from the bytes
+hashed: two different turns in one run produced one key, and the deployment, which fingerprints the
+turn behind a key, refused the second as a conflicting retry of the first. The refusal is loud, but
+the key is deterministic, so the second turn was refused on every retry and could never be stored.
+The suite asserted only that the same turn gets the same key, never that different turns get
+different ones.
+
+**Decided.**
+- The key is SHA-256 over netstrings — length in UTF-8 bytes, `:`, the bytes, `,` — of
+  `taisce-turn-key/2`, the subject, the run, and each message's role and content, shaped as a
+  version-5 UUID. The specification is in `conformance/README.md`. `conformance/turn-keys.json` holds
+  vectors written by an implementation outside the runner, which the runner's own test and every
+  adapter's tests read.
+- The derivation's name is the first field hashed, so no key from this derivation can equal one from
+  any other, including the next.
+- A conformance case, `different_turns_are_never_one_key`, runs two turns whose line-joined text is
+  identical and expects both stored under different keys. The derivation it replaces is kept in the
+  reference driver behind a knob, and the suite is watched refusing it.
+- **Accepted: one duplicate per turn in flight across the upgrade.** A turn whose first attempt was
+  sent by an adapter on the old derivation and whose retry is sent by one on the new derivation
+  carries two keys and is stored twice. That needs a process upgraded between a failed attempt and
+  its retry, and the cost is one duplicated turn, which recall and erasure both handle like any
+  other.
+
+**Rejected: deriving the key from the representation the deployment fingerprints.** One definition of
+"the same turn" held in two places sounds stronger. But that representation is the deployment's
+internal normalisation, which may change with a migration. Every adapter would have to track it, and
+a change there would silently change every key in every language. The key is a contract between an
+adapter and its own retries, and a contract is better stated where it can be versioned.
+
+**Rejected: a canonical JSON encoding of the turn.** JSON canonicalisation differs across the
+languages' libraries in escaping, number forms and Unicode normalisation. Byte-identical keys in four
+languages would rest on four serialisers agreeing on details none of them promises.
+
+**Rejected: escaping the separator.** It works, and it is a second encoding to get right in every
+language, with its own edge cases (an escape character in content). A length prefix needs no rule
+about content at all.
+
+**Rejected: sending both keys during a migration window.** It would remove the duplicate at the
+change, at the cost of a contract field the deployment carries forever for a window that closes on
+the first retry after an upgrade.
+
+**What this does not cover.** A key derived by an application that bypasses the adapters is the
+application's own. The deployment's fingerprint still refuses a reused key with a different turn,
+whatever produced it.
+
+**Undo cost.** Moderate. Changing the derivation again is a new derivation name, new vectors and a
+change in four adapters, and it costs the same one duplicate per turn in flight. Nothing stored
+depends on how a key was derived.
+
+**Impact.** Correctness: a turn whose text happens to, or is steered to, read like another turn in
+the same run is stored, rather than refused for good. Security: model output is an input to the key,
+so this closes a path by which content the model was steered to produce could make a later
+legitimate turn unstorable.
+
 ## D27 — There is a Go adapter, on the Agent Framework's Go context provider, held to the same suite
 
 **Date.** 2026-11-09. **Issue.** [#128](https://github.com/ensera-ai/taisce/issues/128).

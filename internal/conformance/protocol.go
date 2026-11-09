@@ -54,7 +54,15 @@ type Case struct {
 	// is proved by the service's tests.
 	Context *ContextAnswer `json:"context,omitempty"`
 	Turn    Turn           `json:"turn"`
-	Expect  Expect         `json:"expect"`
+	// Then is a second, different turn the driver runs after Turn, for the same subject and in the
+	// same case, so in the same run. Two turns are what it takes to show that different turns get
+	// different keys; one turn, however often repeated, only shows the converse.
+	Then *Turn `json:"then,omitempty"`
+	// Erase, when set, has the driver erase the case's subject through the adapter's own client
+	// after the turns, and report the receipt it was handed. The runner then exports the subject
+	// itself: a receipt is the adapter's word, and the export is the deployment's.
+	Erase  bool   `json:"erase,omitempty"`
+	Expect Expect `json:"expect"`
 }
 
 // ContextAnswer is the shape of POST /v1/contexts as the proxy serves it for a case.
@@ -156,6 +164,10 @@ type Expect struct {
 	// they say that a retry was sent and that the deployment folded it into one observation.
 	ObserveCalls     *int  `json:"observe_calls,omitempty"`
 	ObserveKeysEqual *bool `json:"observe_keys_equal,omitempty"`
+	// Erased is that the erasure the driver ran came back as a receipt that is clean, with every
+	// residual zero and something deleted, and that the deployment exports nothing for the subject
+	// afterwards. An adapter that reports success it was not handed fails the second half.
+	Erased *bool `json:"erased,omitempty"`
 }
 
 // Message is one message as the driver handed it to the model, or as it was told to include.
@@ -165,14 +177,30 @@ type Message struct {
 	Untrusted bool   `json:"untrusted,omitempty"`
 }
 
-// Instruction is what the runner sends a driver for one turn: where the deployment is, as the
-// proxy, the credential, the subject, and the turn.
+// Instruction is what the runner sends a driver: where the deployment is, as the proxy, the
+// credential, the subject, and either a turn to run or an action to take.
 type Instruction struct {
-	Case          string `json:"case"`
+	Case string `json:"case"`
+	// Action is empty for a turn. ActionErase has the driver erase DataSubjectID through the
+	// adapter's client and report the receipt; Turn is then empty.
+	Action        string `json:"action,omitempty"`
 	API           string `json:"api"`
 	Token         string `json:"token"`
 	DataSubjectID string `json:"data_subject_id"`
 	Turn          Turn   `json:"turn"`
+}
+
+// ActionErase is the one action a driver takes that is not a turn.
+const ActionErase = "erase"
+
+// Erasure is the receipt as the driver was handed it by the adapter's client: what was deleted and
+// what still matched afterwards, per kind, and whether that is nothing. Error is what the client
+// raised, which for a receipt that is not clean it must, carrying the receipt with it.
+type Erasure struct {
+	Deleted  map[string]int `json:"deleted"`
+	Residual map[string]int `json:"residual"`
+	Clean    bool           `json:"clean"`
+	Error    string         `json:"error,omitempty"`
 }
 
 // Report is what a driver answers: the messages it handed the model, in order, whether the turn
@@ -187,6 +215,8 @@ type Report struct {
 	// StoreError is the error the adapter surfaced when storing failed, and empty when it did not
 	// fail. An adapter that stores and fails and reports nothing here has failed silently.
 	StoreError string `json:"store_error,omitempty"`
+	// Erasure is the receipt, for an erase instruction, and absent for a turn.
+	Erasure *Erasure `json:"erasure,omitempty"`
 }
 
 // MemoryMessagePrefix is the first line of every injected memory message.
