@@ -1,0 +1,32 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# A new advisory against a dependency that has not changed arrives with no commit, so a check that
+# runs only on pushes and pull requests cannot see it until somebody next changes something. This
+# runs the same reachable-advisory check `make gate` runs (`make vuln`) every day and on demand.
+# A failing run is the signal: it is red on the Actions tab and mails whoever watches the repository.
+# Dependabot alerts are a second, independent signal; this one is the one the build enforces.
+name: advisories
+
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Reachable advisories
+        run: make vuln

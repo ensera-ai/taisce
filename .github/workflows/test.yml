@@ -92,6 +92,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Reachable advisories
+        run: make vuln
+
       - name: Stop the substrate
         if: always()
         run: make db-down

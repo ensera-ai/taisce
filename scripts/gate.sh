@@ -11,7 +11,7 @@
 #
 # So this clones the commit, starts a fresh substrate from the project's own image, and runs exactly
 # what the workflow ran, in a Linux container under colima: the licence gate, the full suite with the
-# coverage floor, and vet. Whether the contract document is current is a test kept with the document
+# coverage floor, vet, and the reachable-advisory check. Whether the contract document is current is a test kept with the document
 # in the development repository (internal/api/contractdoc_test.go), so it runs in the suite here.
 #
 # What it does not reproduce, stated so nobody relies on it at a wider width: the hosted runner is
@@ -89,7 +89,7 @@ set +e
 docker run --rm --network "$net" -v "$work:/src" -w /src \
     -v taisce-gate-gomod:/go/pkg/mod -v taisce-gate-gobuild:/root/.cache/go-build \
     "$image" bash -c "make test TEST_DSN='$dsn' COVER_PROFILE=coverage.out \
-        && go vet ./..." 2>&1 | tee "$log"
+        && go vet ./... && make vuln" 2>&1 | tee "$log"
 code=${PIPESTATUS[0]}
 set -e
 elapsed=$(( $(date +%s) - started ))
