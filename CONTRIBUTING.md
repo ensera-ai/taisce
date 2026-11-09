@@ -47,7 +47,7 @@ question about cache state. Naming the overlay makes it a question you answered.
 
 The build is tagged `taisce:dev` and `taisce-postgres:dev`, never with a release's tag. The local
 image cache is shared by every install on the machine, so a build written to
-`ghcr.io/ensera-ai/taisce:v0.5.1` would be what any other install runs the next time it is recreated.
+`ghcr.io/ensera-ai/taisce:v0.6.0` would be what any other install runs the next time it is recreated.
 Leave the overlay off and Compose runs the release again. If a machine already holds a build under a
 release tag, `docker compose pull` in that install's directory brings the release back.
 

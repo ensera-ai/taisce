@@ -23,7 +23,7 @@ pulls them:
 
 ```bash
 export DEEPSEEK_API_KEY=…   # from platform.deepseek.com
-curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.5.1/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/ensera-ai/taisce/v0.6.0/compose.yaml
 cat > .env <<EOF
 TAISCE_INFERENCE_API_KEY=$DEEPSEEK_API_KEY
 TAISCE_INFERENCE_ENDPOINT=https://api.deepseek.com/v1
@@ -82,6 +82,16 @@ parked turns and a ledger you can verify. It is off by default; `TAISCE_PORTAL=o
 switches it on at `http://127.0.0.1:8081/portal/`, and it opens only for an operator token.
 
 ![The Taisce ops centre](site/static/img/ops-centre/overview.png)
+
+An instance can also be read from outside itself: `/metrics` on the management surface serves the
+numbers an operator alerts on — the formation backlog, parked turns, database sessions — as
+instance-wide aggregates, carrying no project label and nothing from memory. So a Taisce instance goes
+on a dashboard beside everything else you run instead of being understood only by opening its page.
+
+Predicates are a closed vocabulary, which is what keeps a relation from being whatever a model
+decided to call it. An operator can add one over the management surface, so the vocabulary is yours to
+extend without a new release — and it stays closed, because anything not in it is refused rather than
+guessed at.
 
 [Operate an instance](docs/operate/overview.md) covers running Taisce from the ops centre, the CLI and
 the management API.
