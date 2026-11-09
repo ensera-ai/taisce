@@ -140,6 +140,10 @@ func (m *ManagementServer) Handler(readiness ...http.Handler) http.Handler {
 	for _, o := range managementOperations {
 		mux.Handle(o.Method+" "+ManagementPrefix+o.Path, m.operated(o.handler(m)))
 	}
+	// The scrape, behind the same operator door and outside the operation table: it answers the
+	// exposition format rather than a JSON object, so it has no request or response shape for the
+	// contract to describe, and it writes no ledger row of its own. See metrics.go.
+	mux.Handle(http.MethodGet+" "+ManagementPrefix+MetricsPath, m.operated(m.metrics))
 	return mux
 }
 
