@@ -9,7 +9,7 @@
 # a green run that asserted nothing — so the tool is installed rather than the test excused.
 #
 # The Go version is the one go.mod pins. Change them together.
-FROM golang:1.27.1-bookworm
+FROM golang:1.27.3-bookworm
 
 # Helm is pinned and verified rather than installed by a script fetched at build time. A pipe into a
 # shell runs whatever the server returns that day; a pinned archive checked against its published

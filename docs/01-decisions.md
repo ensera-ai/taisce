@@ -1842,3 +1842,98 @@ reader needed. Security: no new authority — the same operator door, one more r
 narrowness of what a scrape may carry is the security content of this entry. Performance: the scrape
 reads the snapshot the health report already builds, so it adds one query per scrape and nothing to the
 read path.
+
+## D33 — The coverage floor is a percentage and the toolchain that measured it
+
+**Date.** 2026-11-09. **Issue.** [#162](https://github.com/ensera-ai/taisce/issues/162).
+
+**Why it was open.** `make test` failed the 92.3 floor at 92.0% on a commit the hosted build had
+reported green at 92.4% (#168). Neither run was wrong. The same tree, one machine, one database and
+one command measure 92.4% under Go 1.27.1 and 92.0% under 1.27.3, and the floor sat between the two
+numbers. A floor recorded as a bare percentage is a measurement without its instrument, and the gate
+had been comparing readings from two meters with nothing saying so.
+
+**What changed, measured.** Nothing became untested. On `73e61f4` both profiles instrument the same
+8,702 blocks with the same spans; no block exists in one and not the other, and none went from covered
+to uncovered. The whole difference is 639 statements that 1.27.3 stops counting inside 336 blocks
+across 61 files, every one of them covered in both runs, where a single statement spans many source
+lines. `api.Contract()` holds four such blocks, counted as 17 statements each under 1.27.1 and as 1,
+2, 2 and 3 under 1.27.3; the source of each is one `b.WriteString` call whose literal is concatenated
+across a dozen or more lines. Uncovered statements were flat — 992 against 990 — so the fall is equal
+amounts coming off numerator and denominator together. The older count tracks the lines an expression
+occupies; the newer one tracks the statements in it, which is what the gate claims to measure. Full
+figures: `research/2026-11-09-toolchain-advisories.md`.
+
+**Decided.** `coverage.floor` records the percentage; the `toolchain` line in `go.mod` records what
+produced it, and the two move in the same commit or neither moves. The floor is re-measured whenever
+the pin moves, from the lowest of at least three full runs under the new toolchain, and the register
+entry for a pin move carries those runs. The floor is then placed below what the **hosted runner**
+reads, not below what a development machine reads: the platform moves the number as well as the
+toolchain does, and the runner is the one that fails pull requests. Local runs are evidence about the
+size of a change in the meter; they are not the basis for the number. D7 stands unchanged in everything it decided: the floor is
+absolute, it is a ratchet, and a change that only deletes covered code still fails it. What D7 did not
+anticipate is a change of instrument, which is not a change in what the suite covers and cannot be
+answered by covering more.
+
+**Rejected: writing tests to lift the number back over 92.3.** There is nothing for such a test to
+test. No statement became untested, so a test written to move the figure would hold no property anyone
+could name — the thing #162 and D7's own reasoning both forbid. This was not hypothetical: a branch
+had already added 340 lines of tests so the suite would clear 92.3 under 1.27.3. Those tests cover
+refusal branches nothing exercised, which rule 6 wants for its own sake, and they are welcome on that
+footing — but they are not the answer to a change of meter, and keeping the two apart is the whole of
+this entry.
+
+**Rejected: keeping the floor at 92.3 by pinning at 1.27.1.** This code reaches twelve advisories in
+the 1.27.1 standard library, through the operator portal's template renderer and through every HTTP
+path the service serves. Holding a compiler with reachable advisories to protect a coverage figure
+trades a security property for a number.
+
+**Rejected: a floor relative to the base branch, reconsidered.** D7 rejected it and its reasons hold —
+erosion in steps smaller than noise, a second suite run or a stored artefact per pull request, the
+wrong question answered. It would also not have helped here: the base branch's number is a reading
+from whichever toolchain measured it.
+
+**Rejected: deriving the floor from the toolchain automatically so it never needs restating.** A number
+the build computes for itself is a target that follows the suite, which is the failure D7 names. The
+pair is restated by a person, in a diff, with the runs attached.
+
+**Measured.** Three full runs of `make test` on `055b893` — `a97f3b3` plus this change — one machine,
+one substrate container of its own, no test failures in any run:
+
+| Run | Statements | Coverage |
+|---|---|---|
+| 1 | 11,642 / 12,641 | 92.0971% |
+| 2 | 11,645 / 12,641 | 92.1209% |
+| 3 | 11,646 / 12,641 | 92.1288% |
+
+Those are darwin/arm64 figures, and they are not what the gate reads. CI run 42637282343, on
+linux/amd64 under the same pinned toolchain, reports **92.0%** for the same commits — lower than every
+local run. `go tool cover -func` prints one decimal and `scripts/coverage-gate.sh` compares that
+string, so the runner's true value is somewhere in [91.95, 92.05) and the gate can only ever place a
+floor to a tenth of a point.
+
+So the meter is the toolchain **and the platform**, and the basis for the floor is the runner's figure,
+because the runner is what enforces it. A floor set from the local reading is a floor the hosted build
+sits on: 92.0 against a reading of 92.0 passes as "at the floor" with no headroom, and the next
+ordinary run that lands a tenth lower fails a gate nobody changed — the failure
+`scripts/coverage-gate.sh` says costs more than the tenth it protects.
+
+The floor moves from 92.3 to **91.9**: one step below what the enforcing runner reads, 0.2 below the
+lowest local run. The same code under 1.27.1 measured 92.5% in CI run 42633642119, which is the gap
+this entry exists to account for.
+
+One observation recorded rather than acted on: six runs across two trees spread by less than 0.04 of a
+point, while `scripts/coverage-gate.sh` says the range across consecutive runs of an unchanged tree is
+about half a point. That comment is not corrected here, because six runs on one machine against one
+substrate are not evidence about the runner where the claim may have come from. Whether the gate's
+stated noise is real is worth its own measurement before anything leans on it.
+
+**Undo cost.** Low for the floor — one number and this entry. Not low for the pin it is now tied to:
+moving the toolchain back means accepting the advisories in #162, so the pair is cheap to restate and
+the reason for its value is not.
+
+**Impact.** Process and security. A pull request that moves the toolchain now owes three suite runs and
+a register entry, which is the cost of knowing what a coverage number means. Security: it ties the
+floor to a pin whose value was chosen for what the compiler carries, so lowering the meter can no
+longer be done without touching the thing that decides reachable advisories. It moves no boundary in
+the service and changes no data.
