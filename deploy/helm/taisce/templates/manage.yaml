@@ -42,7 +42,7 @@ spec:
               value: {{ .Values.manage.portal | quote }}
             - name: TAISCE_SCHEMA
               value: {{ .Values.schema | quote }}
-            {{- include "taisce.adminEnv" . | nindent 12 }}
+            {{- include "taisce.adminEnv" (dict "root" . "pool" .Values.manage.adminPool) | nindent 12 }}
           readinessProbe:
             exec: {command: ["/taisce", "probe", "--manage"]}
             periodSeconds: 10

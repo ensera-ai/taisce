@@ -12,6 +12,30 @@
 # closed (enableSuperuserAccess false): the operator applies a superuser password after the fact by
 # reconciliation, and a deployment that depends on that arriving is one that starts before it does.
 {{- if eq .Values.postgresql.mode "cnpg" }}
+{{/* The connections this release declares must fit the server it declares beside them.
+
+     Every process refuses to start when its own pool cannot fit the slots that are free, which
+     catches a server that is already full. It cannot catch a release that over-declares: pools fill
+     lazily, so at install time every pod sees a nearly empty database and starts cleanly, and the
+     shortfall arrives later as connection refusals on a deployment that came up green. Nothing was
+     comparing the sum against max_connections, so the arithmetic was a paragraph rather than a rule.
+
+     It is a rule here. Rendering is refused when the declared demand, plus the 25% headroom
+     docs/21 asks for so that operators, migrations and monitoring can still connect, does not fit.
+     Refused at render rather than warned about, because a warning on a `helm upgrade` is read after
+     the fact and this is cheaper to correct before anything is applied.
+
+     Only in this mode: an external database's DSNs come from a secret this chart never reads, and
+     its max_connections is not ours to know. */}}
+{{- $demand := add (mul (int .Values.api.replicas) (add (int .Values.api.memoryPool) (int .Values.api.registryPool)))
+                   (mul (int .Values.worker.replicas) (int .Values.worker.memoryPool))
+                   3 }}
+{{- if .Values.manage.enabled }}{{- $demand = add $demand (int .Values.manage.adminPool) }}{{- end }}
+{{- $slots := int (index .Values.postgresql.cnpg.parameters "max_connections") }}
+{{- if gt (div (mul $demand 125) 100) $slots }}
+{{- fail (printf "this release declares %d client connections and max_connections is %d: %d replicas of the API at %d+%d, %d workers at %d, the ops centre at %d and bootstrap at 3, which needs max_connections of at least %d to leave the 25%% headroom operators and migrations connect through. Raise postgresql.cnpg.parameters.max_connections, or lower the pools or the replica counts."
+     $demand $slots (int .Values.api.replicas) (int .Values.api.memoryPool) (int .Values.api.registryPool) (int .Values.worker.replicas) (int .Values.worker.memoryPool) (int .Values.manage.adminPool) (div (mul $demand 125) 100)) }}
+{{- end }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -28,12 +52,13 @@ spec:
     storageClass: {{ . | quote }}
     {{- end }}
   ephemeralVolumesSizeLimit:
-    shm: {{ .Values.postgresql.cnpg.sharedMemory | quote }}
+    shm: {{ include "taisce.sharedMemory" . | quote }}
   resources: {{- toYaml .Values.postgresql.cnpg.resources | nindent 4 }}
   postgresql:
     shared_preload_libraries: [pg_stat_statements]
     parameters:
-      {{- range $k, $v := .Values.postgresql.cnpg.parameters }}
+      {{- $derived := include "taisce.derivedParameters" . | fromYaml }}
+      {{- range $k, $v := mergeOverwrite $derived (deepCopy .Values.postgresql.cnpg.parameters) }}
       {{ $k }}: {{ $v | quote }}
       {{- end }}
   bootstrap:
