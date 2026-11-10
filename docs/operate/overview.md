@@ -438,13 +438,18 @@ operator who made it and over that connection there would be no operator to name
 
 ### Four things to know before you add one
 
-**Restart the worker before extraction uses it.** A formation worker reads the vocabulary once, when
-it starts, and is then told the same list for every turn — which is what makes two extractions
-comparable. So a relation added while a worker is running is admitted by the database immediately and
-is not yet in the list the model is given: turns keep being refused as `unmapped_relation` until the
-worker restarts. Add the relations you need, then restart the worker (in Compose,
-`docker compose restart worker`), and use `taisce vocabulary list` to confirm what the next worker
-will load.
+**It is in use on the next turn, with no restart.** A formation worker reads the vocabulary at the
+top of every turn, so a relation you add is in the list the model is given for the next turn that
+scope forms. `taisce vocabulary list` is read through the same loader the worker uses, so what it
+shows is what the next turn will be extracted against.
+
+**A turn that had already failed an attempt will park.** Every turn is stamped with its extractor
+identity before the first model call, and the vocabulary is part of that identity — one turn is never
+half one interpretation and half another. So a turn that failed an attempt *before* you added the
+relation cannot complete afterwards: it is refused on every further attempt and parks. Parked turns
+are reported in `GET /v1/freshness` and in the worker's log, and the way to form one is a rebuild
+(see [rebuilds](#recovery-rebuilds-and-storage)). A turn that had not yet been attempted is
+unaffected. If a scope is behind, letting it drain before you add a relation avoids this entirely.
 
 **Facts formed afterwards carry a different extractor identity.** The vocabulary is part of what
 identifies the extractor, so every fact formed after a change is stamped differently from the ones

@@ -439,8 +439,14 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 	}
 	inferenceConfig.Timeout = policy.TurnBudget
 	observations := pg.NewObservationStore(memory)
+	// Read again at the top of every turn, because this process outlives the vocabulary: an
+	// operator extends it while the worker is running, and a worker holding the set it read at
+	// startup refuses the relation that was just added. The startup read above stays as the check
+	// that it is readable at all — a deployment whose vocabulary cannot be read should say so when
+	// it starts rather than on its first turn.
 	former := formation.NewFormer(observations, pg.NewFactStore(memory),
-		extract.NewWith(inference.NewModel(inferenceConfig), vocabulary))
+		extract.NewWith(inference.NewModel(inferenceConfig), vocabulary)).
+		ReadingVocabularyFrom(pg.NewVocabularyReader(memory, schema))
 	driver := formation.NewDriver(
 		formation.NewWorkerWithPolicy(memory, observations, former, policy),
 		observations, pg.NewRetentionStore(memory, schema),

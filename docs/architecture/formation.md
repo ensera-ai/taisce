@@ -62,8 +62,11 @@ service ([compose.yaml](../../compose.yaml)).
 
 If any is missing, the process still starts and logs a `WARN` message beginning `MEMORY WILL NOT
 FORM`. Storage, recall of what has already formed, and erasure all work without a model, and
-refusing to start would make a first install fail in its first minute. The vocabulary is loaded
-once, when the driver starts (`pg.LoadVocabulary`).
+refusing to start would make a first install fail in its first minute. The vocabulary is read at
+startup (`pg.LoadVocabulary`), which is the check that it can be read at all, and again at the top of
+every turn through `pg.VocabularyReader` — because an operator extends it while the worker is
+running, and a worker holding the set it read at startup refuses the relation that was just added.
+The read is one of forty rows, on a path that already makes a model call per message.
 
 ### The policy
 

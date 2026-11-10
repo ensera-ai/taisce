@@ -75,30 +75,6 @@ const metricsContentType = "text/plain; version=0.0.4; charset=utf-8"
 // number read off a dashboard carries the conditions it was taken under.
 const operationsWindow = 5 * time.Minute
 
-// clockSlack is how far ahead of this process the database's clock is allowed to be before the
-// scrape starts missing what just happened.
-//
-// A ledger row is stamped by the database, and the window is taken on this process's clock. Where
-// the two disagree — and they do, by a hundred milliseconds between a service and its database on
-// one developer machine, measured — a row written a moment before the scrape is stamped after the
-// window's end and dropped from the count. Over a run of scrapes nothing is lost, because the next
-// window covers it, but the number an operator reads is then always missing the most recent
-// operations, which are the ones a run of refusals shows up in first.
-//
-// So the window's end is pushed out by a tolerance and its length kept exactly operationsWindow.
-// Five seconds is far more skew than two hosts sharing a clock source ever show and a sixtieth of
-// the window, so it costs the reading nothing. What it does not cover: a database clock minutes
-// ahead of the service, which this cannot fix and which breaks the ledger's own ordering long
-// before it breaks a metric.
-//
-// This is a mitigation on one caller, not the fix (#169). The fix is to resolve the window where the
-// rows are stamped — `clock_timestamp() - interval` inside the statement — so that both ends of it
-// come from one clock. That belongs in the ledger's activity read, which this shares with the
-// operations centre, and the centre has the same defect for the same reason: a window one caller
-// quietly compensates for is a defect that gets forgotten, so it is recorded rather than patched
-// here.
-const clockSlack = 5 * time.Second
-
 // exposition writes the Prometheus text exposition format.
 //
 // It is a type rather than three string appends at each call site so that the shape of a sample is
@@ -192,8 +168,10 @@ func (m *ManagementServer) metrics(w http.ResponseWriter, r *http.Request, _ cre
 		writeError(w, http.StatusServiceUnavailable, codeInternal, "the instance's numbers could not be read")
 		return
 	}
-	until := time.Now().UTC().Add(clockSlack)
-	activity, err := m.stores.Audit.Activity(r.Context(), "", until.Add(-operationsWindow), until, 1)
+	// The window's length, not its end: the end is read from the clock that stamped the rows. A
+	// scrape that computed it here would miss whatever the database wrote in the interval between
+	// the two clocks, every time, and the operations centre reads the same window.
+	activity, err := m.stores.Audit.Activity(r.Context(), "", operationsWindow, 1)
 	if err != nil {
 		m.log.Error("metrics: count the ledger", "error", err)
 		writeError(w, http.StatusServiceUnavailable, codeInternal, "the instance's numbers could not be read")
