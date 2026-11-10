@@ -549,13 +549,12 @@ func (p *Portal) home(w http.ResponseWriter, r *http.Request, grant credential.G
 	p.m.record(r, domain.AuditProjectList, grant, "", domain.OutcomeAllowed, len(projects))
 	p.m.record(r, domain.AuditFormationStatus, grant, "", domain.OutcomeAllowed, len(page.Scopes))
 	page.Health = p.health(r)
-	now := time.Now().UTC()
-	var since time.Time
-	if rng.Length > 0 {
-		since = now.Add(-rng.Length)
-	}
-	if activity, err := p.m.stores.Audit.Activity(r.Context(), narrowed, since, now, rng.Buckets); err == nil {
-		page.Activity = newPortalActivity(rng, narrowed, activity, now)
+	// The window's length, not its end. The end comes from the clock that stamped the ledger's rows,
+	// so the page cannot be missing what was written in the interval between this process's clock and
+	// the database's — and the time the page reports as its own is the window's end rather than a
+	// second reading taken here, so what it says it is showing is what it asked for.
+	if activity, err := p.m.stores.Audit.Activity(r.Context(), narrowed, rng.Length, rng.Buckets); err == nil {
+		page.Activity = newPortalActivity(rng, narrowed, activity, activity.Until)
 		p.m.record(r, domain.AuditAuditActivity, grant, narrowed, domain.OutcomeAllowed, int(activity.Current.Operations))
 	} else {
 		// The activity is a reading of the ledger, and the rest of the page is not: a ledger that

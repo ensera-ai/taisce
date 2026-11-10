@@ -31,11 +31,58 @@ type Former struct {
 	observations *pg.ObservationStore
 	facts        *pg.FactStore
 	extractor    *extract.Extractor
+	// vocabularies is where the closed sets are read from at the top of each turn, for a former
+	// that runs for longer than the vocabulary stays still. Absent is valid and means the extractor
+	// it was built with is the one every turn uses — which is what a command that loads the
+	// vocabulary, forms one thing and exits wants.
+	vocabularies extract.Vocabularies
 }
 
 // NewFormer builds a former over the stores and the extractor it drives.
 func NewFormer(observations *pg.ObservationStore, facts *pg.FactStore, extractor *extract.Extractor) *Former {
 	return &Former{observations: observations, facts: facts, extractor: extractor}
+}
+
+// ReadingVocabularyFrom makes each turn read the vocabulary as it is when that turn begins.
+//
+// # Why a long-running former has to
+//
+// The vocabulary is a table an operator extends while the deployment is running, and extending it
+// is the one operation that fits an instance to its own domain. A former that holds the set it read
+// at startup refuses the relation the operator has just added, with the same refusal they were
+// trying to remove and nothing saying the process is behind. The cost of not reading it is an
+// operation that appears not to work; the cost of reading it is one read of forty rows per turn, on
+// a path that already makes a model call per message.
+//
+// # Why per turn and not per message or on a tick
+//
+// Per turn, because the turn is the unit the extraction identity is pinned to: the whole of a turn is
+// extracted under one vocabulary, and the identity recorded for it names that vocabulary. Reading
+// per message would let the set change inside a turn whose identity says it did not. A tick or a
+// cached copy would add a staleness window and a second thing to tune, and nothing has measured the
+// read as a cost worth that.
+func (f *Former) ReadingVocabularyFrom(v extract.Vocabularies) *Former {
+	f.vocabularies = v
+	return f
+}
+
+// extractorForTurn is the extractor one turn runs under, bound to the vocabulary now.
+//
+// Returned rather than swapped into the former, so the vocabulary cannot move under a turn whose
+// pinned identity has already named it.
+func (f *Former) extractorForTurn(ctx context.Context) (*extract.Extractor, error) {
+	if f.vocabularies == nil {
+		return f.extractor, nil
+	}
+	v, err := f.vocabularies.Vocabulary(ctx)
+	if err != nil {
+		// Refused rather than carried on with the vocabulary from last time. A turn extracted under
+		// a vocabulary this process cannot currently read would be stamped with an identity nobody
+		// can reproduce, and the turn is retried: a backlog that waits is recoverable, a fact formed
+		// under an unverifiable vocabulary is not.
+		return nil, fmt.Errorf("read the vocabulary for this turn: %w", err)
+	}
+	return f.extractor.WithVocabulary(v), nil
 }
 
 // Report is what one turn produced. Counted rather than returned in full, because the rows
@@ -111,14 +158,21 @@ func (f *Former) Form(ctx context.Context, schema pg.Schema, observation domain.
 	if err != nil {
 		return report, err
 	}
-	version := f.extractor.PipelineVersion()
+	// The vocabulary is read, the identity is taken from what was read, and both are used for the
+	// whole turn — in that order, because the identity is a statement about the vocabulary the turn
+	// was extracted under and the two cannot be allowed to disagree.
+	extractor, err := f.extractorForTurn(ctx)
+	if err != nil {
+		return report, err
+	}
+	version := extractor.PipelineVersion()
 	if err := f.facts.PinExtraction(ctx, schema, observation.Scope, observation.ID, version); err != nil {
 		return report, err
 	}
 	report.MessagesRead = len(messages)
 
 	for _, message := range messages {
-		result, err := f.extractor.Extract(ctx, message)
+		result, err := extractor.Extract(ctx, message)
 		if err != nil {
 			// A model failure stops the turn. Continuing would form half of it and mark it done,
 			// and a half-formed turn is indistinguishable afterwards from one that genuinely

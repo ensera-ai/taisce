@@ -100,3 +100,30 @@ func LoadVocabulary(ctx context.Context, pool *pgxpool.Pool, schema Schema) (dom
 	}
 	return domain.Vocabulary{Ontology: ontology, Unresolvable: terms}, nil
 }
+
+// VocabularyReader reads one tenant's closed sets whenever it is asked.
+//
+// # Why a reader and not the loaded vocabulary
+//
+// The vocabulary is a table an operator extends while the deployment is running. A process that
+// holds the sets it read at startup is extracting against a vocabulary the database has already
+// moved past, and the refusal it produces — the relation is not admitted — is the same refusal the
+// operator was trying to remove. Holding a reader instead means the question "what does this
+// instance admit" is answered where the answer lives.
+//
+// It takes the pool it is given, which on the formation path is the memory identity. That identity
+// has SELECT on these tables and no write at all, and this does not widen it: reading the vocabulary
+// more often is still only reading it.
+type VocabularyReader struct {
+	pool   *pgxpool.Pool
+	schema Schema
+}
+
+func NewVocabularyReader(pool *pgxpool.Pool, schema Schema) *VocabularyReader {
+	return &VocabularyReader{pool: pool, schema: schema}
+}
+
+// Vocabulary is both closed sets as the database holds them now.
+func (r *VocabularyReader) Vocabulary(ctx context.Context) (domain.Vocabulary, error) {
+	return LoadVocabulary(ctx, r.pool, r.schema)
+}

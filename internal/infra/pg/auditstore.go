@@ -167,14 +167,55 @@ func (t *ActivityTotals) add(operation, outcome string, n, magnitude, written in
 	}
 }
 
-// Activity counts the ledger over [since, until), for one project or, with project empty, for all
-// of them, cut into the given number of buckets.
+// Activity counts the ledger over the last `length`, for one project or, with project empty, for
+// all of them, cut into the given number of buckets. A zero length is the whole ledger.
 //
-// A zero since means the whole ledger: it starts at the earliest row (or an hour before until, for
-// an empty ledger), and it has no previous window. Three statements, each bounded by the window and
-// served by the time index, rather than one that returns every row for the caller to count: the
-// work is proportional to the window's rows and happens where they are.
-func (s *AuditStore) Activity(ctx context.Context, project string, since, until time.Time, buckets int) (Activity, error) {
+// # The window ends on the clock that stamped the rows
+//
+// A ledger row is stamped by the database: `occurred_at` takes the column's default, which is the
+// database's own clock. So the window's end is read from that clock too, and the caller says how
+// long the window is rather than when it ends. The end is `clock_timestamp()` rather than `now()`
+// because within a transaction the latter is the transaction's start, and an end earlier than the
+// reading that produced it would exclude rows stamped at exactly that moment.
+//
+// A caller computing the end on its own clock is the defect this signature exists to prevent. Where
+// the two clocks disagree — and they do: a hundred and twelve milliseconds between a service process
+// and its database container, measured on one development machine — every row the database stamped in
+// the interval between them is stamped later than the window's end and silently dropped. Nothing
+// fails. The count is simply a little low, every time, and low by however far the clocks are apart,
+// and what it is missing is the newest operations, which are the ones a run of refusals shows up in
+// first.
+//
+// Skew is the normal case rather than the exceptional one: the database runs in its own container,
+// virtual machine or managed service, with its own clock discipline, and agreement is the thing that
+// would need arranging. So this takes a length, and the host's clock cannot enter — which is the
+// same reasoning this project applies elsewhere, that a rule the substrate settles beats a value two
+// machines have to agree on.
+//
+// What it does not cover: a database clock that moves between the reading taken here and the rows
+// counted below. Both are the same clock, so a window can only be short by however far that clock
+// advanced during the read, which is the same tolerance every aggregate over a live table has.
+func (s *AuditStore) Activity(ctx context.Context, project string, length time.Duration, buckets int) (Activity, error) {
+	var until time.Time
+	if err := s.pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&until); err != nil {
+		return Activity{}, fmt.Errorf("read the ledger's clock: %w", err)
+	}
+	var since time.Time
+	if length > 0 {
+		since = until.Add(-length)
+	}
+	return s.activityBetween(ctx, project, since, until, buckets)
+}
+
+// activityBetween counts the ledger over [since, until).
+//
+// Separate from the window's resolution, and unexported, so that there is exactly one way for a
+// caller outside this package to ask for activity — by length, against the clock that stamped the
+// rows. A zero since means the whole ledger: it starts at the earliest row (or an hour before
+// until, for an empty ledger), and it has no previous window. Three statements, each bounded by the
+// window and served by the time index, rather than one that returns every row for the caller to
+// count: the work is proportional to the window's rows and happens where they are.
+func (s *AuditStore) activityBetween(ctx context.Context, project string, since, until time.Time, buckets int) (Activity, error) {
 	if buckets <= 0 {
 		buckets = 1
 	}
