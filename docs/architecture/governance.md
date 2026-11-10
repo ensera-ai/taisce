@@ -209,7 +209,8 @@ delete. So a shared entity that stays is correctly not counted as residual.
 
 - rebuild lineage (`eraseGenerationMetadataTx`);
 - name spellings (`removeEntityNamesTx`);
-- the evidence quotes of shared facts;
+- the evidence quotes of shared facts, and the window of words around each one that is stored beside
+  it;
 - withdrawal instructions;
 - curated claims;
 - formation receipts (`receiptOwnershipSQLFor`);

@@ -2135,3 +2135,83 @@ boundary — the identity that could do this is the one that can do anything an 
 moves nothing on the read or write path, changes no data, and costs no performance. What it does not
 cover is a relation no fact carries: nothing references it, so there is nothing to refuse, and
 renaming one loses no memory.
+
+---
+
+## D37 — The words around a citation are cut once, when the evidence is written
+
+**Date.** 2026-11-09. **Issue.** [#158](https://github.com/ensera-ai/taisce/issues/158).
+
+**Why it was open.** The evidence join on the recall read did
+`substring(convert_to(m.content,'UTF8') from … for …)` per returned row, to keep three hundred and
+twenty bytes of context around each quote. That converts the whole message to bytes once per fact per
+read, so the cost of showing a few hundred bytes depended on how long the message was — and it is on
+the read path, which every caller pays on every call. Quote, span and message content are immutable
+once stored, so every read was recomputing bytes that could not have changed.
+
+**Decided.** Three columns on `fact_evidence` — the window, where it starts, and the message's length
+— filled by a trigger when the row is written, and read back as columns. The read converts no message
+to bytes. `RawWindow.Legible` still repairs the cut edges in Go, bounded by the window's own size, so
+the rune and word repair stays in one place and keeps its own tests.
+
+The joins to the observation and the message **stay**, with no column of the message's text selected
+through them. The first attempt removed them along with the cut, and two tests that predate this
+change caught it: a window is only honest while the message it came from is still in this project.
+`src.scope = r.scope` is the cross-project guard — a row repointed at another project's observation
+keeps its own scope, so the evidence row's scope cannot stand in for it — and the message's presence
+is what says the words should still be shown, because a fact whose message is gone has a quote it
+cites and three hundred bytes of surrounding words nobody cited. Either join missing makes the window
+null, which is the answer the read gave before. Selecting nothing from the message means its row is
+found by index and its content is never detoasted, so the check costs a lookup rather than a
+message.
+
+A trigger rather than the three statements that insert evidence, because a fourth will be written by
+somebody who has never read the migration, and forgetting the window is silent: the fact comes back
+with its quote and no words around it, which is indistinguishable from an erased message.
+
+**Governance, which is the part that would normally sink it.** The columns hold a copy of message
+text, so an erasure has to reach them. `fact_evidence` is not a new place text lives: its rows are
+registered through `projection_dependency`, cascade away with the fact, are deleted by the eraser for
+any erased observation, and are deleted by the retention sweep before a turn's messages are. And it
+is not an ordering anybody has to remember — `evidence_message_fk` references `turn_message` with no
+delete action, so the substrate refuses to remove a message while an evidence row cites it. A
+statement that tried to orphan a stored window fails.
+
+That was the stated condition for shipping this at all: before the change, a fact whose message was
+gone came back with its quote and an empty context, and a stored copy could have outlived the message
+instead. A quote outliving the message it came from is not worth a faster read.
+`TestAStoredCitationWindowIsErasedWithTheEvidenceItBelongsTo` holds it, through the substrate's
+refusal and through both sweeps — and `TestAFactWhoseMessageIsGoneKeepsItsQuoteWithNoContext` holds
+the case where that constraint has been dropped, which is the damaged data the read already had a
+branch for.
+
+**Rejected: leaving the cut in the read.** It is the status quo and it is free in governance terms,
+which is a real argument. What decided against it is that the work is provably redundant — the same
+bytes, recomputed per fact per read, for immutable inputs — and that it is on the path rule 9 calls
+the critical one.
+
+**Rejected: a table of its own for the stored window.** It would have been a new kind with a new
+residual key for an erasure to prove, for no benefit: the window belongs to exactly one evidence row
+and has the same lifetime.
+
+**Rejected: storing the legible text instead of the raw window.** It would move the rune and word
+repair to the write path and store its result, saving a bounded repair over at most three hundred and
+twenty bytes per returned row. That is not the cost the issue is about, and it would put the repair's
+logic in two places — a trigger and `RawWindow.Legible` — with no test able to say they agree.
+
+**Rejected: changing citation resolution the same way.** That path re-derives the quote and the window
+from the message on purpose: its job is to prove the stored span still resolves against the stored
+bytes, and a stored copy answering for itself would prove nothing. Its cost is paid once per
+inspection by a caller who asked for exactly that.
+
+**Undo cost.** Low to moderate. Reverting the read is a few lines; the columns and the trigger would
+be dropped by a migration, and nothing else reads them. What a revert cannot recover is nothing:
+every value in them is derivable from the message, which is why the migration could backfill them.
+
+**Impact.** Performance, on the read path, and no number is claimed for it: how much it saves depends
+on message sizes, and this project has no hardware that can produce a latency figure
+(`AGENTS.md`, "What is not settled"). What can be said without measuring is that the read no longer
+converts message content to bytes, so the cost of a fact's context stopped being a function of the
+message's length. Security is unchanged rather than improved: the guards that stood on those joins
+still stand on them, and this change's first attempt is the reason that sentence is here. Erasure's
+guarantees are exactly as they were, which is the condition it had to meet.
