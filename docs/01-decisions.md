@@ -2136,6 +2136,8 @@ moves nothing on the read or write path, changes no data, and costs no performan
 cover is a relation no fact carries: nothing references it, so there is nothing to refuse, and
 renaming one loses no memory.
 
+
+
 ---
 
 ## D37 — The words around a citation are cut once, when the evidence is written
