@@ -2063,6 +2063,79 @@ identity already had SELECT on these tables and reading them more often is still
 
 ---
 
+## D36 — The vocabulary key a fact references cannot move while the fact carries it
+
+**Date.** 2026-11-09. **Issue.** [#165](https://github.com/ensera-ai/taisce/issues/165).
+
+**Why it was open.** `fact_cardinality_matches_vocabulary` referenced `predicate(predicate,
+cardinality)` `ON UPDATE CASCADE`. The deletion side of the same reference refuses, and the migration
+that created it says why: retiring a relation while facts still use it must fail loudly, because a
+cascade would delete the memory instead of refusing the change. That reasoning was applied to delete
+and not to update, and what the update side then permitted was measured rather than assumed.
+
+One statement — `UPDATE predicate SET cardinality='one' WHERE predicate='works_at'` — rewrote the
+cardinality on every fact carrying the relation, in the same statement:
+
+```
+  when  | vocabulary | on_the_fact
+--------+------------+-------------
+ before | many       | many
+        |            |
+ after one statement | one | one
+```
+
+No fact deleted, no count changed, no memory write on the ledger, receipts unaffected, and the rows
+look correct afterwards. The copy on each fact is what supersession rests on, so this is not a label:
+it changes whether a later fact closed an earlier one, for facts formed before the change, invisibly.
+
+**What was not open, which is where this started.** The issue reported that a *rename* cascaded. It
+does not: a rename of a relation facts carry was already refused by `fact_predicate_fk`, whose
+`ON UPDATE NO ACTION` check fires before the cascade reaches the rows, because that constraint was
+created first. The premise was checked before anything was built, which is what the issue asked for,
+and it did not hold.
+
+**Decided.** The reference becomes `ON UPDATE RESTRICT`, matching the delete side. That closes the
+cardinality door, and it also makes the rename's refusal a stated rule rather than an accident of the
+order two internal referential triggers happen to fire in — an order nothing states, nothing tests,
+and a later migration that dropped and recreated `fact_predicate_fk` would reverse without anybody
+noticing.
+
+In the substrate rather than in the application, because the design already rejects both operations
+(D29: a rename is a second spelling of one relation) and the vocabulary operation offers neither.
+"We do not offer it" is a convention, and a convention is broken by the statement written under
+pressure by whoever holds the administrative connection — which is the only identity that can reach
+this table at all.
+
+**What the cascade was serving: nothing.** No path in this system updates either referenced column.
+The vocabulary operation inserts and does not update, no migration changes a name or a cardinality,
+and the memory identity has no write on the table.
+
+**Rejected: leaving it and recording that renames are unsupported.** The issue offered this as the
+honest outcome if a rename turned out to be unreachable. Half of it was unreachable and the other
+half was not, so a register entry alone would have left the cardinality door open and written down a
+guarantee about the rename that rested on trigger creation order.
+
+**Rejected: refusing it in the vocabulary operation instead.** The operation already does not offer
+either change, so there is nothing to add there. The statement that does the damage does not go
+through the operation.
+
+**Rejected: offering a supported rename, by rewriting facts and recording the change.** It is a
+larger feature than the door it closes, and it would need a receipt saying which facts were rewritten
+and under whose authority, which is a rebuild with extra steps. The path that already exists — add
+the new relation, rebuild the sources that used the old one, erase what is left — keeps every receipt
+honest. A rename would leave the history claiming the facts were always spelled that way.
+
+**Undo cost.** Low. One migration restores the cascade, and nothing stored depends on the setting.
+What is not undoable is a cardinality that was cascaded before this: the previous value is nowhere,
+because the cascade overwrote it on every fact and recorded nothing.
+
+**Impact.** Security, in the narrow sense rule 8 means: a boundary the design asserted is now
+expressed where a statement cannot get around it, rather than in a convention. It is not a privilege
+boundary — the identity that could do this is the one that can do anything an owner may do — and it
+moves nothing on the read or write path, changes no data, and costs no performance. What it does not
+cover is a relation no fact carries: nothing references it, so there is nothing to refuse, and
+renaming one loses no memory.
+
 ## D38 — A recall explains itself when asked, and the explanation carries references rather than text
 
 **Date.** 2026-11-09. **Issue.** [#160](https://github.com/ensera-ai/taisce/issues/160).
