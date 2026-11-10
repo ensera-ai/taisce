@@ -769,6 +769,7 @@ are eight reasons today:
 | `conflicting_value` | The message already gave the relation a different current value | [0052](../../internal/migrate/sql/0052_a_second_current_value_is_refused_not_failed.sql) |
 | `not_spoken_by_principal` | It speaks for the principal from a message the principal did not speak | [0053](../../internal/migrate/sql/0053_a_non_user_message_may_assert_about_others.sql) |
 | `entity_name_limit` | One of its ends carries a name this store cannot keep: longer than the bound, or one spelling too many for one entity | [0066](../../internal/migrate/sql/0066_a_name_that_cannot_be_kept_is_a_refusal.sql) |
+| `unresolvable_object` | The relation names no other end. Stored rather than refused until 0072, with its object end null — which the traversal behind a recall skips, so the fact had evidence and no question could return it | [0072](../../internal/migrate/sql/0072_a_relation_with_no_other_end.sql) |
 
 `predicate` has no foreign key here, because this column holds exactly the relations the vocabulary
 refused. A refused claim still quotes somebody, so it is a registered projection like any other.
