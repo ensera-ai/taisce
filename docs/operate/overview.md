@@ -356,6 +356,7 @@ those refusals **by reason and by the relation the model proposed**, never with 
 | `conflicting_value` | The same message gives two current values for something that can only have one |
 | `not_spoken_by_principal` | A first-person claim from someone other than the person, such as the assistant's "so you work at Ensera" |
 | `entity_name_limit` | A name is too long, or one spelling too many for a single entity |
+| `unresolvable_object` | The relation names no other end, so there is nothing for the fact to be about on the far side |
 
 Refusals are normal; a conversation full of thanks and small talk refuses a lot. Watch for a change:
 a jump in `unlocatable_quote` or `unmapped_relation` after changing models usually means the new model

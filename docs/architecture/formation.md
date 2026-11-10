@@ -319,6 +319,7 @@ files each refusal under the most specific reason.
 |---|---|---|---|
 | 1 | The relation is in the vocabulary (`Ontology.Lookup`) | `unmapped_relation` | A relation outside the set is never an edge |
 | 2 | The subject is not an unresolvable term, such as a pronoun | `unresolvable_subject` | Before the quote: a claim about nothing is wrong whether or not its quote exists |
+| 2 | Neither end is blank | `unresolvable_subject`, `unresolvable_object` | Here too, and for the same reason: an end that is not there is wrong whether or not its quote can be found |
 | 3 | The quote is found in the message (`Locate`) | `unlocatable_quote` | Nothing can be cited without it |
 | 4 | Polarity is `asserted` | `not_asserted` | A denial cites perfectly and is still not a fact |
 | 5 | Tense is `present`, or `past` on an event relation | `not_current` | A past state would answer "where do they live" with a place they left |

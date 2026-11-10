@@ -58,7 +58,7 @@ func TestTheFanoutCapBoundsTheRowsAHubEntityIsReadFor(t *testing.T) {
 	if _, err := pool.Exec(ctx, schema.SQL(`ANALYZE {schema}.fact`)); err != nil {
 		t.Fatal(err)
 	}
-	args := []any{[]string{"p1"}, []string{hub}, 50, []string{"user"}, domain.ContextWindow, 1, domain.Fanout, nil}
+	args := []any{[]string{"p1"}, []string{hub}, 50, []string{"user"}, 1, domain.Fanout, nil}
 	var raw json.RawMessage
 	if err := pool.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+schema.SQL(pg.FactsAboutQueryForTesting), args...).Scan(&raw); err != nil {
 		t.Fatal(err)

@@ -54,7 +54,13 @@ release tag, `docker compose pull` in that install's directory brings the releas
 Other targets you may need:
 
 - `make gate` runs the same checks a change must pass before it merges (licence headers, the full
-  suite with coverage, `go vet`, and the API reference check) in a clean Linux container.
+  suite with coverage, `go vet`, the API reference check, and the reachable-advisory check) in a clean
+  Linux container.
+- `make vuln` checks dependencies against published advisories on their own. It judges reachability
+  rather than presence, so an advisory in code nothing here calls is reported and does not fail, and
+  the standard library is judged with everything else. It is not part of `make test`: it reads the
+  advisory database over the network, and a test target that needs the network fails on a train. Run
+  it when you change a dependency; the build and `make gate` run it for you.
 - `make contract` regenerates the API reference from the code. If you change the shape of an API
   operation, run it and include the diff in your pull request.
 - `make test-inference` runs the tests that need a real model. It costs money and sends test text to
