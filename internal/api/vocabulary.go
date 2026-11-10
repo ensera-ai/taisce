@@ -39,16 +39,18 @@
 // fact formed afterwards carries. That is not a side effect to hide — it is the record of what
 // changed, and it is what a rebuild reads to find the facts formed under the older vocabulary.
 //
-// # What this operation does not cover
+// # When it takes effect, and what it does not cover
 //
-// It does not reach a running formation worker. A worker loads the vocabulary once, at startup, and
-// is told the same list for every turn, deliberately: a prompt whose vocabulary arrives in a
-// different order is a different prompt, and extraction could not be compared across runs. So a
-// relation added here is admitted by the foreign key at once and is not in the list the model is
-// given until the worker restarts, and turns naming it keep being refused as unmapped until then.
-// Reloading mid-run would mean two workers extracting the same backlog under two vocabularies, which
-// is a worse answer than a restart; what is owed instead is that the limit is stated where an
-// operator reads it, which is in the operator guide beside the command.
+// A formation worker reads the vocabulary at the top of every turn, so a relation added here is in
+// the list the model is given for the next turn that scope forms. No restart, and nothing for an
+// operator to remember.
+//
+// What it does not cover is a turn already in flight. A turn is stamped with its extractor identity
+// before its first model call and the vocabulary is folded into that identity, so a turn that has
+// already been attempted — and failed — cannot complete under a changed vocabulary: it is refused
+// as a changed extraction and parks, and forming it needs a rebuild. That is the same rule that
+// stops a turn being half one model's reading and half another's, and the limit is stated where an
+// operator reads it, beside the command in the operator guide.
 package api
 
 import (
