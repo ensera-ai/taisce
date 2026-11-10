@@ -1993,6 +1993,76 @@ nothing in the service, changes no data, and costs no performance.
 
 ---
 
+## D35 — A formation worker reads the relation vocabulary at the top of every turn, not once at startup
+
+**Date.** 2026-11-09. **Issue.** [#164](https://github.com/ensera-ai/taisce/issues/164).
+
+**Why it was open.** The vocabulary is the one surface that fits an instance to its own domain, and
+an operator can now extend it over the management surface while the deployment is running. The
+formation worker read it once, when it started, so a relation an operator added was admitted by the
+foreign key immediately and was not in the list the model was given: the turn naming it kept being
+refused as `unmapped_relation`, with the same refusal the operator was trying to remove and nothing
+saying the process was behind. The operation worked and appeared not to. The workaround was to add
+the relations before anything was loaded and restart the worker, which is a deployment action
+standing between an operator and the one knob they have.
+
+**Decided.** The vocabulary is read at the top of every turn, through a reader the worker holds
+rather than a set it loaded. The startup read stays, as the check that it can be read at all: a
+deployment whose vocabulary is unreadable should say so when it starts and not on its first turn. A
+turn whose read fails is refused and retried rather than formed under the set from last time,
+because a fact stamped with an identity naming a vocabulary nobody can produce is not recoverable
+and a waiting turn is.
+
+Per turn, and not per message, because the turn is the unit the extraction identity is pinned to:
+the whole of a turn is extracted under one vocabulary and the identity recorded for it names that
+vocabulary. Reading per message would let the set move inside a turn whose identity says it did not.
+The extractor is handed an immutable vocabulary for the turn — a second extractor value, never a
+mutation — so the set cannot move under a turn whose identity has already been taken.
+
+What this costs an operator is stated beside the command: a turn that had already failed an attempt
+before the relation was added cannot complete afterwards. Its identity is pinned, the vocabulary is
+part of that identity, and a turn is never half one interpretation and half another — so it is
+refused as a changed extraction and parks, and forming it needs a rebuild. That is not new
+behaviour; it is what a worker restarted after a vocabulary change already did. What is new is that
+it no longer takes a restart, which makes it a consequence of adding a relation rather than of a
+deployment action, which is why it is written down and held by a test.
+
+**Rejected: keep the startup load and document the restart.** It was the cheaper answer and it was
+on the table. The argument for it was comparability — a worker told the same list for every turn
+means two extractions were asked the same question. That argument does not hold. The list's *order*
+is what comparability needs and the query guarantees it (`ORDER BY predicate`), while the *set* lives
+in a table no process can hold still: two replicas that started either side of a change are already
+extracting under two vocabularies, and a rolling restart has the same window. What actually carries
+comparability is the identity pinned to each turn, which names the vocabulary that turn was
+extracted under and is readable afterwards. Holding the set in a process makes comparability depend
+on process lifetime, which nobody can see.
+
+**Rejected: reload on a tick, or cache with a time to live.** It adds a staleness window, a second
+thing to tune, and a question — how stale is acceptable — that nothing has measured a reason to ask.
+The read it would avoid is forty rows on a path that already makes a model call per message. A cache
+is justified by a number that says the read matters, and there is no such number; when the latency
+budget work produces one, this is the first place to look.
+
+**Rejected: `LISTEN`/`NOTIFY` on a vocabulary change.** It makes the vocabulary push instead of
+pull, which removes the per-turn read, and it costs a dedicated connection per worker, a trigger on
+the table, and a recovery path for a notification missed while the listener was reconnecting — at
+which point the worker is stale again and nothing says so. More moving parts than the read they
+save.
+
+**Undo cost.** Low. It is one call at the top of a turn and one reader passed to the former at
+startup; removing it restores the previous behaviour exactly and nothing stored depends on it. What
+the data carries is the extractor identity per turn, which was already there and is unchanged in
+shape.
+
+**Impact.** Operations, and the write path. An operator extending the vocabulary gets an operation
+that takes effect, which is what D29 decided and what this makes true. On the write path it adds one
+read of forty rows per turn, against a model call per message in the same turn; no latency number is
+claimed for it, because this project has no hardware that can produce one
+(`AGENTS.md`, "What is not settled"). It changes no data, no schema and no grant: the memory
+identity already had SELECT on these tables and reading them more often is still only reading them.
+
+---
+
 ## D38 — A recall explains itself when asked, and the explanation carries references rather than text
 
 **Date.** 2026-11-09. **Issue.** [#160](https://github.com/ensera-ai/taisce/issues/160).

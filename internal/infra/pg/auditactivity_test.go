@@ -44,7 +44,7 @@ func TestTheLedgerIsCountedByWindowBucketOperationAndProject(t *testing.T) {
 	at("observe", "p1", "allowed", 100, since.Add(-49*time.Hour))
 	at("observe", "p1", "allowed", 100, until)
 
-	a, err := store.Activity(ctx, "", since, until, 24)
+	a, err := store.ActivityBetweenForTesting(ctx, "", since, until, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestTheLedgerIsCountedByWindowBucketOperationAndProject(t *testing.T) {
 		t.Fatalf("projects are not busiest first without the instance's own operations: %+v", p)
 	}
 
-	narrowed, err := store.Activity(ctx, "p2", since, until, 24)
+	narrowed, err := store.ActivityBetweenForTesting(ctx, "p2", since, until, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestTheLedgerIsCountedByWindowBucketOperationAndProject(t *testing.T) {
 	}
 
 	// The whole ledger starts at its first row and has nothing before it.
-	all, err := store.Activity(ctx, "", time.Time{}, until, 10)
+	all, err := store.ActivityBetweenForTesting(ctx, "", time.Time{}, until, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,14 +96,14 @@ func TestTheLedgerIsCountedByWindowBucketOperationAndProject(t *testing.T) {
 		t.Fatalf("the whole ledger is %+v", all)
 	}
 	// An empty ledger's whole history is the last hour, in one bucket when none are asked for.
-	empty, err := pg.NewAuditStore(pool, tenant(t, pool, "audit_activity_empty")).Activity(ctx, "", time.Time{}, until, 0)
+	empty, err := pg.NewAuditStore(pool, tenant(t, pool, "audit_activity_empty")).ActivityBetweenForTesting(ctx, "", time.Time{}, until, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !empty.Since.Equal(until.Add(-time.Hour)) || len(empty.Series) != 1 || empty.Current.Operations != 0 {
 		t.Fatalf("an empty ledger's history is %+v", empty)
 	}
-	if _, err := store.Activity(ctx, "", until, since, 24); err == nil {
+	if _, err := store.ActivityBetweenForTesting(ctx, "", until, since, 24); err == nil {
 		t.Fatal("a window that ends before it starts was counted")
 	}
 
