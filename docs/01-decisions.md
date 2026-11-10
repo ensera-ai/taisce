@@ -1991,8 +1991,6 @@ after the fact means moving data rather than changing a flag.
 token is an instance-wide key, and an instance is the only separation that holds against one. It moves
 nothing in the service, changes no data, and costs no performance.
 
----
-
 ## D35 — A formation worker reads the relation vocabulary at the top of every turn, not once at startup
 
 **Date.** 2026-11-09. **Issue.** [#164](https://github.com/ensera-ai/taisce/issues/164).
@@ -2060,8 +2058,6 @@ read of forty rows per turn, against a model call per message in the same turn; 
 claimed for it, because this project has no hardware that can produce one
 (`AGENTS.md`, "What is not settled"). It changes no data, no schema and no grant: the memory
 identity already had SELECT on these tables and reading them more often is still only reading them.
-
----
 
 ## D36 — The vocabulary key a fact references cannot move while the fact carries it
 
@@ -2135,8 +2131,6 @@ boundary — the identity that could do this is the one that can do anything an 
 moves nothing on the read or write path, changes no data, and costs no performance. What it does not
 cover is a relation no fact carries: nothing references it, so there is nothing to refuse, and
 renaming one loses no memory.
-
----
 
 ## D37 — The words around a citation are cut once, when the evidence is written
 
@@ -2215,8 +2209,6 @@ converts message content to bytes, so the cost of a fact's context stopped being
 message's length. Security is unchanged rather than improved: the guards that stood on those joins
 still stand on them, and this change's first attempt is the reason that sentence is here. Erasure's
 guarantees are exactly as they were, which is the condition it had to meet.
-
----
 
 ## D38 — A recall explains itself when asked, and the explanation carries references rather than text
 
