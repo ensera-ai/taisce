@@ -2210,7 +2210,6 @@ message's length. Security is unchanged rather than improved: the guards that st
 still stand on them, and this change's first attempt is the reason that sentence is here. Erasure's
 guarantees are exactly as they were, which is the condition it had to meet.
 
-<<<<<<< HEAD
 ## D38 — A recall explains itself when asked, and the explanation carries references rather than text
 
 **Date.** 2026-11-09. **Issue.** [#160](https://github.com/ensera-ai/taisce/issues/160).
@@ -2268,7 +2267,7 @@ new version rather than a patch, which is the ordinary cost of publishing anythi
 control is on, and the collector is a nil value otherwise, so a recall that did not ask allocates
 nothing. It touches security by stating a boundary rather than moving one — the budget bounds what
 crosses the wire, and the explanation is held to it.
-=======
+
 ## D39 — A lookup is charged to strangers' allowance only when the token is not one the instance issued
 
 **Date.** 2026-11-11. **Issue.** [#214](https://github.com/ensera-ai/taisce/issues/214).
@@ -2332,4 +2331,3 @@ waited for. Performance: the door no longer caps a process at 128 requests a sec
 claimed for what it now serves — that is whatever the work slots and the database allow, and nothing
 here measured it. The cost added to every request is one SHA-256 and a map lookup, and one registry
 read every five seconds per process.
->>>>>>> origin/main
