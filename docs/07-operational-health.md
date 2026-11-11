@@ -197,10 +197,59 @@ scrape_configs:
 | `taisce_operations_allowed` | Operations the ledger recorded as allowed in the recent window |
 | `taisce_operations_refused` | Operations the ledger recorded as refused in the recent window |
 | `taisce_operations_window_seconds` | How far back the two counts above look |
+| `taisce_operation_duration_milliseconds` | Histogram, by `operation`: how long a request to a memory operation took |
+| `taisce_formation_turn_duration_milliseconds` | Histogram: how long a turn took to form, for turns that formed |
+| `taisce_formation_lag_milliseconds` | Histogram: how long a turn waited between being stored and being formed |
+| `taisce_admission_refused_total` | Counter: requests refused because the process had no capacity for them |
 
-Every value is read from the same place the health report and the ops centre read it: the
-operational snapshot, and the ledger's own counts. Nothing here is measured for the metrics, so a
-number on a dashboard cannot disagree with the page you were looking at a moment ago.
+The first fifteen are read from the same place the health report and the ops centre read them: the
+operational snapshot, and the ledger's own counts. Nothing is measured for those, so a number on a
+dashboard cannot disagree with the page you were looking at a moment ago. The last four are
+measured, and are described next.
+
+### How long things take
+
+Three histograms and one counter say whether the instance is slow, which nothing above can. A backlog
+says formation is behind and not why; an operation count says requests were served and not how long
+anybody waited.
+
+```promql
+# The 95th percentile of recall, over five minutes, in milliseconds.
+histogram_quantile(0.95, sum by (le) (rate(taisce_operation_duration_milliseconds_bucket{operation="recall"}[5m])))
+
+# Is formation behind because the model is slow, or because the queue is deep?
+histogram_quantile(0.95, rate(taisce_formation_turn_duration_milliseconds_bucket[15m]))   # the model, and the writes after it
+histogram_quantile(0.95, rate(taisce_formation_lag_milliseconds_bucket[15m]))             # what an agent waits: the queue as well
+
+# Is the instance turning requests away?
+rate(taisce_admission_refused_total[5m])
+```
+
+- **A request is timed from the door.** The duration includes the credential lookup, the work, the
+  ledger row and the response being handed over, because that is what a caller waited for. Refused
+  requests are timed with the rest.
+- **The lag is the number an agent feels.** It is how long memory did not yet know what it had been
+  told. The turn duration is the part of it spent forming; the difference is time in the backlog.
+  Only turns that formed are counted, so a provider outage shows as a rising backlog and no new
+  observations, not as fast formation.
+- **A capacity refusal is counted here and nowhere else.** A `429` for capacity writes no ledger row,
+  so it is in neither `operations_allowed` nor `operations_refused`. Without this counter an instance
+  refusing a third of its requests looked, on a scrape, exactly like an idle one.
+
+These are real counters: they only rise, and they do not fall to zero when a process restarts,
+because each process adds what it counted to a total kept in the database. Take a `rate()` of them.
+
+**Where the numbers come from, and what that costs.** A request is timed in the API process and a
+turn in the worker, and the scrape is answered by the management process. Each process counts in
+memory and adds its counts to the instance's totals every ten seconds and once more when it stops.
+So a scrape can be up to ten seconds behind a process, a process that is killed loses up to ten
+seconds of counts, and these are not an exact count of requests. The ledger is that.
+
+**The buckets are not tuned to a target, because there is none.** They are spread evenly on a
+logarithmic scale: 5 ms to 30 s for a request, 100 ms to 5 minutes for a turn, 1 second to a day for
+the lag. No latency budget has been agreed for this system, and a percentile read from these is the
+percentile of your deployment on your hardware — a measurement of that arrangement and no claim about
+the software.
 
 Allowed and refused are counted apart because the ratio is the signal. A run of refusals against
 steady traffic is what an attack looks like from the outside, and a single total hides it.
@@ -223,8 +272,10 @@ moment raises nothing.
 
 ### What it deliberately does not expose
 
-**No project label, and no label at all.** Every series is an instance-wide aggregate. A scrape does
-not stay where it is taken — it goes to a monitoring system whose access and retention are a
+**No project label, and no label drawn from anything stored.** Every series is an instance-wide
+aggregate. Two labels exist: `le`, a bucket's upper edge from a fixed list, and `operation`, which is
+one of the operations the API declares — the scrape fails rather than serve one that is not. A scrape
+does not stay where it is taken — it goes to a monitoring system whose access and retention are a
 different trust domain from an operator token — and a per-project label set would turn every scrape
 into an enumeration of who this instance's customers are. Per-project detail stays on the management
 API and the ops centre, behind this same credential, where you ask for it one project at a time.
@@ -235,9 +286,9 @@ content: the ledger holds no words and neither does this.
 settled convention for a memory span to emit against, so anything named now would be renamed later,
 and nothing you alert on needs it.
 
-**No durations and no latencies.** Nothing here times anything, because adding timing to the read
-path is a cost paid on every call and no latency target has been agreed to justify it. See
-[the decision register](01-decisions.md) for what is settled.
+**No model-call timings by purpose, and none for the management surface.** A turn's formation is
+timed as a whole; the report, compaction and embedding calls are not timed separately, and neither
+are an operator's own requests. See [D44](decisions/D44.md) for what was measured and what was left.
 
 ### Limits of these numbers
 
@@ -253,8 +304,9 @@ path is a cost paid on every call and no latency target has been agreed to justi
 - **A heartbeat is a worker reporting in, not formation having happened.** It is written by the
   driver that runs the passes. A turn that formed without a pass behind it — in a test, say — moves
   the backlog and leaves the worker series exactly where they were.
-- **A partial scrape is a failed scrape.** If either the snapshot or the ledger cannot be read, the
-  whole scrape answers `503` and nothing is served. A series that quietly stopped being published
+- **A partial scrape is a failed scrape.** If the snapshot, the ledger or the timings cannot be read
+  — or a stored timing is named for something the API does not declare — the whole scrape answers
+  `503` and nothing is served. A series that quietly stopped being published
   reads as a condition that stopped happening; a target marked down cannot be mistaken for good
   news. The same `503` is the answer from a deployment wired without the operational reader.
 - **The scrape is not on the ledger.** Every other management operation is. This one is not: it
