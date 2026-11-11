@@ -99,6 +99,8 @@ type Pass struct {
 	// Derived is how many projects were given the derived passes although nothing was waiting to be
 	// formed in them.
 	Derived int
+	// More says the pass stopped at its bound in at least one project and left turns waiting there.
+	More bool
 }
 
 // WithPasses attaches the subject pass, which partitions a scope and writes its reports, and the
@@ -147,8 +149,9 @@ func (d *Driver) Once(ctx context.Context) (Pass, error) {
 		if ctx.Err() != nil {
 			return pass, ctx.Err()
 		}
-		drained, err := d.worker.drain(ctx, d.schema, scope)
-		pass.Formed += len(drained.reports)
+		drained, err := d.worker.drain(ctx, d.schema, scope, d.policy.TurnsPerScope, false)
+		pass.Formed += drained.formed
+		pass.More = pass.More || drained.more
 		pass.Failed += drained.failed
 		pass.Parked += drained.parked
 		if drained.status != 0 {
@@ -156,6 +159,11 @@ func (d *Driver) Once(ctx context.Context) (Pass, error) {
 		}
 
 		switch {
+		case err == nil && drained.more:
+			// Turns are still waiting here, and the worker has moved on so that other projects are
+			// reached. The passes that derive from formed turns wait for the backlog to empty, as
+			// they always have: each is a model call, and running them after every slice would
+			// write a report per slice for a project that is about to change again.
 		case err == nil:
 			d.projections(ctx, scope, &pass)
 		case errors.Is(err, ErrScopeBusy):
@@ -398,6 +406,17 @@ func (d *Driver) Run(ctx context.Context) error {
 			lastSweep = time.Now()
 		}
 
+		// A pass that stopped at its bound left turns waiting on purpose, so that other projects
+		// were reached. Waiting out the interval now would make the bound a throttle: a project
+		// would form eight turns every five seconds however fast the model was. So it goes straight
+		// back, and stops only for the context.
+		if pass.More {
+			if ctx.Err() != nil {
+				d.log.Info("formation driver stopped")
+				return nil
+			}
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			d.log.Info("formation driver stopped")

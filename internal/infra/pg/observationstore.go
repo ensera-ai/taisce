@@ -609,9 +609,14 @@ RETURNING scope`
 // The driver asks this rather than being told which scopes exist, because a scope is created by the
 // first turn written to it and nothing announces that. One index scan over the backlog index.
 func (s *ObservationStore) ScopesWithBacklog(ctx context.Context, schema Schema) ([]string, error) {
+	// Oldest waiting turn first, then by name so the order is the same every time. A worker gives
+	// each project a bounded number of turns per pass, and this decides who is first in a pass: the
+	// project that has waited longest, not the one whose name sorts first — which was the same
+	// project every time.
 	rows, err := s.pool.Query(ctx, schema.SQL(
-		`SELECT DISTINCT scope FROM {schema}.observation
-		  WHERE formed_at IS NULL AND parked_at IS NULL ORDER BY scope`))
+		`SELECT scope FROM {schema}.observation
+		  WHERE formed_at IS NULL AND parked_at IS NULL
+		  GROUP BY scope ORDER BY min(ingested_at), scope`))
 	if err != nil {
 		return nil, fmt.Errorf("list scopes with backlog: %w", err)
 	}
