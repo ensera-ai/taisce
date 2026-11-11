@@ -71,7 +71,20 @@ func runManage(ctx context.Context, log *slog.Logger) error {
 	if addr == "" {
 		addr = "127.0.0.1:8081"
 	}
-	ready := api.NewReadiness(func(checkCtx context.Context) error { return admin.Ping(checkCtx) })
+	builtFor, err := migrate.BuiltFor()
+	if err != nil {
+		return fmt.Errorf("read the schema version this binary was built for: %w", err)
+	}
+	// The database answering, and migrated as far as this binary needs. The management surface is
+	// started by the same upgrade that starts the migration, and its routes read tables its own
+	// release may have added.
+	waiting := &schemaWait{}
+	ready := api.NewReadiness(func(checkCtx context.Context) error {
+		if err := admin.Ping(checkCtx); err != nil {
+			return err
+		}
+		return waiting.note(log, pg.CheckSchemaBuiltFor(checkCtx, admin, schema, builtFor))
+	})
 	handler := managementHandler(server, ready)
 	httpServer := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 2 * time.Minute, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}

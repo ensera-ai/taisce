@@ -105,6 +105,20 @@ func load(dir string) ([]Script, error) {
 	return out, nil
 }
 
+// BuiltFor is the newest memory migration this binary carries: the schema version it was built to
+// run against.
+//
+// Read from the embedded scripts, so it cannot disagree with what `Apply` would install. A binary
+// asks it once at startup and compares it with what the database records, to tell a schema that has
+// not been migrated yet from one that has.
+func BuiltFor() (int, error) {
+	all, err := Load()
+	if err != nil {
+		return 0, err
+	}
+	return all[len(all)-1].Version, nil
+}
+
 // Apply upgrades an instance memory namespace. Each migration and its version marker commit in
 // one transaction, so failure leaves the last fully applied version. Project creation never calls it.
 func Apply(ctx context.Context, pool *pgxpool.Pool, schema Schema) (applied []int, err error) {

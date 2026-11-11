@@ -26,8 +26,19 @@ curl -s http://127.0.0.1:8080/ready
 {"status":"ready"}
 ```
 
-For the API, "ready" means it can reach both the memory schema and the credential registry. The
-check runs at most once a second and the result is cached for one second. A probe that arrives while
+For the API, "ready" means it can reach both the memory schema and the credential registry, and
+that the schema has been migrated at least as far as the binary was built for. During an upgrade a
+new process can start before the migration has committed; it answers `503`, takes no traffic, and
+becomes ready on its own when the migration lands. The probe does not say why — it says nothing but
+ready or not — so the reason is in the process's log, once when the wait starts and once when it
+ends:
+
+```text
+not ready: the schema is older than this binary was built for: it is at version 75 and this binary
+was built for version 76; waiting for the migration
+```
+
+The check runs at most once a second and the result is cached for one second. A probe that arrives while
 a check is already running gets `503` straight away instead of queueing.
 
 ### Require a working worker

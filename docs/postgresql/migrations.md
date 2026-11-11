@@ -280,6 +280,16 @@ Taisce has not had its first supported release yet. Until then:
 | Atomic writes, project boundaries, least privilege, provenance, erasure and rebuild hold at every commit. | Compatibility shims, mixed-binary operation or zero-downtime upgrades. |
 | A schema baseline, version support, upgrades and rollback will be defined before the first supported release. | Down migrations. |
 
+One thing an upgrade does have, whatever is later promised: **a process does not report ready on a
+schema older than the one it was built for.** An upgrade starts new processes and the migration at
+the same moment, and nothing orders them. A new process that reaches the database first waits,
+unready and taking no traffic, and becomes ready on its own when the migration commits
+(`CheckSchemaBuiltFor` in [operationalhealth.go](../../internal/infra/pg/operationalhealth.go);
+[D47](../decisions/D47.md)). The check is one-sided. A process from the previous release, still
+serving after the migration, is not refused: whether it is safe there depends on what a migration is
+allowed to change between releases, which is the promise in the right-hand column that has not been
+made.
+
 Some early migrations do carry upgrade logic. Control 0003 backfills a credential's single project.
 [0024](../../internal/migrate/sql/0024_project_names_fit_the_provisioning_contract.sql) refuses invalid
 historical project names atomically.
