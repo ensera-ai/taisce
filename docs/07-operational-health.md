@@ -201,11 +201,16 @@ scrape_configs:
 | `taisce_formation_turn_duration_milliseconds` | Histogram: how long a turn took to form, for turns that formed |
 | `taisce_formation_lag_milliseconds` | Histogram: how long a turn waited between being stored and being formed |
 | `taisce_admission_refused_total` | Counter: requests refused because the process had no capacity for them |
+| `taisce_model_calls_total` | Counter, by `purpose`: generation calls made |
+| `taisce_model_calls_unmetered_total` | Counter, by `purpose`: calls the provider reported no usage for |
+| `taisce_model_prompt_tokens_total` | Counter, by `purpose`: tokens sent to a generation model, where the provider said |
+| `taisce_model_completion_tokens_total` | Counter, by `purpose`: tokens a generation model wrote, where the provider said |
+| `taisce_model_replies_cut_total` | Counter, by `purpose`: replies that reached a ceiling and were refused whole |
 
 The first fifteen are read from the same place the health report and the ops centre read them: the
 operational snapshot, and the ledger's own counts. Nothing is measured for those, so a number on a
-dashboard cannot disagree with the page you were looking at a moment ago. The last four are
-measured, and are described next.
+dashboard cannot disagree with the page you were looking at a moment ago. The rest are measured, and
+are described next.
 
 ### How long things take
 
@@ -238,6 +243,34 @@ rate(taisce_admission_refused_total[5m])
 
 These are real counters: they only rise, and they do not fall to zero when a process restarts,
 because each process adds what it counted to a total kept in the database. Take a `rate()` of them.
+
+### What generation costs
+
+The `purpose` is `extraction`, `report` or `compaction` — the three things a generation model is
+called for, each with its own prompt.
+
+```promql
+# Tokens written per extraction call, on average, over an hour.
+rate(taisce_model_completion_tokens_total{purpose="extraction"}[1h])
+  / rate(taisce_model_calls_total{purpose="extraction"}[1h])
+
+# Is anything being cut?
+rate(taisce_model_replies_cut_total[15m])
+```
+
+- **Unknown is not zero.** A provider that sends no usage is counted in
+  `taisce_model_calls_unmetered_total` and adds nothing to the token counts. If that series moves, the
+  token totals are a floor and not a total.
+- **A reply that reaches a ceiling is refused whole.** A cut reply can be well-formed JSON holding
+  half of what the model meant to say, and using it would store half of a message's claims with
+  nothing to show the other half was lost. So it is a failed attempt, the turn is tried again, and a
+  turn that is cut every time is parked where you can see it. The reply's tokens are still counted:
+  it was paid for.
+- **No ceiling is stated unless you state one**, with `TAISCE_INFERENCE_MAX_OUTPUT_TOKENS`. The right
+  number depends on the model. One that reasons before it answers spends the allowance on its
+  reasoning: asked for a single word under a ceiling of 64 tokens, such a model returned an empty
+  reply. See [D46](decisions/D46.md). Watch `taisce_model_completion_tokens_total` for a while, set a ceiling well above what
+  you see, and watch `taisce_model_replies_cut_total` stay at zero.
 
 **Where the numbers come from, and what that costs.** A request is timed in the API process and a
 turn in the worker, and the scrape is answered by the management process. Each process counts in
@@ -273,8 +306,9 @@ moment raises nothing.
 ### What it deliberately does not expose
 
 **No project label, and no label drawn from anything stored.** Every series is an instance-wide
-aggregate. Two labels exist: `le`, a bucket's upper edge from a fixed list, and `operation`, which is
-one of the operations the API declares — the scrape fails rather than serve one that is not. A scrape
+aggregate. Three labels exist: `le`, a bucket's upper edge from a fixed list; `operation`, which is
+one of the operations the API declares; and `purpose`, one of the three things a generation model is
+called for. The scrape fails rather than serve a value that is not in its set. A scrape
 does not stay where it is taken — it goes to a monitoring system whose access and retention are a
 different trust domain from an operator token — and a per-project label set would turn every scrape
 into an enumeration of who this instance's customers are. Per-project detail stays on the management
