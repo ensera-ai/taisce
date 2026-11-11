@@ -71,3 +71,56 @@ fact keeps its ID. A historical recall reads whichever version was open at the t
 
 If a fact's closing message is erased, Taisce won't guess the end date. The fact stays unavailable
 until a new source establishes it again.
+
+## Whether a project's people share one world
+
+A single-value relation, such as where somebody lives, holds one current value, and a newer
+statement closes the older one. Whose older one depends on the project, and you say which it is:
+
+```sh
+taisce project statements my_project shared
+taisce project statements my_project separate
+taisce project list
+```
+
+- **`shared`** — the people in the project talk about one world. A team's workspace is this: when a
+  colleague says the office moved, that replaces what somebody else said about where it was.
+- **`separate`** — each person's statements are their own. An application with end users is this:
+  when Bob says his sister Sarah lives in Tokyo, that must not replace what Alice said about *her*
+  sister Sarah, even though both names resolve to one entity in the project.
+
+A project nobody decided about is **`separate`**. A shared world left on `separate` shows two current
+values where there should be one — both dated, both cited, and visible in the first read. Separate
+worlds left on `shared` lose a true fact with nothing to show for it. A project that existed before
+this setting did stays `shared`, because its facts were formed under that rule.
+
+In a `separate` project a recall across the whole project can return two current values for one
+subject and relation, each with its own source. A recall for one `data_subject_id` returns that
+person's.
+
+**Say it before the project holds a fact.** Every fact records the account it was filed under, so
+the setting cannot change afterwards, and the command says so. To change your mind later, create a
+project with the rule you want and store the content there.
+
+The command runs over the administrative connection — on a cluster, through `exec` into the
+management surface. It is not yet a route on the management API.
+
+### Facts ended by somebody else's statement
+
+In a `shared` project that should have been `separate`, a fact may have been closed by a different
+data subject's statement. They can be counted, because a closed fact records which fact replaced
+it. Run this as the operator, with your own schema name in place of `memory`:
+
+```sql
+SELECT f.scope, count(*)
+  FROM memory.fact f
+  JOIN memory.fact s ON s.scope = f.scope AND s.fact_id = f.superseded_by
+ WHERE f.cardinality = 'one'
+   AND NOT upper_inf(f.valid)
+   AND f.data_subject_id IS DISTINCT FROM s.data_subject_id
+ GROUP BY f.scope;
+```
+
+In a team's workspace a count above zero is the system working. In an application with end users it
+is that many facts given an end by somebody else. The count misses one case: if the statement that
+did the closing was later erased, the closed fact no longer records what replaced it.

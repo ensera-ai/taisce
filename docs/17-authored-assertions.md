@@ -77,8 +77,10 @@ back, with `replayed: true`.
 
 ## Watch out for
 
-- **Single-value predicates supersede.** Asserting a new employer for a `works_at` subject closes
-  the current one, just like extraction would.
+- **Single-value predicates supersede, within an account.** Asserting a new employer for a `works_at`
+  subject closes the current one, just like extraction would. In a project whose statements are
+  `separate`, that is the current one the same data subject holds; a value another data subject holds
+  is left alone ([temporal history](09-temporal-history.md#whether-a-projects-people-share-one-world)).
 - **Editing a record is a different call.** To change an existing record, use
   [corrections](14-record-corrections.md) with its expected version.
 - **Provenance is not proof.** The evidence names your credential in `authored_by` and

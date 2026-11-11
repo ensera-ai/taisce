@@ -179,7 +179,7 @@ func assertFactVersionTx(ctx context.Context, tx pgx.Tx, schema Schema, scope, o
                     max(lower(known)+interval '1 microsecond') FILTER (WHERE upper_inf(valid) AND upper_inf(known) AND lower(valid)<$4),
                     max(upper(known)) FILTER (WHERE NOT upper_inf(known) AND valid && tstzrange($4,NULL)))
                     FROM {schema}.fact WHERE scope=$1 AND subject_entity_id=$2::uuid AND predicate=$3
-                     AND data_subject_id IS NOT DISTINCT FROM $5::text`)
+                     AND account = {schema}.fact_account($1, $5::text)`)
 				args = []any{scope, subjectID, claim.Predicate, validFrom, nullIfEmpty(dataSubjectID)}
 			}
 			if err := tx.QueryRow(ctx, query, args...).Scan(&learnedAt); err != nil {
@@ -352,14 +352,19 @@ INSERT INTO {schema}.fact
      valid, confidence, data_subject_id, cardinality, source_role, known, recorded_at, superseded_by, supersession_source)
 VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6, tstzrange($7, $13), $8, $9, $10, $11, tstzrange($12,NULL), $12, $14::uuid, $15::uuid)`
 
-// Closes whatever this speaker currently holds for this subject and relation, at the moment the new
+// Closes whatever this account currently holds for this subject and relation, at the moment the new
 // one starts.
 //
-// The speaker is part of the slot. An entity is shared by everybody in a project who names it, so
-// without the data subject here one person's statement closed another person's: a true fact given an
-// end by somebody who never saw it, with nothing refused and so nothing counted. `IS NOT DISTINCT
-// FROM` rather than `=`, because a statement with no data subject is its own account and NULL equals
-// nothing — with `=`, unattributed statements would never supersede each other at all.
+// The account is part of the slot. In a project whose people share one world there is one account,
+// and anybody's newer statement closes the older one. In a project whose people do not, each data
+// subject has their own, and a statement closes only what the same person said before — because an
+// entity is shared by everybody who names it, and without the account here one person's statement
+// about "Sarah" closed another person's about a different Sarah: a true fact given an end by
+// somebody who never saw it, with nothing refused and so nothing counted.
+//
+// The account is asked of the substrate (`fact_account`) rather than computed here, so that this
+// statement and the trigger that stamps the row it is about to insert cannot disagree about which
+// account that is.
 //
 // `upper_inf(valid)` rather than "contains now": the interval being closed is the OPEN one, and a
 // fact that was already given an end is history that must not be rewritten. Ends are set to the new
@@ -373,7 +378,7 @@ const supersedeSQL = `
 WITH previous AS MATERIALIZED (
  SELECT fact_id,scope,valid,known FROM {schema}.fact
  WHERE scope=$1 AND subject_entity_id=$2::uuid AND predicate=$3
-   AND data_subject_id IS NOT DISTINCT FROM $8::text
+   AND account = {schema}.fact_account($1, $8::text)
    AND upper_inf(valid) AND upper_inf(known) AND lower(valid)<$4
  FOR UPDATE
 ), saved AS (

@@ -63,7 +63,7 @@ committed by whoever held that lock before it.
 | Ingestion budget | row lock by update | the single `ingestion_budget` row | commit of any append or release | the deferred triggers in [0025](../../internal/migrate/sql/0025_unfinished_observations_reserve_ingestion_capacity.sql) | the backlog ceiling |
 | Claim source | transaction advisory | `taisce:claim-source:<namespace>:<project>:<observation>` | one claim, retraction or publication | `lockClaimSource`, [recordretraction.go](../../internal/infra/pg/recordretraction.go) | one source's claims are written one at a time |
 | Entity row | row lock by `ON CONFLICT DO UPDATE`, or `FOR UPDATE` | `entity (scope, normalized_name)` | the claim transaction | [factstore.go](../../internal/infra/pg/factstore.go), [entitynames.go](../../internal/infra/pg/entitynames.go) | orders assertions about one subject |
-| Current facts | `FOR UPDATE` | the open facts for `(scope, subject, predicate)` | the claim transaction | `supersedeSQL` in [factstore.go](../../internal/infra/pg/factstore.go) | the supersession read |
+| Current facts | `FOR UPDATE` | the open facts for `(scope, subject, predicate, account)` | the claim transaction | `supersedeSQL` in [factstore.go](../../internal/infra/pg/factstore.go) | the supersession read |
 | Erasure | `FOR UPDATE`, sorted by id | the subject row and the selected observations | the erasure | [erasurestore.go](../../internal/infra/pg/erasurestore.go) | an erasure's view of what it deletes |
 | Rebuild, per project | session advisory, try | `<namespace>/project-rebuild/<project>` | the runner's session | [rebuildjob.go](../../internal/infra/pg/rebuildjob.go) | one runner per project |
 | Rebuild job | `FOR UPDATE` plus a lease column | `fact_rebuild_job (scope, job_id)` | each checkpoint and publication | [rebuildjob.go](../../internal/infra/pg/rebuildjob.go) | a replaced runner cannot publish |
@@ -253,11 +253,13 @@ endpoint ([0058](../../internal/migrate/sql/0058_a_scope_can_tell_somebody_it_fo
 
 ## Supersession is a constraint, not a lock
 
-A single-cardinality relation, such as where somebody lives, may hold one current value per subject.
-`fact_single_cardinality_excl`, an `EXCLUDE USING gist` over the project, subject, predicate, `valid`
-and `known`, makes that a database invariant
+A single-cardinality relation, such as where somebody lives, may hold one current value per subject,
+per account. `fact_single_cardinality_excl`, an `EXCLUDE USING gist` over the project, subject,
+predicate, account, `valid` and `known`, makes that a database invariant
 ([0010](../../internal/migrate/sql/0010_supersession_is_a_constraint_rather_than_a_lock.sql),
-[0032](../../internal/migrate/sql/0032_retractions_preserve_source_instructions.sql)).
+[0032](../../internal/migrate/sql/0032_retractions_preserve_source_instructions.sql),
+[0075](../../internal/migrate/sql/0075_a_project_says_whether_its_people_share_a_world.sql)). The
+account is the whole project where its people share a world, and the data subject where they do not.
 
 The alternative was an application lock per subject and relation, taken on every write path. That is
 correct only while every path remembers to take it, including one written next year by someone who
@@ -271,7 +273,7 @@ writers reach it:
    (`upsertEntitySQL` in [factstore.go](../../internal/infra/pg/factstore.go)). That locks the subject's
    row for the rest of the claim transaction, so a second assertion about the same subject waits for
    the first to commit.
-2. **The current facts.** `supersedeSQL` then locks the subject's current facts for that relation
+2. **The current facts.** `supersedeSQL` then locks the account's current facts for that subject and relation
    `FOR UPDATE`. Because it runs after the entity lock, it sees the first writer's fact. It archives
    the prior interval in `fact_history`, closes its `valid` range at the new fact's start, and restarts
    its `known` range at the new knowledge time. The new fact is inserted in the same transaction.
@@ -504,8 +506,9 @@ twice, and deduplicating by content would erase the repetition.
 
 - Its claims get their own fact ids and their own evidence, because a fact's id includes its source
   observation.
-- For a single-cardinality relation, the later claim supersedes the earlier if it starts later, and is
-  refused as `conflicting_value` if it starts at the same instant.
+- For a single-cardinality relation, the later claim supersedes the earlier one in the same account if
+  it starts later, and is refused as `conflicting_value` if it starts at the same instant. A claim in
+  a different account does neither: both stay current.
 
 A transport retry therefore needs a key to count as one write, and the adapters are required to send
 one.

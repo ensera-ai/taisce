@@ -841,12 +841,14 @@ func TestTheDatabaseRefusesTwoOverlappingSingleCardinalityFacts(t *testing.T) {
 		t.Fatalf("read subject: %v", err)
 	}
 
-	// A second open interval for the same subject and relation, inserted directly.
+	// A second open interval for the same subject and relation, from the same person, inserted
+	// directly. The person is named because the slot is theirs: in a project of separate worlds a
+	// row with no data subject is filed under a different account and is a different slot.
 	_, err = pool.Exec(ctx, schema.SQL(
 		`INSERT INTO {schema}.fact
-		     (fact_id, scope, subject_entity_id, predicate, statement, valid, confidence, cardinality, source_role)
+		     (fact_id, scope, subject_entity_id, predicate, statement, valid, confidence, cardinality, source_role, data_subject_id)
 		 VALUES (gen_random_uuid(), 'p1', $1::uuid, 'lives_in', 'A second current residence.',
-		         tstzrange(now(), NULL), 0.9, 'one', 'user')`), subject)
+		         tstzrange(now(), NULL), 0.9, 'one', 'user', 'subject-1')`), subject)
 	if err == nil {
 		t.Fatal("the database stored two overlapping current facts for a single-cardinality relation")
 	}

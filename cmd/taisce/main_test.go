@@ -790,12 +790,37 @@ func TestAProjectCanBeSuspendedAndResumed(t *testing.T) {
 		t.Fatal("suspended with no name")
 	}
 
+	// Whether the project's people share one world is said on this path, reads back where an
+	// operator looks for it, and starts as separate because nobody chose. A project that does not
+	// exist, a value that is neither, and a missing argument are each refused.
+	out, err := captureStdout(t, func() error { return dispatch(ctx, quiet(), []string{"project", "list"}) })
+	if err != nil || !strings.Contains(out, "statements=separate") {
+		t.Fatalf("a project nobody decided about is not listed as separate: %q (%v)", out, err)
+	}
+	if err := dispatch(ctx, quiet(), []string{"project", "statements", "live", "shared"}); err != nil {
+		t.Fatalf("say the project's people share a world: %v", err)
+	}
+	out, err = captureStdout(t, func() error { return dispatch(ctx, quiet(), []string{"project", "list"}) })
+	if err != nil || !strings.Contains(out, "statements=shared") {
+		t.Fatalf("the listing does not show what was said: %q (%v)", out, err)
+	}
+	for _, bad := range [][]string{{"project", "statements", "live", "everybody"}, {"project", "statements", "live"},
+		{"project", "statements", "ghost", "shared"}, {"project", "statements", "live", "shared", "extra"}} {
+		if err := dispatch(ctx, quiet(), bad); err == nil {
+			t.Fatalf("%v was accepted", bad)
+		}
+	}
+	if err := dispatch(ctx, quiet(), []string{"project", "statements", "live", "everybody"}); err == nil ||
+		!strings.Contains(err.Error(), "one world") {
+		t.Fatalf("the refusal of a value that is neither does not say what the two mean: %v", err)
+	}
+
 	// Retention is settable on this path, in whole days, and reads back where an operator looks for
 	// it. A value nobody could have meant is refused before the database sees it.
 	if err := dispatch(ctx, quiet(), []string{"project", "retention", "live", "30"}); err != nil {
 		t.Fatalf("set retention: %v", err)
 	}
-	out, err := captureStdout(t, func() error { return dispatch(ctx, quiet(), []string{"project", "list"}) })
+	out, err = captureStdout(t, func() error { return dispatch(ctx, quiet(), []string{"project", "list"}) })
 	if err != nil || !strings.Contains(out, "retention=30 days") {
 		t.Fatalf("the listing does not show the policy: %q (%v)", out, err)
 	}

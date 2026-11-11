@@ -180,6 +180,8 @@ func TestReceiptErasureAlsoRemovesKnowledgeDependingOnAnotherSubject(t *testing.
 	ctx := context.Background()
 	pool := testPool(t)
 	schema := tenant(t, pool, "receipt_causal_owner")
+	// The knowledge that depends on another subject exists only where people share a world.
+	peopleIn(t, ctx, pool, schema, pg.StatementsShared)
 	facts := pg.NewFactStore(pool)
 	obs := pg.NewObservationStore(pool)
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

@@ -377,7 +377,8 @@ memory.
 | state | `has_status`¹ |
 | constraint | `requires`, `prohibits` |
 
-¹ Single value: at most one current value per subject; eleven relations in all.
+¹ Single value: at most one current value per subject, per account; eleven relations in all. A
+project whose people share a world has one account; one whose people do not has one per data subject.
 ² Event: a past-tense report is admitted and stays true, because "I was born in Cork" does not stop
 being true. The event flag is not rendered into the prompt, so adding it did not change the prompt.
 
@@ -461,14 +462,31 @@ one transaction, in this order:
 ### Supersession is a constraint, not a lock
 
 `fact_single_cardinality_excl` is an `EXCLUDE USING gist` constraint over project, subject, relation,
-overlapping `valid` and overlapping `known`, for single-value facts whose subject is resolved.
+account, overlapping `valid` and overlapping `known`, for single-value facts whose subject is
+resolved.
 [Migration 0010](../../internal/migrate/sql/0010_supersession_is_a_constraint_rather_than_a_lock.sql)
-created it, and migration 0032 added `known`.
+created it, migration 0032 added `known`, and
+[migration 0075](../../internal/migrate/sql/0075_a_project_says_whether_its_people_share_a_world.sql)
+added the account.
+
+**The slot includes an account, and the project decides what an account is.** A named entity is one
+node for everybody in a project, so two people who each mention "Sarah" write about the same node.
+Whether the second statement should close the first depends on the project:
+
+| `project.statements` | An account is | "Atlas moved to Oslo" from a colleague | "My sister Sarah lives in Tokyo" from another user |
+|---|---|---|---|
+| `shared` | the project | closes "Atlas is in Dublin" | closes somebody else's Sarah — wrong for this project |
+| `separate` (the default) | the data subject | leaves "Atlas is in Dublin" current beside it — wrong for this project | leaves the other Sarah alone |
+
+A trigger stamps each fact's `account` from the project when the fact is inserted — the empty string
+for a shared project, the data subject otherwise — so the four paths that write facts cannot compute
+it differently. The setting can be changed until the project holds a fact, and is refused by the
+database afterwards ([temporal history](../09-temporal-history.md#whether-a-projects-people-share-one-world)).
 
 A lock would be correct only as long as every write path remembered to take it. The constraint is
 correct because the database will not store the violation, whichever path tries.
 
-`supersedeSQL` does the replacement. It finds the current value that started strictly earlier,
+`supersedeSQL` does the replacement. It finds the account's current value that started strictly earlier,
 copies its interval to `fact_history` with erasure registrations, and closes its `valid` range at the
 new value's start, so the two intervals meet exactly. The constraint is the backstop, and it leads to
 three outcomes worth knowing:
