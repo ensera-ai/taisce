@@ -69,8 +69,10 @@ func (e *StatusError) HTTPStatus() int { return e.Status }
 // path a customer is waiting on. A retry buried here would make the two indistinguishable and would
 // hold a connection open through a backoff nobody chose.
 func (m *Model) Propose(ctx context.Context, message domain.Message, vocabulary domain.Ontology) ([]extract.Proposal, error) {
+	ceiling := m.config.MaxOutputTokens
 	body, err := json.Marshal(chatRequest{
-		Model: m.config.Model,
+		Model:     m.config.Model,
+		MaxTokens: ceiling,
 		// Both come from the prompt file, which is where the agreement with the model is written
 		// down. Zero, because extraction is not a creative task: two extractions of one message
 		// should agree, and every disagreement is either a fact that appears once or one that
@@ -119,10 +121,11 @@ func (m *Model) Propose(ctx context.Context, message domain.Message, vocabulary 
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return nil, fmt.Errorf("decode model response: %w", err)
 	}
-	if len(decoded.Choices) == 0 {
-		return nil, fmt.Errorf("model returned no choices")
+	content, err := m.config.accept(PurposeExtraction, decoded, ceiling)
+	if err != nil {
+		return nil, err
 	}
-	return parseProposals(decoded.Choices[0].Message.Content)
+	return parseProposals(content)
 }
 
 // parseProposals reads the model's JSON.
@@ -316,6 +319,16 @@ type chatRequest struct {
 	Temperature    float32         `json:"temperature"`
 	Messages       []chatMessage   `json:"messages"`
 	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+	// MaxTokens is the most the model may write back, when the operator has said. Left out of the
+	// request otherwise, which leaves the provider's own limit in force.
+	//
+	// No default is stated here, and that is a measured decision rather than an omission. A model
+	// that reasons before it answers spends this allowance on the reasoning: asked for one word
+	// under a ceiling of 64 tokens, one such model returned an empty reply and a finish reason of
+	// "length". So the right ceiling depends on the model as well as on the prompt, a wrong one
+	// fails every turn rather than a few, and the number has to come from whoever knows which
+	// model they run — with the token counts this package now reports to choose it from.
+	MaxTokens int `json:"max_tokens,omitempty"`
 }
 
 type chatMessage struct {
@@ -330,5 +343,13 @@ type responseFormat struct {
 type chatResponse struct {
 	Choices []struct {
 		Message chatMessage `json:"message"`
+		// FinishReason is why the model stopped. "length" means it reached the ceiling.
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	// Usage is what the call cost, when the provider says. A pointer, because absent and zero are
+	// different answers.
+	Usage *struct {
+		PromptTokens     int64 `json:"prompt_tokens"`
+		CompletionTokens int64 `json:"completion_tokens"`
+	} `json:"usage"`
 }

@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/infra/inference"
+	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -234,5 +236,48 @@ func TestABootstrapToldNotToMintWritesNoTokenAndLeavesNoCredential(t *testing.T)
 	}
 	if strings.Contains(logged.String(), "no credential exists") && strings.Contains(logged.String(), "operator issue") {
 		t.Errorf("a bootstrap on an instance with an operator still says none exists:\n%s", logged.String())
+	}
+}
+
+// A generation call is counted under its purpose, and one the provider said nothing about is counted
+// as unknown rather than as free.
+func TestGenerationCallsAreCountedByPurposeAndUnknownIsNotZero(t *testing.T) {
+	ctx, pool := isolatedInstance(t)
+	if err := bootstrap(ctx, quiet(), []string{"--project", "first"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := pg.NewSchema("memory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	measurements := pg.NewMeasurements(pool, schema)
+	count := meterCalls(measurements)
+	count(inference.Call{Purpose: inference.PurposeExtraction, Reported: true, PromptTokens: 500, CompletionTokens: 60})
+	count(inference.Call{Purpose: inference.PurposeExtraction})
+	count(inference.Call{Purpose: inference.PurposeCompaction, Reported: true, PromptTokens: 80, CompletionTokens: 2048, Cut: true})
+	if err := measurements.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	read, err := pg.ReadMeasurements(ctx, pool, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]int64{
+		"model_calls.extraction":             2,
+		"model_calls_unmetered.extraction":   1,
+		"model_prompt_tokens.extraction":     500,
+		"model_completion_tokens.extraction": 60,
+		"model_calls.compaction":             1,
+		"model_prompt_tokens.compaction":     80,
+		"model_completion_tokens.compaction": 2048,
+		"model_replies_cut.compaction":       1,
+	} {
+		if got := read.Counters[name]; got != want {
+			t.Errorf("%s is %d, want %d", name, got, want)
+		}
+	}
+	// A call nobody metered adds no tokens, and no counter exists that it did not move.
+	if len(read.Counters) != 8 {
+		t.Errorf("counters were written that no call moved: %v", read.Counters)
 	}
 }

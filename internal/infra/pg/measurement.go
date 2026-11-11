@@ -54,7 +54,29 @@ const (
 	// the one thing the ledger cannot say: a refusal for capacity writes no ledger row, so a
 	// process shedding load looked identical to an idle one.
 	CounterAdmissionRefused = "admission_refused"
+
+	// What generation calls cost, each kept per purpose (see PurposeCounter). Calls is how many
+	// were made and Unmetered how many of those the provider reported no usage for — so a reader
+	// can tell tokens that were not spent from tokens nobody counted. Cut is how many replies
+	// reached a ceiling and were refused whole; they are in the token counts too, because a reply
+	// that was cut was still paid for.
+	CounterModelCalls            = "model_calls"
+	CounterModelCallsUnmetered   = "model_calls_unmetered"
+	CounterModelPromptTokens     = "model_prompt_tokens"
+	CounterModelCompletionTokens = "model_completion_tokens"
+	CounterModelRepliesCut       = "model_replies_cut"
 )
+
+// PurposeCounters are the counters kept once per purpose, in the order they are published.
+var PurposeCounters = []string{
+	CounterModelCalls, CounterModelCallsUnmetered, CounterModelPromptTokens,
+	CounterModelCompletionTokens, CounterModelRepliesCut,
+}
+
+// PurposeCounter names one of the per-purpose counters for one purpose. The purpose is whatever the
+// caller's closed set says it is; this only joins the two, and the name's shape is checked where
+// every name is.
+func PurposeCounter(counter, purpose string) string { return counter + "." + purpose }
 
 // Bounds are the upper edges of a kind's buckets, in milliseconds. An observation above the last
 // falls in a final bucket of its own.

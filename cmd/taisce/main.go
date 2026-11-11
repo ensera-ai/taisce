@@ -453,6 +453,7 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 		return err
 	}
 	inferenceConfig.Timeout = policy.TurnBudget
+	inferenceConfig.Metered = meterCalls(measurements)
 	observations := pg.NewObservationStore(memory)
 	// Read again at the top of every turn, because this process outlives the vocabulary: an
 	// operator extends it while the worker is running, and a worker holding the set it read at
@@ -481,6 +482,28 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 		}
 	}()
 	return nil
+}
+
+// meterCalls counts what each generation call cost, by purpose, into the instance's totals.
+//
+// A call the provider reported no usage for is counted as unmetered and adds no tokens: its cost is
+// unknown, which is not the same as nothing, and an operator adding the totals up has to be able to
+// see how much of the picture is missing. A reply that was cut is counted in the tokens as well as
+// on its own, because it was paid for.
+func meterCalls(measurements *pg.Measurements) func(inference.Call) {
+	return func(call inference.Call) {
+		purpose := string(call.Purpose)
+		measurements.Add(pg.PurposeCounter(pg.CounterModelCalls, purpose), 1)
+		if call.Reported {
+			measurements.Add(pg.PurposeCounter(pg.CounterModelPromptTokens, purpose), call.PromptTokens)
+			measurements.Add(pg.PurposeCounter(pg.CounterModelCompletionTokens, purpose), call.CompletionTokens)
+		} else {
+			measurements.Add(pg.PurposeCounter(pg.CounterModelCallsUnmetered, purpose), 1)
+		}
+		if call.Cut {
+			measurements.Add(pg.PurposeCounter(pg.CounterModelRepliesCut, purpose), 1)
+		}
+	}
 }
 
 // measurementInterval is how often a process writes down what it has counted.
