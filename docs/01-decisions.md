@@ -2331,3 +2331,90 @@ waited for. Performance: the door no longer caps a process at 128 requests a sec
 claimed for what it now serves — that is whatever the work slots and the database allow, and nothing
 here measured it. The cost added to every request is one SHA-256 and a map lookup, and one registry
 read every five seconds per process.
+
+## D40 — A project says whether its people share one world, and a fact is filed under an account
+
+**Date.** 2026-11-11. **Issue.** [#210](https://github.com/ensera-ai/taisce/issues/210).
+
+**Why it was open.** A named entity is one node per project, and a single-valued relation holds one
+current value, so a newer statement closes an older one. Whether that is right depends on something
+no row could say. In a team's workspace, "Atlas is in Dublin" followed by a colleague's "Atlas moved
+to Oslo" is news about one world, and the second must close the first. In an application with end
+users, Alice's "my sister Sarah lives in Paris" and Bob's "my sister Sarah lives in Tokyo" are two
+worlds that share a name, and the second must not. The store assumed the first everywhere. Reproduced
+against a real database for the second: Alice's fact was given an end at the moment Bob's began —
+nothing refused, nothing erased, a genuine citation on the fact that did it, and a recall scoped to
+Alice answering as though she had never said it.
+
+A first attempt keyed supersession on the speaker everywhere. Two existing tests failed, and they
+were right to: they state the Atlas case and require the colleague's statement to win. So neither
+rule is the defect. The defect was that a project could not say which it is.
+
+**Decided.**
+- **`project.statements` is `shared` or `separate`.** Shared: the project is one account, and
+  anybody's newer statement closes the older one. Separate: each data subject has an account, and a
+  statement closes only what the same person said.
+- **Every fact carries the account it is filed under, and the constraint compares it.** The empty
+  string in a shared project, the data subject in a separate one. In both kinds of project
+  supersession stays a constraint, which is the property "a constraint, not a lock" exists for; a
+  per-project rule enforced only in the write path would have given that up for half of them.
+- **A trigger stamps the account, from the project.** Four paths write facts — formation, an authored
+  assertion, a rebuild and recovery from receipts — and a column each had to compute the same way is
+  one that would eventually be computed differently. The statements that look for a slot ask the same
+  function the trigger uses.
+- **A project nobody decided about is `separate`.** A shared world left on `separate` shows two
+  current values where there should be one: both dated, both cited, visible in the first read.
+  Separate worlds left on `shared` lose a true fact silently. The default is the mistake that shows.
+- **A project that already existed stays `shared`.** Its facts were formed under that rule and are
+  filed under the shared account; changing the rule underneath them would leave rows filed under one
+  account and governed by another.
+- **The setting is fixed once the project holds a fact**, by a trigger, so an UPDATE written by hand
+  is refused as surely as the command. A fact's account cannot be updated either. The memory role
+  cannot write the setting at all: it is the operator's, on the administrative connection.
+
+**Rejected: keyed on the speaker everywhere.** Right for end-user applications and wrong for a team's
+workspace, where it leaves a stale value current beside its replacement. It also reverses behaviour
+two tests state on purpose. This was the first attempt.
+
+**Rejected: a named entity belongs to the person who named it.** Identity would become project, data
+subject and name. It ends the collision at its root and gives up what the entity model is for: an
+organisation several people mention is one node, kept when one of them is erased, reachable by
+anybody who asks about it. It would also change what every existing entity id means.
+
+**Rejected: leaving it, and telling operators to give each end user a project.** No code, and one
+project, one credential and one formation lock per person. It also leaves the loss in place for
+whoever did not read the page, and the loss is silent.
+
+**Rejected: `shared` as the default, because it is what every project was.** Compatibility for
+projects that exist is kept by the migration, which is where it belongs. A default is for the project
+that does not exist yet, and there the question is only which mistake is survivable.
+
+**Rejected: computing the account in each statement that inserts a fact.** Simpler to read in one
+place and wrong in the fifth place somebody writes later. Also rejected: enforcing the per-project
+rule in the supersession statement alone, with the constraint left at its loosest — the constraint
+would then refuse nothing in a shared project that the write path forgot to close.
+
+**Rejected: letting the setting change after facts exist, with a rebuild.** It is what an operator
+who chose wrong will want. A rebuild re-derives facts source by source while others are still filed
+under the old rule, and the project would hold both until it finished. Until there is a rebuild that
+re-files a whole project in one cutover, the honest answer is a new project.
+
+**Undo cost.** High, and it is the kind that grows. The column, the triggers and the constraint are
+one migration in either direction. But the account is on every fact written from here on, and in a
+separate project pairs of facts are current that the narrower rule would not allow, so going back
+means choosing whose statement to end — the choice this entry exists to stop the store making.
+
+**Impact.** Security, in the sense that matters for a memory: in a project that says its people do not
+share a world, what one person is recorded as having said no longer depends on what somebody else
+said. What it does not cover — the node is still shared, so a read across the project shows every
+speaker's statements about a name; a data subject is a string the application supplies and nothing
+verifies it; a project already wrongly `shared` keeps the facts it closed, which can be counted
+(`docs/09-temporal-history.md`) and are restored only by forming the content again in a separate
+project; and erasing the person whose statement closed another's still leaves that fact unavailable
+in a shared project. Performance: every fact insert takes a shared lock on its project's row and
+calls one function, the constraint's index gains a text column, and replacing the constraint locks
+the fact table for one index build; no figure is claimed for any of them. Operations: a new project
+is `separate` unless told otherwise, which changes behaviour for a team workspace created after this
+without anybody setting it — the listing shows the setting, and the command to change it works until
+the first fact. The setting is reachable by the CLI over the administrative connection and not yet
+by the management API or the portal.

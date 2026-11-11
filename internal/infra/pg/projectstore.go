@@ -92,7 +92,12 @@ type Listed struct {
 	Retention string   `json:"retention,omitempty"`
 	Suspended bool     `json:"suspended"`
 	// Statements is whether the project's people share one world: "shared" or "separate".
-	Statements string `json:"statements"`
+	//
+	// Read here for the operator's command and not rendered: the management API's project listing
+	// is part of the frozen v1 contract, and a field added to it widens what other people's code
+	// depends on. It goes on the wire when the setting gets a route of its own, in one reviewed
+	// change, rather than arriving in a response as a side effect of this one.
+	Statements string `json:"-"`
 }
 
 // List reads every project from the project table, suspended ones included. A project is a row,
