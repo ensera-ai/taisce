@@ -36,6 +36,27 @@ postgresql:
     # this size by spelling with the one the API server stored, and a mismatch replaces a replica
     # without end.
     sharedMemory: ""
+    # Where backups go. One of the two must be stated, and a release that states neither is refused.
+    #
+    # Replicas are not a backup. Three instances protect against losing a node, and nothing else:
+    # an erasure of the wrong subject, a migration that goes wrong, a dropped schema and an
+    # uninstall are each on every instance within a second. So this chart will not render a
+    # database whose operator arrived at "no backup" by not choosing.
+    backup:
+      # The name of an ObjectStore (barmancloud.cnpg.io) in this namespace. Stated, the cluster
+      # archives its write-ahead log there continuously and a base backup is taken on the schedule
+      # below. The ObjectStore itself — the bucket, its credentials, how long backups are kept —
+      # is yours to create: it belongs to whoever owns the storage, and a chart that wrote one
+      # would have to hold the bucket's credentials to do it. The Barman Cloud plugin must be
+      # installed beside the operator.
+      objectStore: ""
+      # When a base backup is taken, as the operator reads it: six fields, seconds first. Daily at
+      # 02:00 UTC. One is also taken as soon as the schedule exists, because a deployment whose
+      # only backup is tomorrow's has none today.
+      schedule: "0 0 2 * * *"
+      # true states that this deployment has no backup, on purpose. Nothing in it can then be
+      # recovered past what the replicas hold, and the install notes say so every time.
+      acknowledgedNone: false
     # The size of the database, and the one number the parameters below follow.
     #
     # Large on purpose. A chart that is small by default is one somebody runs in production

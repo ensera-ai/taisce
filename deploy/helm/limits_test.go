@@ -129,7 +129,7 @@ func TestTheChartRefusesATopologyThatDeclaresMoreConnectionsThanTheServerHas(t *
 	render(t)
 	refuse := func(args ...string) string {
 		t.Helper()
-		out, err := exec.Command("helm", append([]string{"template", "t", "taisce"}, args...)...).CombinedOutput()
+		out, err := exec.Command("helm", append([]string{"template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true"}, args...)...).CombinedOutput()
 		if err == nil {
 			t.Fatalf("helm template %v was accepted and should not have been:\n%s", args, out)
 		}
@@ -272,7 +272,7 @@ func TestTheDatabasesMemoryParametersFollowItsMemoryLimit(t *testing.T) {
 	}
 	// A unit the chart cannot read is refused, not guessed at: misreading it by a factor of 1024
 	// configures a database that will not start, for a reason nothing would point at.
-	refused, err := exec.Command("helm", "template", "t", "taisce", "--set-string", "postgresql.cnpg.resources.limits.memory=32G").CombinedOutput()
+	refused, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set-string", "postgresql.cnpg.resources.limits.memory=32G").CombinedOutput()
 	if err == nil || !strings.Contains(string(refused), "write it in Gi or Mi") {
 		t.Errorf("a memory limit in an unreadable unit must be refused: %v\n%s", err, refused)
 	}
@@ -335,7 +335,7 @@ func TestTheSharedMemoryVolumeIsSizedInTheFormTheAPIServerStores(t *testing.T) {
 	// A stated size this chart cannot respell is refused. Passing it through unread is how the loop
 	// comes back: 1G, 1000M and 1.5Gi are all valid quantities and none is stored as written.
 	for _, bad := range []string{"1G", "1000M", "1.5Gi", "0Gi", "Gi", "1073741824"} {
-		out, err := exec.Command("helm", "template", "t", "taisce", "--set-string", "postgresql.cnpg.sharedMemory="+bad).CombinedOutput()
+		out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set-string", "postgresql.cnpg.sharedMemory="+bad).CombinedOutput()
 		if err == nil || !strings.Contains(string(out), "postgresql.cnpg.sharedMemory") || !strings.Contains(string(out), "whole number of Mi or Gi") {
 			t.Errorf("sharedMemory=%q must be refused with the reason: %v\n%s", bad, err, out)
 		}

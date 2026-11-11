@@ -26,6 +26,11 @@
 postgresql:
   cnpg:
     instances: 1
+    # Said out loud, because the chart refuses a release that says nothing about backups. This shape
+    # is for trying the chart on a cluster, and what it holds is whatever you put in to try it. The
+    # moment it holds something you could not ingest again, name an object store instead.
+    backup:
+      acknowledgedNone: true
     storage:
       size: 10Gi
     resources:
