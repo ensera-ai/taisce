@@ -541,6 +541,7 @@ which is read in [passages.go](../../cmd/taisce/passages.go).
 | `TAISCE_INFERENCE_EXTRACTOR_MODEL` | none | the generation model; required for formation |
 | `TAISCE_INFERENCE_API_KEY` | empty: no key sent | the generation provider's key |
 | `TAISCE_INFERENCE_ALLOWLIST` | empty: permits nothing | comma-separated hosts, each matching an endpoint URL's host exactly |
+| `TAISCE_INFERENCE_MAX_OUTPUT_TOKENS` | empty: none stated, the provider's own limit applies | the most a generation model may write back for one call. A reply that reaches a ceiling, this one or the provider's, is refused whole. A value that is not a whole number from 1 to 1,000,000 fails startup |
 | `TAISCE_INFERENCE_EMBEDDING_ENDPOINT` | the generation endpoint | where embedding requests go, when that is a different provider |
 | `TAISCE_INFERENCE_EMBEDDING_MODEL` | none | the embedding model; an embedder refuses at the point of use without it |
 | `TAISCE_INFERENCE_EMBEDDING_API_KEY` | the generation key, only when the embedding endpoint is the same | the embedding provider's key; never borrowed across hosts |

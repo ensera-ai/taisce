@@ -63,7 +63,9 @@ func NewReporter(config Config) *Reporter {
 // Write asks the model to describe one community.
 func (r *Reporter) Write(ctx context.Context, c report.Context) (report.Report, error) {
 	material := renderContext(c)
+	ceiling := r.config.MaxOutputTokens
 	body, err := json.Marshal(chatRequest{
+		MaxTokens:      ceiling,
 		Model:          r.config.Model,
 		Temperature:    reportPrompt.ModelContract.Temperature,
 		ResponseFormat: &responseFormat{Type: reportPrompt.ModelContract.ResponseFormat},
@@ -105,10 +107,11 @@ func (r *Reporter) Write(ctx context.Context, c report.Context) (report.Report, 
 	if err := json.Unmarshal(raw, &completion); err != nil {
 		return report.Report{}, fmt.Errorf("decode reply: %w", err)
 	}
-	if len(completion.Choices) == 0 {
-		return report.Report{}, fmt.Errorf("the model returned no reply")
+	content, err := r.config.accept(PurposeReport, completion, ceiling)
+	if err != nil {
+		return report.Report{}, err
 	}
-	return decodeReport(completion.Choices[0].Message.Content)
+	return decodeReport(content)
 }
 
 // reportEnvelope is the reply shape the prompt asks for.

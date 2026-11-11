@@ -18,6 +18,7 @@ import (
 
 	"github.com/ensera-ai/taisce/internal/api"
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/google/uuid"
@@ -63,6 +64,45 @@ var expectedDistributions = map[string]struct {
 	"taisce_operation_duration_milliseconds":      {pg.OperationDuration, true},
 	"taisce_formation_turn_duration_milliseconds": {pg.FormationTurnDuration, false},
 	"taisce_formation_lag_milliseconds":           {pg.FormationLag, false},
+}
+
+// expectedPurposeCounters are the counters published once per purpose a generation model is called
+// for. The third and last label this endpoint carries, and closed like the other two.
+var expectedPurposeCounters = []string{
+	"taisce_model_calls_total",
+	"taisce_model_calls_unmetered_total",
+	"taisce_model_prompt_tokens_total",
+	"taisce_model_completion_tokens_total",
+	"taisce_model_replies_cut_total",
+}
+
+// purposeSample is one line of a per-purpose counter: the label is a purpose, and nothing else fits.
+var purposeSample = regexp.MustCompile(`^(taisce_model_[a-z_]+_total)\{purpose="([a-z]+)"\} ([0-9]+)$`)
+
+// checkPurposeSample holds one such line to the closed set of purposes and of counters.
+func checkPurposeSample(t *testing.T, line string) (string, int64) {
+	t.Helper()
+	m := purposeSample.FindStringSubmatch(line)
+	if m == nil {
+		t.Fatalf("a sample this endpoint must not serve: %q", line)
+	}
+	declared := false
+	for _, name := range expectedPurposeCounters {
+		declared = declared || name == m[1]
+	}
+	known := false
+	for _, purpose := range inference.Purposes() {
+		known = known || string(purpose) == m[2]
+	}
+	if !declared || !known {
+		t.Fatalf("a counter or a purpose nobody declared: %q", line)
+	}
+	value, err := strconv.ParseInt(m[3], 10, 64)
+	if err != nil {
+		t.Fatalf("%q is not an integer: %v", line, err)
+	}
+	name, _, _ := strings.Cut(line, " ")
+	return name, value
 }
 
 // distributionSample is one line of a histogram. The whole of what a label set may be is written
@@ -215,6 +255,12 @@ func parseExposition(t *testing.T, body string) exposed {
 				t.Fatalf("%s is served twice", name)
 			}
 			out.series[name] = value
+		case strings.HasPrefix(line, "taisce_model_"):
+			name, value := checkPurposeSample(t, line)
+			if _, seen := out.series[name]; seen {
+				t.Fatalf("%s is served twice", name)
+			}
+			out.series[name] = value
 		default:
 			match := samplePattern.FindStringSubmatch(line)
 			if match == nil {
@@ -266,6 +312,18 @@ func parseExposition(t *testing.T, body string) exposed {
 			}
 			if _, ok := out.series[family+"_sum"+group]; !ok {
 				t.Fatalf("%s%s has a count and no sum", family, group)
+			}
+		}
+	}
+	// Every per-purpose counter is served for every purpose, whether or not a call has been made, so
+	// the series exist before the first call.
+	for _, family := range expectedPurposeCounters {
+		if !helped[family] || !typed[family] {
+			t.Fatalf("%s is not declared with a HELP and a TYPE line", family)
+		}
+		for _, purpose := range inference.Purposes() {
+			if _, ok := out.series[family+`{purpose="`+string(purpose)+`"}`]; !ok {
+				t.Fatalf("%s is not served for %s", family, purpose)
 			}
 		}
 	}
@@ -480,6 +538,10 @@ func TestInstanceMetricsCarryNoProjectLabelAndNothingFromMemory(t *testing.T) {
 			checkDistributionSample(t, line)
 			continue
 		}
+		if strings.HasPrefix(line, "taisce_model_") {
+			checkPurposeSample(t, line)
+			continue
+		}
 		name, value, ok := strings.Cut(line, " ")
 		if !ok || !named[name] {
 			t.Fatalf("a sample names %q, which is not one of the series this endpoint declares: %q", name, line)
@@ -588,8 +650,10 @@ func TestTheScrapeSaysHowLongRequestsAndFormationTook(t *testing.T) {
 	// Before anything has been measured the families are declared and hold no series, which is how
 	// a monitoring system learns a series exists without being told a number nobody measured.
 	_, body := scrapeMetrics(t, m.manage.URL, m.operator)
-	if before := parseExposition(t, body); len(before.series) != 0 {
-		t.Fatalf("nothing has been measured and the scrape reports timings: %v", before.series)
+	for name, value := range parseExposition(t, body).series {
+		if strings.Contains(name, "_milliseconds_") || value != 0 {
+			t.Fatalf("nothing has been measured and the scrape reports %s = %d", name, value)
+		}
 	}
 
 	for i := 0; i < 3; i++ {
@@ -725,5 +789,56 @@ func TestAMeasurementTheSurfaceDoesNotDeclareFailsTheScrape(t *testing.T) {
 	if _, err := m.pool.Exec(ctx, m.schema.SQL(
 		`INSERT INTO {schema}.measurement(kind,name,buckets,sum_ms,count) VALUES('operation_duration','x",project="p1',$1,0,0)`), buckets); err == nil {
 		t.Fatal("a measurement whose name is label syntax was stored")
+	}
+}
+
+// The scrape says what generation calls cost, by purpose, and tells unknown from nothing.
+//
+// A generation call's length is decided by text somebody else wrote, and nothing counted what was
+// spent: an operator on a metered provider learned what formation cost from the provider's invoice.
+// The counts are kept per purpose because the three have different remedies — a costly extraction is
+// about what is being stored, a costly report about how often reports are rewritten.
+//
+// A call the provider reported no usage for is counted as a call and as unmetered, and adds no
+// tokens, so a reader adding up the tokens can see how much of the picture is missing.
+func TestTheScrapeSaysWhatGenerationCallsCostByPurpose(t *testing.T) {
+	m := newManaged(t, "api_metrics_tokens")
+	ctx := context.Background()
+	add := func(counter string, purpose inference.Purpose, n int64) {
+		m.measurements.Add(pg.PurposeCounter(counter, string(purpose)), n)
+	}
+	add(pg.CounterModelCalls, inference.PurposeExtraction, 3)
+	add(pg.CounterModelPromptTokens, inference.PurposeExtraction, 900)
+	add(pg.CounterModelCompletionTokens, inference.PurposeExtraction, 120)
+	add(pg.CounterModelCallsUnmetered, inference.PurposeExtraction, 1)
+	add(pg.CounterModelCalls, inference.PurposeReport, 1)
+	add(pg.CounterModelRepliesCut, inference.PurposeReport, 1)
+	if err := m.measurements.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, body := scrapeMetrics(t, m.manage.URL, m.operator)
+	values := parseExposition(t, body)
+	for name, want := range map[string]int64{
+		`taisce_model_calls_total{purpose="extraction"}`:             3,
+		`taisce_model_calls_unmetered_total{purpose="extraction"}`:   1,
+		`taisce_model_prompt_tokens_total{purpose="extraction"}`:     900,
+		`taisce_model_completion_tokens_total{purpose="extraction"}`: 120,
+		`taisce_model_calls_total{purpose="report"}`:                 1,
+		`taisce_model_replies_cut_total{purpose="report"}`:           1,
+		`taisce_model_calls_total{purpose="compaction"}`:             0,
+	} {
+		if got := values.series[name]; got != want {
+			t.Errorf("%s is %d, want %d", name, got, want)
+		}
+	}
+
+	// A stored counter nobody declared fails the scrape, for the reason an undeclared operation
+	// does, and its name is not served.
+	m.measurements.Add("model_calls.scrapeproject", 1)
+	if err := m.measurements.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if resp, body := scrapeMetrics(t, m.manage.URL, m.operator); resp.StatusCode != http.StatusServiceUnavailable || strings.Contains(body, "scrapeproject") {
+		t.Fatalf("a counter for a purpose nobody declared was served, or its name was: %d %s", resp.StatusCode, body)
 	}
 }

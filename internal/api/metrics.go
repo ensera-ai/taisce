@@ -47,6 +47,7 @@ import (
 	"time"
 
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 )
 
@@ -140,6 +141,38 @@ func (e *exposition) counter(name, help string, value int64) {
 	e.b.WriteString("# HELP " + metricPrefix + name + "_total " + help + "\n")
 	e.b.WriteString("# TYPE " + metricPrefix + name + "_total counter\n")
 	e.b.WriteString(metricPrefix + name + "_total " + strconv.FormatInt(value, 10) + "\n")
+}
+
+// counterByPurpose writes one counter family with a series for every purpose a generation model is
+// called for.
+//
+// The third label, and closed like the other two: a purpose is one of the set the inference package
+// declares, each with its own prompt. Every purpose is written whether or not a call has been made
+// for it, so the series exist before the first call and a rule written against one does not have to
+// handle it appearing.
+func (e *exposition) counterByPurpose(name, help string, stored map[string]int64) {
+	family := metricPrefix + name + "_total"
+	e.b.WriteString("# HELP " + family + " " + help + "\n")
+	e.b.WriteString("# TYPE " + family + " counter\n")
+	for _, purpose := range inference.Purposes() {
+		e.b.WriteString(family + `{purpose="` + string(purpose) + `"} ` +
+			strconv.FormatInt(stored[pg.PurposeCounter(name, string(purpose))], 10) + "\n")
+	}
+}
+
+// declaredCounter reports whether a stored counter's name is one this endpoint publishes.
+func declaredCounter(name string) bool {
+	if name == pg.CounterAdmissionRefused {
+		return true
+	}
+	for _, counter := range pg.PurposeCounters {
+		for _, purpose := range inference.Purposes() {
+			if name == pg.PurposeCounter(counter, string(purpose)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // distributions writes one family of histograms: how long a kind of thing took.
@@ -323,6 +356,21 @@ func (m *ManagementServer) metrics(w http.ResponseWriter, r *http.Request, _ cre
 	// Turned away at the door for want of capacity. No ledger row is written for one, so without
 	// this a process refusing a third of its requests looks exactly like an idle one.
 	e.counter("admission_refused", "Requests refused because the process had no capacity for them.", measured.Counters[pg.CounterAdmissionRefused])
+	// What generation calls cost. A stored counter this endpoint does not declare fails the scrape
+	// for the reason an undeclared operation does: the totals are written by the processes that
+	// serve, and this is the last place a name nobody reviewed could be stopped.
+	for name := range measured.Counters {
+		if !declaredCounter(name) {
+			m.log.Error("metrics: a stored counter is not one this endpoint declares", "counter", name)
+			writeError(w, http.StatusServiceUnavailable, codeInternal, "the instance's numbers could not be read")
+			return
+		}
+	}
+	e.counterByPurpose(pg.CounterModelCalls, "Generation calls made, by purpose.", measured.Counters)
+	e.counterByPurpose(pg.CounterModelCallsUnmetered, "Generation calls the provider reported no usage for, by purpose.", measured.Counters)
+	e.counterByPurpose(pg.CounterModelPromptTokens, "Tokens sent to a generation model, by purpose, where the provider said.", measured.Counters)
+	e.counterByPurpose(pg.CounterModelCompletionTokens, "Tokens a generation model wrote, by purpose, where the provider said.", measured.Counters)
+	e.counterByPurpose(pg.CounterModelRepliesCut, "Replies that reached a ceiling and were refused whole, by purpose.", measured.Counters)
 
 	w.Header().Set("Content-Type", metricsContentType)
 	// A scrape is a reading of now. A cached one is a reading of whenever it was taken, which an
