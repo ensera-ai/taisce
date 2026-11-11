@@ -37,12 +37,25 @@ helm install memory deploy/helm/taisce -n taisce \
   --set inference.endpoint=https://models.example/v1 \
   --set inference.extractorModel=Qwen/Qwen3.8-27B \
   --set inference.allowlist=models.example \
-  --set inference.apiKeySecret=model-key
+  --set inference.apiKeySecret=model-key \
+  --set postgresql.cnpg.backup.objectStore=memory-backups
 ```
 
+The last line is the one setting with no default: a release names where its backups go, or says it
+has none, and one that says neither is refused. [Backups](#backups-say-where-they-go-or-say-there-are-none)
+below covers both answers.
+
+No credential exists after the install. Bootstrap provisions the instance and mints nothing, because
+a Job's output is a container log, and a cluster ships its logs somewhere this release did not
+choose. Mint the first ones yourself — the output is streamed to your terminal and to no log:
+
 ```sh
-kubectl -n taisce logs job/memory-taisce-bootstrap-1 | grep token
+kubectl -n taisce exec deploy/memory-taisce-manage -- /taisce operator issue ops
+kubectl -n taisce exec deploy/memory-taisce-manage -- /taisce credential issue owner -project default -access read_write
 ```
+
+The second is the project owner's, asked for with `read_write` because it is the one that can erase.
+Leave `-access` off for a key an agent holds.
 
 `inference.allowlist` names the hosts that may receive somebody's words. Empty permits nothing, so
 formation does not start — which is the default, because an allowlist that permits everything when
@@ -84,9 +97,9 @@ The database image must provide the `vector` extension; `btree_gist` and `pg_sta
 contrib modules of every build. The default is the operator's image family that bundles pgvector;
 a deployment that builds its own substrate image sets `postgresql.cnpg.image`.
 
-### If the first credentials were lost
+### If a credential was lost
 
-Mint replacements; do not go looking for the old ones. The administrative database connection
+Mint a replacement; do not go looking for the old one. The administrative database connection
 outlives every credential, and the management surface is the workload that holds it:
 
 ```sh
@@ -95,15 +108,17 @@ kubectl -n taisce exec deploy/memory-taisce-manage -- /taisce credential issue r
 ```
 
 **Minting does not revoke what was lost.** A token nobody can find is still a token that works for
-whoever has it — the person who read the log before it was deleted, or whatever shipped that log
-somewhere. `/taisce credential list` names what exists and `/taisce credential revoke <id>` closes
-it, and doing that is part of recovering rather than an optional tidy-up.
+whoever has it. `/taisce credential list` names what exists and `/taisce credential revoke <id>`
+closes it, and doing that is part of recovering rather than an optional tidy-up.
 
-This is why nothing in the chart keeps a token at rest. A Secret holding one, or a bootstrap Job
-kept on every upgrade, would turn a credential that exists for a moment into one that exists for the
-life of the deployment and can be read by anyone who can read the namespace — in exchange for
-convenience that the two commands above already provide
-([D15](../../docs/01-decisions.md)).
+This is why nothing in the chart keeps a token at rest, and why nothing in it prints one. A Secret
+holding a token would turn a credential shown for a moment into one that exists for the life of the
+deployment, readable by anyone who can read the namespace. A Job printing one is worse: its output is
+copied to the cluster's log store as it is written, and kept there under retention and access rules
+this release did not choose — which is where the first operator token of an earlier install was
+found, after the Job that printed it had been deleted. The two commands above give the token to the
+person who asked for it and to nothing else
+([D15 and D42](../../docs/01-decisions.md)).
 
 **A role password is kept and a token is not, and the difference is who has to read it back.** The
 deployment itself presents `dataPassword` and `controlPassword` on every connection it opens, so
@@ -114,8 +129,9 @@ the cost of a credential.
 
 **What this does not cover.** With `manage.enabled=false` there is no workload holding the
 administrative connection, so there is nothing to exec into: enable the management surface, mint,
-and disable it again. And nothing brings back the tokens themselves — they are gone, which is the
-property that makes a stolen database useless for impersonation.
+and disable it again. Nothing brings back a token itself — it is gone, which is the property that
+makes a stolen database useless for impersonation. And nothing here stops a token being pasted
+somewhere that is logged: a terminal with session recording, a shell history, a ticket.
 
 ### From a published chart
 
@@ -127,7 +143,8 @@ Omitting `--version` installs the newest published chart, which is what you want
 pinning. The namespace and the key come first here too:
 
 ```sh
-helm install memory oci://ghcr.io/ensera-ai/charts/taisce -n taisce --set inference.apiKeySecret=model-key
+helm install memory oci://ghcr.io/ensera-ai/charts/taisce -n taisce --set inference.apiKeySecret=model-key \
+  --set postgresql.cnpg.backup.objectStore=memory-backups
 ```
 
 Pin with `--version <chart version>` — plain SemVer, the release tag without its `v`. No version is
@@ -170,6 +187,41 @@ forms nothing. Raise it on a network where a healthy peer can be silent for long
 
 With `postgresql.mode=external` neither applies. The DSNs come from a secret this chart never reads,
 so the pool ceilings are yours to put in them, and the keepalives are yours to set on your server.
+
+## Backups: say where they go, or say there are none
+
+A release that says nothing about backups
+is refused before anything is applied:
+
+```text
+this release declares 3 database instance(s) and no backup. Replicas protect against losing a node
+and nothing else ...
+```
+
+Three instances and a failover path protect against losing a node. An erasure of the wrong subject,
+a migration that goes wrong, a dropped schema and an uninstall are each on every instance within a
+second, and none of the three can give them back.
+
+- **`postgresql.cnpg.backup.objectStore`** names an `ObjectStore` (`barmancloud.cnpg.io`) in the
+  release's namespace. The cluster then archives its write-ahead log there continuously, and a base
+  backup is taken daily at 02:00 UTC and once when the schedule is created.
+  `postgresql.cnpg.backup.schedule` changes when. The Barman Cloud plugin must be installed beside
+  the operator.
+- **`postgresql.cnpg.backup.acknowledgedNone=true`** states that this deployment has no backup, on
+  purpose. It renders, and the install notes say so every time.
+
+The `ObjectStore` is yours to create: the bucket, its credentials and how long backups are kept
+belong to whoever owns the storage, and a chart that wrote one would have to hold those credentials.
+
+What the chart cannot check, because it is true or false on a cluster and not in a rendering: that
+the object store exists, that its credentials work, and that a backup has completed. The install
+notes print the two commands that do. And a backup nobody has restored from is a hope — rehearse a
+restore into a second cluster before depending on this one.
+
+**A restore brings back what was erased.** Everything erased since the backup was taken is in the
+backup, and nothing re-applies an erasure after a restore. Until that changes, keep your own record
+of erasure requests and repeat them after restoring.
+
 
 ## Shrinking it, deliberately
 

@@ -204,8 +204,10 @@ CLI's direct path over the administrative connection. The serving registry role 
 
 - Issuing a project credential first checks that the project exists and is not suspended. A
   credential for a project nobody can use would authenticate and then reach nothing.
-- `taisce bootstrap` mints the first operator credential when none is live
-  ([commands.go](../../cmd/taisce/commands.go)).
+- `taisce bootstrap` mints the first operator credential when none is live, and prints it once
+  ([commands.go](../../cmd/taisce/commands.go)). Where its output is a shipped log it is told not to:
+  the chart runs it with `-mint-credentials=false`, and the operator mints the first credentials
+  through `exec` into the manage process, whose output is not part of any container's log.
 - `Store.Revoke` sets `revoked_at` and keeps the row, so ledger entries attributed to the credential
   still name something.
 - Nothing caches a grant. Every request resolves the token against the registry again, so a

@@ -3,24 +3,41 @@ Taisce {{ .Chart.AppVersion }} is installing as {{ .Release.Name }}.
 Topology: PostgreSQL {{ if eq .Values.postgresql.mode "cnpg" }}under CloudNativePG, {{ .Values.postgresql.cnpg.instances }} instance(s){{ else }}external, from secret {{ .Values.postgresql.external.existingSecret }}{{ end }};
 {{ .Values.api.replicas }} API replica(s); {{ .Values.worker.replicas }} worker(s); management surface {{ if .Values.manage.enabled }}in-cluster at {{ include "taisce.name" . }}-manage:8081{{ else }}disabled{{ end }}; portal {{ .Values.manage.portal }}.
 
-The first credentials are printed once, by the bootstrap Job of the revision that minted them:
-  kubectl -n {{ .Release.Namespace }} logs job/{{ include "taisce.name" . }}-bootstrap-{{ .Release.Revision }} | grep token
-
-Copy them out now. That log is the only copy — only digests are stored — and the next upgrade
-deletes this Job and its log with it. A later revision's Job finds the instance already reachable
-and mints nothing, so it has no token to print.
+No credential exists yet, on a first install: bootstrap provisions the instance and mints nothing,
+because a Job's output is a log, and a log is shipped and kept somewhere this release did not choose.
 {{ if .Values.manage.enabled }}
-If they were missed, mint replacements instead of looking for them. The management surface holds the
-administrative connection, which outlives every credential:
-  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "taisce.name" . }}-manage -- /taisce operator issue replacement
-  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "taisce.name" . }}-manage -- /taisce credential issue replacement -project {{ .Values.project }}
+Mint the first ones yourself. The output is streamed to your terminal and to no log:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "taisce.name" . }}-manage -- /taisce operator issue <name>
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "taisce.name" . }}-manage -- /taisce credential issue <name> -project {{ .Values.project }} -access read_write
 
-Minting does not revoke what was lost: /taisce credential list names what exists and
-/taisce credential revoke <id> closes it.
+The second is the project owner's, so it is asked for with read_write: it is the one that can erase.
+Leave -access off for a key an agent holds, which writes memory and cannot destroy it.
+
+Each token is shown once, to you: only digests are stored, so a lost one is replaced by minting another, with
+the same two commands. Minting does not revoke what was lost: /taisce credential list names what
+exists and /taisce credential revoke <id> closes it.
 {{- else }}
-If they were missed, nothing in this deployment can mint a replacement: the management surface holds
-the administrative connection and it is disabled. Enable it, mint, then disable it again:
+Nothing in this deployment can mint one: the management surface holds the administrative connection
+and it is disabled. Enable it, mint, then disable it again:
   helm upgrade {{ .Release.Name }} <chart> --reuse-values --set manage.enabled=true
+{{- end }}
+
+{{- if eq .Values.postgresql.mode "cnpg" }}
+{{ if .Values.postgresql.cnpg.backup.objectStore }}
+Backups go to the ObjectStore {{ .Values.postgresql.cnpg.backup.objectStore }}: the write-ahead log continuously, and a base backup on
+"{{ .Values.postgresql.cnpg.backup.schedule }}" and once now. This rendering could not check that the store exists or that a
+backup has completed. Check both:
+  kubectl -n {{ .Release.Namespace }} get backup
+  kubectl -n {{ .Release.Namespace }} get cluster {{ include "taisce.db" . }} -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")]}'
+A backup nobody has restored from is a hope. Rehearse a restore into a second cluster before you
+depend on this one. A restore also brings back everything erased since the backup was taken, and
+nothing here erases it again.
+{{- else }}
+THIS DEPLOYMENT HAS NO BACKUP. postgresql.cnpg.backup.acknowledgedNone is true, so it holds only
+what its {{ .Values.postgresql.cnpg.instances }} database instance(s) hold. An erasure of the wrong subject, a failed migration, a dropped
+schema or an uninstall cannot be recovered from. To change that, create an ObjectStore and set
+postgresql.cnpg.backup.objectStore to its name.
+{{- end }}
 {{- end }}
 
 No RTO or RPO is claimed: this is a topology with a failover path, and the recovery time is what

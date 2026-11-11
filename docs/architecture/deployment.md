@@ -36,7 +36,10 @@ Every deployment arranges the same four things:
    - provisions the first project (`migrate.ProvisionScope`);
    - mints the first operator credential and the first project credential, but only when none can
      reach them yet. Each token is printed once, and only its digest is stored
-     ([commands.go](../../cmd/taisce/commands.go), `bootstrap`).
+     ([commands.go](../../cmd/taisce/commands.go), `bootstrap`). The chart tells it not to
+     (`-mint-credentials=false`): a Job's output is a container log, shipped and kept somewhere the
+     release did not choose, so on a cluster the operator mints the first credentials through `exec`,
+     whose output reaches their terminal and no log.
 
    Bootstrap is idempotent, because both deployment styles run it on every start or upgrade.
 3. **Serving identities that cannot change the schema.** The API and the workers connect as
@@ -401,8 +404,16 @@ formation is deliberately off.
 
 ```sh
 helm install memory deploy/helm/taisce \
-  --set postgresql.cnpg.instances=1 --set api.replicas=1 --set worker.replicas=1
+  --set postgresql.cnpg.instances=1 --set api.replicas=1 --set worker.replicas=1 \
+  --set postgresql.cnpg.backup.acknowledgedNone=true
 ```
+
+The last line is the chart's one question that has no default. A release must either name where its
+backups go (`postgresql.cnpg.backup.objectStore`) or state that it has none, and one that says
+neither is refused before anything is applied. Replicas are not a backup: they protect against
+losing a node, and everything else — a wrong erasure, a failed migration, an uninstall — reaches
+every instance within a second. [The chart's README](../../deploy/helm/README.md) covers both
+settings and what the chart cannot check.
 
 That makes every tier a single point of failure, and the chart renders it as asked. The default is
 the large shape so that nobody deploys the small one believing it was the large one.

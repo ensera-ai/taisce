@@ -17,7 +17,7 @@ import (
 
 func render(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("helm", append([]string{"template", "t", "taisce"}, args...)...)
+	cmd := exec.Command("helm", append([]string{"template", "t", "taisce"}, withoutABackup(args)...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template %v: %v\n%s", args, err, out)
@@ -25,8 +25,24 @@ func render(t *testing.T, args ...string) string {
 	return string(out)
 }
 
+// withoutABackup states that the release has no backup, unless the caller said something about
+// backups itself.
+//
+// A release that says nothing is refused, so "the chart's defaults" no longer render at all, and
+// every test here that reads a rendering needs one. This is the one setting they are given, and it
+// is the answer that adds no object to what they read. The refusal itself is held by
+// TestAReleaseStatesWhereItsBackupsGoOrSaysItHasNone, which does not come through here.
+func withoutABackup(args []string) []string {
+	for _, a := range args {
+		if strings.Contains(a, "postgresql.cnpg.backup.") || a == "values-small.yaml" {
+			return args
+		}
+	}
+	return append([]string{"--set", "postgresql.cnpg.backup.acknowledgedNone=true"}, args...)
+}
+
 func TestTheChartLintsAndItsDefaultsAreHighlyAvailableAndClosed(t *testing.T) {
-	if out, err := exec.Command("helm", "lint", "taisce").CombinedOutput(); err != nil {
+	if out, err := exec.Command("helm", "lint", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true").CombinedOutput(); err != nil {
 		t.Fatalf("helm lint: %v\n%s", err, out)
 	}
 	out := render(t)
@@ -68,7 +84,7 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 		t.Error("the external rendering must reach the named secret and declare no cluster")
 	}
 	// The portal's ingress cannot be enabled while the portal is off: that would expose the surface's door.
-	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example").CombinedOutput(); err == nil || !strings.Contains(string(out), "manage.portal") {
+	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example").CombinedOutput(); err == nil || !strings.Contains(string(out), "manage.portal") {
 		t.Errorf("the portal ingress must be refused while the portal is off, got %v\n%s", err, out)
 	}
 	exposed := render(t, "--set", "manage.portal=on", "--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example",
@@ -76,7 +92,7 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 	if strings.Count(exposed, "kind: Ingress") != 2 || !strings.Contains(exposed, "path: /portal") || !strings.Contains(exposed, `value: "on"`) {
 		t.Error("enabling both ingresses renders both, the portal at its prefix")
 	}
-	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "ingress.api.enabled=true").CombinedOutput(); err == nil || !strings.Contains(string(out), "host is required") {
+	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set", "ingress.api.enabled=true").CombinedOutput(); err == nil || !strings.Contains(string(out), "host is required") {
 		t.Errorf("an ingress without a host is refused, got %v\n%s", err, out)
 	}
 }
@@ -106,7 +122,7 @@ func TestThePortalIngressAcceptsOnTheWayTheBinaryDoes(t *testing.T) {
 		}
 	}
 	for _, value := range []string{"off", "onn", "yes", ""} {
-		out, err := exec.Command("helm", "template", "t", "taisce", "--set-string", "manage.portal="+value,
+		out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set-string", "manage.portal="+value,
 			"--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example").CombinedOutput()
 		if err == nil || !strings.Contains(string(out), "manage.portal") {
 			t.Errorf("manage.portal=%q does not switch the portal on, and its ingress was not refused: %v\n%s", value, err, out)
@@ -167,7 +183,7 @@ func TestTheChartAsksForAnImageTheReleasePushed(t *testing.T) {
 // runner would not share.
 func notes(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("helm", append([]string{"install", "t", "taisce", "--dry-run=client", "-n", "taisce"}, args...)...)
+	cmd := exec.Command("helm", append([]string{"install", "t", "taisce", "--dry-run=client", "-n", "taisce"}, withoutABackup(args)...)...)
 	cmd.Env = append(os.Environ(), "KUBECONFIG=/dev/null")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -180,18 +196,20 @@ func notes(t *testing.T, args ...string) string {
 	return after
 }
 
-// The tokens bootstrap prints exist in one Job's log and nowhere else, and the next upgrade deletes
-// that Job. An operator who learns this after the fact has lost nothing they cannot mint again, but
-// only if the notes said both halves: copy it now, and here is how to replace it. This test is what
-// a later reader re-runs to find out whether they still do.
-func TestTheNotesSayTheFirstTokensAreTheOnlyCopyAndHowToReplaceThem(t *testing.T) {
+// A token is shown once, to whoever minted it, and the notes say what to do about losing one.
+//
+// Only digests are stored, so a lost token is not recovered: another is minted, by the same command
+// that minted the first, and the lost one is revoked by name. An operator who learns that at the
+// moment they discover the loss has lost nothing they cannot replace — but only if the notes said
+// so. This test is what a later reader re-runs to find out whether they still do.
+func TestTheNotesSayATokenIsShownOnceAndHowToReplaceOne(t *testing.T) {
 	out := notes(t)
 	for _, want := range []string{
-		"the only copy",
-		"the next upgrade",
+		"shown once",
+		"only digests are stored",
 		"mints nothing",
-		"exec deploy/t-taisce-manage -- /taisce operator issue replacement",
-		"exec deploy/t-taisce-manage -- /taisce credential issue replacement -project default",
+		"exec deploy/t-taisce-manage -- /taisce operator issue <name>",
+		"exec deploy/t-taisce-manage -- /taisce credential issue <name> -project default",
 		"Minting does not revoke what was lost",
 		"/taisce credential revoke <id>",
 	} {
@@ -203,16 +221,47 @@ func TestTheNotesSayTheFirstTokensAreTheOnlyCopyAndHowToReplaceThem(t *testing.T
 
 // With no management surface there is no workload holding the administrative connection, so the
 // recipe above would name a deployment that does not exist. The notes have to say that instead of
-// printing a command that cannot work — a recovery instruction that fails is worse than none,
-// because it is read as evidence that recovery was tried.
+// printing a command that cannot work — an instruction that fails is worse than none, because it is
+// read as evidence that the step was tried. It matters more now that the recipe is the only way to a
+// first credential and not only to a replacement.
 func TestTheNotesDoNotOfferAnExecRecipeWhenNoWorkloadHoldsTheAdminConnection(t *testing.T) {
 	out := notes(t, "--set", "manage.enabled=false")
 	if strings.Contains(out, "exec deploy/t-taisce-manage") {
 		t.Errorf("the notes offer an exec into a management surface that is disabled:\n%s", out)
 	}
-	for _, want := range []string{"the only copy", "it is disabled", "--set manage.enabled=true"} {
+	for _, want := range []string{"No credential exists yet", "it is disabled", "--set manage.enabled=true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the notes do not say %q with the management surface off:\n%s", want, out)
+		}
+	}
+}
+
+// No container this chart runs writes a credential to its log.
+//
+// A cluster ships container output to a log store, where it is kept under retention and access
+// rules this deployment did not choose. So the Job is told to mint nothing, and the notes send the
+// operator to a command whose output reaches their terminal and no log.
+func TestNoContainerInTheChartWritesACredentialToItsLog(t *testing.T) {
+	job := render(t, "--show-only", "templates/bootstrap-job.yaml")
+	if !strings.Contains(job, `"-mint-credentials=false"`) {
+		t.Errorf("the bootstrap Job is not told to mint nothing, so it prints the first tokens to a log:\n%s", job)
+	}
+	out := notes(t)
+	for _, gone := range []string{"logs job/", "grep token", "printed once"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the notes still send an operator to a log for a token (%q):\n%s", gone, out)
+		}
+	}
+	for _, want := range []string{
+		"No credential exists yet",
+		"exec deploy/t-taisce-manage -- /taisce operator issue",
+		"exec deploy/t-taisce-manage -- /taisce credential issue",
+		"-project default",
+		"to your terminal and to no log",
+		"/taisce credential revoke <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the notes do not say %q:\n%s", want, out)
 		}
 	}
 }

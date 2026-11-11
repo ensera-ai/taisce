@@ -285,7 +285,7 @@ Every command exits 0 on success and 1 on failure. Flags take one dash or two (`
 | Command | What it does | Flags and notes |
 |---|---|---|
 | `taisce`, `taisce serve` | Run the server | The role comes from `TAISCE_ROLE` |
-| `bootstrap` | Prepare an empty database and mint the first tokens | `-project` (default `default`), `-credential` (default `bootstrap`). Needs `TAISCE_CONTROL_PASSWORD` and `TAISCE_DATA_PASSWORD`. Safe to repeat |
+| `bootstrap` | Prepare an empty database and mint the first tokens | `-project` (default `default`), `-credential` (default `bootstrap`), `-mint-credentials` (default `true`; `false` mints nothing, for where the output is a shipped log). Needs `TAISCE_CONTROL_PASSWORD` and `TAISCE_DATA_PASSWORD`. Safe to repeat |
 | `operator issue NAME` | Mint another operator token | Always straight to the database |
 | `project statements NAME shared\|separate` | Say whether the project's people share one world | Straight to the database. Refused once the project holds a fact |
 | `version`, `--version` | Print the version | `unknown` for a plain `go build`; `make build` stamps it |

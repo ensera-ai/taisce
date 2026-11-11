@@ -657,7 +657,8 @@ cannot destroy it.
   that mints nothing, in the chart's notes, and in the chart README beside the step that reads them.
 - Held by `TestBootstrapSaysHowToReplaceTheTokensItShowsOnce`,
   `TestABootstrapThatMintsNothingShowsNoTokenAndStillNamesTheWayToMintOne`,
-  `TestTheNotesSayTheFirstTokensAreTheOnlyCopyAndHowToReplaceThem` and
+  `TestTheNotesSayATokenIsShownOnceAndHowToReplaceOne` (which under D42 replaced the test of the
+  notes' first wording) and
   `TestTheNotesDoNotOfferAnExecRecipeWhenNoWorkloadHoldsTheAdminConnection`.
 
 **Rejected: write the first credentials into a Secret annotated `helm.sh/resource-policy: keep`.**
@@ -2418,3 +2419,127 @@ is `separate` unless told otherwise, which changes behaviour for a team workspac
 without anybody setting it — the listing shows the setting, and the command to change it works until
 the first fact. The setting is reachable by the CLI over the administrative connection and not yet
 by the management API or the portal.
+
+## D41 — A release states where its backups go, or states that it has none
+
+**Date.** 2026-11-11. **Issue.** [#212](https://github.com/ensera-ai/taisce/issues/212).
+
+**Why it was open.** The chart's default is three database instances with a failover path, and it
+configured no backup and said nothing about one. Replicas protect against losing a node. They do not
+protect against anything that is replicated: an erasure of the wrong subject, a migration that goes
+wrong, a dropped schema and an uninstall are each on every instance within a second. Read on a live
+three-instance deployment on 2026-11-11: no backup configuration, no schedule, no backup object. An
+operator arrived at "no backup" by not choosing, on the deployment whose own documentation asks for a
+base backup and a continuous archive.
+
+**Decided.**
+- **A release that says nothing about backups is refused at render.** It names an object store, or it
+  sets `postgresql.cnpg.backup.acknowledgedNone=true`. Both at once is refused too. This is the
+  inference allowlist's rule applied to recovery: an operator may choose to have no backup, and may
+  not get there by forgetting.
+- **Stated as an object store, the cluster archives continuously and a base backup is scheduled** —
+  daily, and once when the schedule is created, because a deployment whose only backup is tomorrow's
+  has none today.
+- **The chart renders what attaches and not what is attached to.** It names an `ObjectStore`; it does
+  not create one. The bucket, its credentials and its retention belong to whoever owns the storage,
+  and a chart that wrote the object would have to hold those credentials.
+- **Through the backup plugin, not the operator's in-tree object-store field.** The database operator
+  has deprecated the in-tree integration and marked it for removal (read 2026-11-11), so a chart
+  written against it renders a field a later operator refuses.
+- **The notes say which was chosen, every time**, and a release with none says so in capitals. That
+  sentence is what stands between "chose none" and "forgot there was none" six months on.
+- **Only for a database this chart declares.** An external database is somebody else's to back up,
+  and the chart never reads its settings.
+
+**Rejected: a backup on by default.** There is nothing to default to. A backup needs a place to go,
+and a chart cannot invent a bucket or hold its key. A default that rendered and then archived to
+nowhere would be a green install with a failing archiver, which is worse than a refusal.
+
+**Rejected: a warning in the notes and no refusal.** It is the gentle version and it is read after
+the install has succeeded, by somebody who has what they came for. The connection sum is refused at
+render for the same reason.
+
+**Rejected: the chart creating the object store from values.** It would make the first install one
+command. It would also put storage credentials in release values, where every `helm get values`
+prints them, and take ownership of an object whose retention policy is not the application's call.
+
+**Rejected: volume snapshots as the default method.** No bucket needed, so it could be on by default.
+It depends on a storage class that supports snapshots, which a single-node cluster on local storage
+does not have, and a snapshot on the same storage system as the volume shares the failures a backup
+is for.
+
+**Undo cost.** Low. Three values and two blocks of template. What cannot be taken back without
+breaking somebody is the refusal itself: a pipeline that installs with no backup setting now fails
+until it states one, which is the intended effect and a breaking change for anyone upgrading.
+
+**Impact.** Operations: the default install can no longer be unrecoverable by omission. What it does
+not cover is stated in the template and the notes — the rendering checks that a store was named, not
+that it exists, that its credentials work, or that a backup has completed; and it does nothing about
+restoring, which has to be rehearsed to be worth anything. Security, in the governance sense: a
+restore brings back everything erased since the backup, and nothing erases it again. That is not
+solved here and is [#228](https://github.com/ensera-ai/taisce/issues/228). Cost: object storage
+for the archive and the base backups, sized by the operator's own retention.
+
+## D42 — On a cluster, bootstrap mints nothing and the operator mints the first credentials
+
+**Date.** 2026-11-11. **Issue.** [#211](https://github.com/ensera-ai/taisce/issues/211). Amends D15.
+
+**Why it was open.** D15 decided that nothing stores a token, and that a bootstrap Job's output "stays
+as perishable as the Job". The first half holds. The second was wrong about where output goes. A Job's
+standard output is a container log, and a cluster that ships logs copies it to the log store as it is
+written, where it is kept under that store's retention and that store's access rules. Deleting the Job
+removes nothing from the store.
+
+Measured on a cluster running a log shipper, 2026-11-11, by counting lines that carry a token without
+reading them: two lines from each of three bootstrap pods. Two of those pods belonged to releases
+that had been uninstalled. The third was the running deployment's, so its operator credential — the
+one that can mint a credential for any project — was readable by everybody who could query logs.
+
+So the chart was doing the thing D15 rejected a kept Secret for, in a worse place: a token at rest,
+under access rules chosen by whoever runs logging rather than by whoever owns the namespace.
+
+**Decided.**
+- **Bootstrap can be told to mint nothing**, with `-mint-credentials=false`. It provisions the planes,
+  the schema and the project exactly as before and issues no credential. While nobody can reach the
+  instance it says so in its log, with the two commands, because an instance that is unreachable on
+  purpose and silent about it looks broken.
+- **The chart always tells it that.** There is no value to turn it back on: a setting whose only
+  effect is to put the operator credential in a log is not one worth offering.
+- **The first credentials are minted by the operator, through `exec` into the management surface.**
+  The exec stream goes to their terminal and is not part of any container's log — checked on the same
+  cluster: a command run that way left nothing in the container's own log. The notes print both
+  commands, and ask for the project owner's credential with `read_write`, which is what bootstrap
+  would have minted and what the default `agent` access (D26) would not give.
+- **The default outside the chart is unchanged.** `taisce bootstrap` still mints and prints once, and
+  the compose file still relies on it.
+
+**Rejected: a Secret meant to be read once.** Written by the Job, named in the notes, and bootstrap
+refusing to run again while it exists. Under the namespace's own access rules, which is better than
+the log. It is still a token at rest that waits for somebody to remember to delete it, and D15's
+argument against a kept Secret applies to it with one word changed.
+
+**Rejected: keep printing, and tell the operator to rotate.** One sentence in the notes. It leaves the
+most powerful credential in the log store of every install until somebody acts, and the notes are
+read once, at the moment the operator has what they came for.
+
+**Rejected: changing the default for every deployment, compose included.** It is the consistent
+answer. On one machine the container's output is on that machine's disk, beside the database volume
+and the environment file that holds its passwords, and whoever can read one can read the others — so
+the exposure it would remove is one that machine already has. Against that, the quickstart and every
+adapter's first step read the token from that output, in four repositories. Not worth breaking for no
+change in who can read what.
+
+**Rejected: a chart value to restore the old behaviour for clusters that do not ship logs.** Nothing
+would read it but a cluster about to start shipping logs.
+
+**Undo cost.** Low. One flag, one argument in the Job, and the notes. An install made under this rule
+has no first credentials in any log, and reverting does not put any there retroactively.
+
+**Impact.** Security: the operator credential is no longer written anywhere but the terminal of the
+person who asked for it. What it does not cover — tokens printed by releases before this one are
+still in whatever log store received them, and stay valid until revoked, so anyone running an earlier
+release should mint replacements and revoke the originals; a release with the management surface
+disabled has nowhere to exec into until it is enabled; and nothing stops a token being pasted into a
+recorded terminal, a shell history or a ticket. On one machine, `docker logs` still holds the tokens
+for as long as the bootstrap container exists. Operations: a first install has one more step, and the
+notes are now the only place that step is written.
