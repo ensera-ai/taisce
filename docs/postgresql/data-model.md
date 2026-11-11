@@ -457,13 +457,21 @@ facts, each with its own evidence.
 
 ```sql
 EXCLUDE USING gist (scope WITH =, subject_entity_id WITH =, predicate WITH =,
-                    valid WITH &&, known WITH &&)
+                    account WITH =, valid WITH &&, known WITH &&)
   WHERE (cardinality = 'one' AND subject_entity_id IS NOT NULL)
 ```
 
-A single-cardinality relation cannot hold two values for one subject when both their validity and
-knowledge intervals overlap. The object is deliberately not in the key: "lives in Dublin" and "lives
-in Amman" overlapping is exactly the state being refused.
+A single-cardinality relation cannot hold two values for one subject, in one account, when both
+their validity and knowledge intervals overlap. The object is deliberately not in the key: "lives in
+Dublin" and "lives in Amman" overlapping is exactly the state being refused.
+
+`account` is who a statement is filed under, and `project.statements` decides it. In a `shared`
+project it is the empty string for every fact: one account, so anybody's newer statement closes the
+older one. In a `separate` project it is the data subject, so a statement closes only what the same
+person said. A trigger stamps it when the fact is inserted, from the `fact_account` function that the
+supersession statements also ask, so the row and the statements that look for its slot cannot
+disagree. Two more triggers keep it true: a fact's account cannot be updated, and a project's
+`statements` cannot change once the project holds a fact.
 
 `known` is in the key so that a withdrawn claim, whose knowledge interval is closed, does not conflict
 with a later assertion that overlaps it in valid time.

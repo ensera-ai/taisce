@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -90,13 +91,20 @@ type Listed struct {
 	Surfaces  []string `json:"surfaces"`
 	Retention string   `json:"retention,omitempty"`
 	Suspended bool     `json:"suspended"`
+	// Statements is whether the project's people share one world: "shared" or "separate".
+	//
+	// Read here for the operator's command and not rendered: the management API's project listing
+	// is part of the frozen v1 contract, and a field added to it widens what other people's code
+	// depends on. It goes on the wire when the setting gets a route of its own, in one reviewed
+	// change, rather than arriving in a response as a side effect of this one.
+	Statements string `json:"-"`
 }
 
 // List reads every project from the project table, suspended ones included. A project is a row,
 // so one created and never used is listed: existence does not depend on anybody having used it.
 func (s *ProjectStore) List(ctx context.Context) ([]Listed, error) {
 	rows, err := s.pool.Query(ctx, s.schema.SQL(
-		`SELECT scope, label, surfaces, coalesce(retention::text, ''), suspended_at IS NOT NULL
+		`SELECT scope, label, surfaces, coalesce(retention::text, ''), suspended_at IS NOT NULL, statements
 		   FROM {schema}.project ORDER BY scope`))
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
@@ -105,7 +113,7 @@ func (s *ProjectStore) List(ctx context.Context) ([]Listed, error) {
 	out := []Listed{}
 	for rows.Next() {
 		var p Listed
-		if err := rows.Scan(&p.Scope, &p.Label, &p.Surfaces, &p.Retention, &p.Suspended); err != nil {
+		if err := rows.Scan(&p.Scope, &p.Label, &p.Surfaces, &p.Retention, &p.Suspended, &p.Statements); err != nil {
 			return nil, err
 		}
 		if p.Surfaces == nil {
@@ -138,6 +146,55 @@ func (s *ProjectStore) SetRetention(ctx context.Context, scope string, days *int
 		  WHERE scope = $1`), scope, interval)
 	if err != nil {
 		return fmt.Errorf("set retention for project %q: %w", scope, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNoSuchProject
+	}
+	return nil
+}
+
+// Statements is whether a project's people share one world.
+//
+// It decides whose earlier statement a new one may end. In a Shared project there is one account
+// and anybody's newer statement about a thing closes the older one — "Atlas moved to Oslo" is news
+// to the whole team. In a Separate project each data subject has their own account, and what one
+// person says about "Sarah" leaves untouched what another said about a different Sarah.
+type Statements string
+
+const (
+	StatementsShared   Statements = "shared"
+	StatementsSeparate Statements = "separate"
+)
+
+// ErrInvalidStatements refuses a value that is neither, before it reaches the database.
+var ErrInvalidStatements = errors.New("statements are shared or separate")
+
+// ErrStatementsFixed is returned when a project already holds facts.
+//
+// Every fact is filed under an account when it is written, and the account comes from this
+// setting. Switching afterwards would leave facts filed under one rule and governed by another: a
+// person's new statement would no longer close what they said before the switch. So the substrate
+// refuses it, and this is that refusal with a name.
+var ErrStatementsFixed = errors.New("the project already holds facts, and its statements setting is fixed once it does")
+
+// SetStatements says whether a project's people share one world. It can be said, and changed,
+// until the project holds its first fact.
+//
+// The refusal is the database's, not this function's: a trigger on the project row refuses the
+// change when a fact exists, so an UPDATE written by hand is refused the same way. This only gives
+// that refusal a name a caller can test for.
+func (s *ProjectStore) SetStatements(ctx context.Context, scope string, statements Statements) error {
+	if statements != StatementsShared && statements != StatementsSeparate {
+		return fmt.Errorf("%q: %w", string(statements), ErrInvalidStatements)
+	}
+	tag, err := s.pool.Exec(ctx, s.schema.SQL(
+		`UPDATE {schema}.project SET statements = $2 WHERE scope = $1`), scope, string(statements))
+	if err != nil {
+		var refused *pgconn.PgError
+		if errors.As(err, &refused) && refused.ConstraintName == "project_statements_fixed_once_facts_exist" {
+			return fmt.Errorf("project %q: %w", scope, ErrStatementsFixed)
+		}
+		return fmt.Errorf("set statements for project %q: %w", scope, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNoSuchProject

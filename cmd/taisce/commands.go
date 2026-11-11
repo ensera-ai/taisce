@@ -40,6 +40,7 @@ const usage = `taisce — memory for agents
   taisce project suspend <name>    make a project's memory unreachable, reversibly
   taisce project resume <name>     return a suspended project to service
   taisce project retention <name>  how long new turns are kept: a number of days, or indefinite
+  taisce project statements <name> whether its people share one world: shared, or separate
   taisce credential issue <name>   mint a credential (--project, --read-only); the token is shown once
   taisce credential list           list credentials (--project; without it, the operator credentials)
   taisce credential revoke <id>    stop a credential resolving
@@ -414,17 +415,17 @@ func project(ctx context.Context, args []string) error {
 		rows, err := admin.Query(ctx, schema.SQL(
 			`SELECT scope, surfaces,
 			        coalesce(retention::text, 'indefinite'),
-			        suspended_at IS NOT NULL
+			        suspended_at IS NOT NULL, statements
 			   FROM {schema}.project ORDER BY scope`))
 		if err != nil {
 			return fmt.Errorf("list projects: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var scope, retention string
+			var scope, retention, statements string
 			var surfaces []string
 			var suspended bool
-			if err := rows.Scan(&scope, &surfaces, &retention, &suspended); err != nil {
+			if err := rows.Scan(&scope, &surfaces, &retention, &suspended, &statements); err != nil {
 				return err
 			}
 			state := ""
@@ -435,9 +436,32 @@ func project(ctx context.Context, args []string) error {
 			if len(surfaces) > 0 {
 				active = strings.Join(surfaces, ",")
 			}
-			fmt.Printf("%-20s surfaces=%-24s retention=%s%s\n", scope, active, retention, state)
+			fmt.Printf("%-20s surfaces=%-24s retention=%s statements=%s%s\n", scope, active, retention, statements, state)
 		}
 		return rows.Err()
+
+	case "statements":
+		// Whether the project's people share one world. It decides whose earlier statement a new
+		// one may end, it is written onto every fact as the account the fact is filed under, and so
+		// it can be said only until the project holds its first fact.
+		if len(args) != 3 {
+			return fmt.Errorf("usage: taisce project statements <name> <shared|separate>")
+		}
+		err := pg.NewProjectStore(admin, schema).SetStatements(ctx, args[1], pg.Statements(args[2]))
+		switch {
+		case errors.Is(err, pg.ErrStatementsFixed):
+			return fmt.Errorf("project %q already holds facts, each filed under the rule it was formed with, so "+
+				"the rule cannot change underneath them. Create a project with the rule you want and "+
+				"store the content there: %w", args[1], err)
+		case errors.Is(err, pg.ErrInvalidStatements):
+			return fmt.Errorf("say shared when the people in %q talk about one world — a later statement "+
+				"about a thing replaces an earlier one, whoever made either — or separate when each "+
+				"person's statements are their own: %w", args[1], err)
+		case err != nil:
+			return fmt.Errorf("set statements for %q: %w", args[1], err)
+		}
+		fmt.Printf("project %q: statements are %s\n", args[1], args[2])
+		return nil
 
 	case "retention":
 		// How long a project keeps what it is told from now on. It rewrites no deadline already

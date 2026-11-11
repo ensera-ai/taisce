@@ -108,6 +108,8 @@ func TestErasingOnlyTheSupersessionCauseInvalidatesDerivedValidity(t *testing.T)
 	ctx := context.Background()
 	pool := testPool(t)
 	schema := tenant(t, pool, "history_causal_erasure")
+	// One person's statement ends another's only where they share a world, so this project says so.
+	peopleIn(t, ctx, pool, schema, pg.StatementsShared)
 	obs, facts := pg.NewObservationStore(pool), pg.NewFactStore(pool)
 	march := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	first := statedAt(t, ctx, obs, facts, schema, march, "Atlas is in Dublin", domain.Claim{Subject: "Atlas", Predicate: "located_in", Cardinality: domain.CardinalityOne, Object: "Dublin", Statement: "Atlas is in Dublin", ValidFrom: march})
