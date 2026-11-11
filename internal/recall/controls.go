@@ -25,6 +25,12 @@ type Controls struct {
 	// Themes forces the report surface even when the question anchored, for a caller who wants
 	// the subjects around an entity as well as the facts about it.
 	Themes bool `json:"themes,omitempty"`
+	// Explain asks for the per-stage view of this recall beside the ordinary bundle: which arm
+	// proposed each anchor, what each stage offered, and what the cuts dropped.
+	//
+	// Off by default, because it is a different cost and a larger response, and most recalls do not
+	// need it. It reports and never changes what is returned.
+	Explain bool `json:"explain,omitempty"`
 }
 
 type EffectiveControls struct {
@@ -34,6 +40,7 @@ type EffectiveControls struct {
 	Hops          int      `json:"hops"`
 	Surfaces      []string `json:"surfaces"`
 	Themes        bool     `json:"themes"`
+	Explain       bool     `json:"explain"`
 }
 
 // RecallWithControls copies the recaller's small configuration value so simultaneous callers can
@@ -78,6 +85,7 @@ func (r *Recaller) RecallWithControls(ctx context.Context, scopes []string, ques
 	}
 	effective.Surfaces = slices.Clone(surfaces)
 	effective.Themes = controls.Themes
+	effective.Explain = controls.Explain
 	// Only an explicit selection is recorded: on a deployment without semantic surfaces, a caller who
 	// named none gets the exact path and nothing about surfaces, and one who named them is told
 	// which did not run.
@@ -85,6 +93,7 @@ func (r *Recaller) RecallWithControls(ctx context.Context, scopes []string, ques
 		local.surfaces = selected
 	}
 	local.themes = controls.Themes
+	local.explain = controls.Explain
 	local.budget.Characters = effective.MaxCharacters
 	bundle, err := local.RecallForSubjectAsOf(ctx, scopes, question, effective.SourceRoles, at, effective.Hops, subject)
 	return bundle, effective, err

@@ -1991,8 +1991,6 @@ after the fact means moving data rather than changing a flag.
 token is an instance-wide key, and an instance is the only separation that holds against one. It moves
 nothing in the service, changes no data, and costs no performance.
 
----
-
 ## D35 — A formation worker reads the relation vocabulary at the top of every turn, not once at startup
 
 **Date.** 2026-11-09. **Issue.** [#164](https://github.com/ensera-ai/taisce/issues/164).
@@ -2060,8 +2058,6 @@ read of forty rows per turn, against a model call per message in the same turn; 
 claimed for it, because this project has no hardware that can produce one
 (`AGENTS.md`, "What is not settled"). It changes no data, no schema and no grant: the memory
 identity already had SELECT on these tables and reading them more often is still only reading them.
-
----
 
 ## D36 — The vocabulary key a fact references cannot move while the fact carries it
 
@@ -2135,8 +2131,6 @@ boundary — the identity that could do this is the one that can do anything an 
 moves nothing on the read or write path, changes no data, and costs no performance. What it does not
 cover is a relation no fact carries: nothing references it, so there is nothing to refuse, and
 renaming one loses no memory.
-
----
 
 ## D37 — The words around a citation are cut once, when the evidence is written
 
@@ -2215,6 +2209,64 @@ converts message content to bytes, so the cost of a fact's context stopped being
 message's length. Security is unchanged rather than improved: the guards that stood on those joins
 still stand on them, and this change's first attempt is the reason that sentence is here. Erasure's
 guarantees are exactly as they were, which is the condition it had to meet.
+
+## D38 — A recall explains itself when asked, and the explanation carries references rather than text
+
+**Date.** 2026-11-09. **Issue.** [#160](https://github.com/ensera-ai/taisce/issues/160).
+
+**Why it was open.** `controls`, `reach` and `degraded` tell a caller what applied, what was reached,
+what did not run and whether the bundle was cut. They stop short of what debugging a bad answer takes:
+which arm proposed each anchor, how many candidates each surface offered before its cut, and what the
+cut took. The last of those was unanswerable from outside — the bundle said a cut happened and not
+what it dropped — so a caller seeing four facts become two could not tell a thin memory from a tight
+allowance. Built after the ranking and anchoring work rather than beside it, this is a debugging tool;
+built first, it is how that work gets developed and measured.
+
+**Decided.** An `explain` recall control, off by default, that returns a per-stage view beside the
+ordinary bundle: every anchor with the arm that proposed it, its score where the arm scores, whether
+it survived and how many facts it brought; and per selected surface, what it offered, what was kept
+and what each cut dropped. It reports and never changes what is returned — a test compares the bundle
+with and without it, field by field, because an explanation that changed the answer would be the
+wrong instrument for finding out why the answer was what it was.
+
+`degraded`'s discipline, not a sparser one: once asked for, every selected surface is present, so a
+stage that ran and found nothing reads as zero rather than as absent. A surface the caller deselected
+is not in it at all, because it was never a stage of that recall.
+
+**The dropped candidates carry no text, and that is the correctness argument.** A fact the caller's own
+budget cut is a fact they were not given. Naming its words in the explanation would hand it back
+through the other door and make the budget a suggestion — a bound on what crosses the wire that a flag
+could walk around. So a drop is a reference, the characters it would have cost, and whatever the stage
+scored it. The reference resolves through citation resolution or record inspection, which are
+authorised in their own right.
+
+`domain.Anchor` gains a `Similarity`, which the semantic surface already computed and was formatting
+into the published `matched` string (`semantic:0.77`). The string form stays, because version 1 froze
+it; the number is for the explanation, since an anchor proposed by meaning is unexplainable without
+it.
+
+**Rejected: on by default.** It is a larger response on every call for something most callers never
+read, which is rule 9's point about the read path: anything added there is paid for by every caller.
+
+**Rejected: an operator-only surface.** The caller asking why memory answered this way is usually the
+developer who will change the question. An explanation they cannot reach is one they ask an operator
+for, which makes a lookup into a conversation.
+
+**Rejected: returning the dropped candidates in full.** It is the obvious shape and it is the one that
+breaks the budget, as above.
+
+**Rejected: a trace of the statements the read ran.** It would be a different artefact — the shape of
+the SQL rather than the shape of the retrieval — it would publish the schema as a contract, and it
+answers a question nobody debugging a bad answer has.
+
+**Undo cost.** Low. The control defaults to off, the field is absent unless asked for, and version 1's
+freeze permits adding a request field a request may omit and a response field. Removing it later is a
+new version rather than a patch, which is the ordinary cost of publishing anything.
+
+**Impact.** Operations and development, not the read path's cost: nothing is recorded unless the
+control is on, and the collector is a nil value otherwise, so a recall that did not ask allocates
+nothing. It touches security by stating a boundary rather than moving one — the budget bounds what
+crosses the wire, and the explanation is held to it.
 
 ## D39 — A lookup is charged to strangers' allowance only when the token is not one the instance issued
 
