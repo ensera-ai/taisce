@@ -842,3 +842,86 @@ func TestTheScrapeSaysWhatGenerationCallsCostByPurpose(t *testing.T) {
 		t.Fatalf("a counter for a purpose nobody declared was served, or its name was: %d %s", resp.StatusCode, body)
 	}
 }
+
+// An observer scrapes, and is a stranger everywhere else.
+//
+// The scrape used to open only for the operator credential, so whatever scraped had to hold the
+// credential that can mint a key for any project. An observer is what a monitoring system is given
+// instead, and the whole of its value is what it cannot do: every management operation, the portal
+// and every memory route are walked here, from the surface's own tables, and each must answer an
+// observer exactly as it answers somebody holding nothing.
+//
+// The tables are walked rather than a list written out, so an operation added later is covered the
+// day it is added.
+func TestAnObserverScrapesAndIsAStrangerEverywhereElse(t *testing.T) {
+	m := newManaged(t, "api_metrics_observer")
+	ctx := context.Background()
+	credentials := credential.NewStore(m.pool, string(migrate.ControlSchema))
+	observer, grant, err := credentials.IssueObserver(ctx, "monitoring")
+	if err != nil {
+		t.Fatalf("issue an observer: %v", err)
+	}
+
+	if resp, body := scrapeMetrics(t, m.manage.URL, observer); resp.StatusCode != http.StatusOK {
+		t.Fatalf("an observer was refused the scrape it exists for: %d %s", resp.StatusCode, body)
+	} else {
+		parseExposition(t, body)
+	}
+	// The operator still scrapes: an operator may read everything on this surface, and a deployment
+	// that scraped with one before observers existed must not stop being monitored by upgrading.
+	if resp, body := scrapeMetrics(t, m.manage.URL, m.operator); resp.StatusCode != http.StatusOK {
+		t.Fatalf("the operator can no longer scrape: %d %s", resp.StatusCode, body)
+	}
+
+	// "The answer a stranger gets" is checked as exactly that: the same route is asked with a
+	// well-formed token nobody issued, and the two answers must be the same and must not be a
+	// success. Comparing with a real stranger rather than with a status written here means a route
+	// this harness does not mount is not mistaken for one that opened.
+	nobody := credential.Prefix + strings.Repeat("A", 43)
+	stranger := func(what string, status int, body []byte, strangerStatus int, strangerBody []byte) {
+		t.Helper()
+		if status != strangerStatus || string(body) != string(strangerBody) || status < 400 {
+			t.Errorf("%s answered an observer %d %s and a stranger %d %s; the two must be the same refusal",
+				what, status, body, strangerStatus, strangerBody)
+		}
+	}
+	for _, o := range api.ManagementOperations() {
+		status, body := rawAgainst(t, m.manage.URL, o.Method, api.ManagementPrefix+o.Path, map[string]any{}, observer)
+		strangerStatus, strangerBody := rawAgainst(t, m.manage.URL, o.Method, api.ManagementPrefix+o.Path, map[string]any{}, nobody)
+		stranger("management operation "+o.Name, status, body, strangerStatus, strangerBody)
+		if status != http.StatusUnauthorized {
+			t.Errorf("management operation %s answered an observer %d; every management operation is mounted here and must refuse it as unauthenticated", o.Name, status)
+		}
+	}
+	if len(api.ManagementOperations()) < 10 {
+		t.Fatalf("only %d management operations were walked; the table this test reads has gone missing", len(api.ManagementOperations()))
+	}
+	for _, o := range api.Operations() {
+		var body map[string]any
+		if o.Method != http.MethodGet {
+			body = map[string]any{}
+		}
+		status, raw := m.raw(t, o.Method, "/"+api.Version+o.Path, body, observer)
+		strangerStatus, strangerBody := m.raw(t, o.Method, "/"+api.Version+o.Path, body, nobody)
+		stranger("memory operation "+o.Name, status, raw, strangerStatus, strangerBody)
+	}
+
+	// Nothing an observer was refused is attributed to it as an act: the ledger holds its refusals
+	// as it holds a stranger's, and no row names it as having done anything.
+	var acted int
+	if err := m.pool.QueryRow(ctx, m.schema.SQL(
+		`SELECT count(*) FROM {schema}.audit_entry WHERE principal = $1 AND outcome = 'allowed'`), grant.CredentialID).Scan(&acted); err != nil {
+		t.Fatal(err)
+	}
+	if acted != 0 {
+		t.Fatalf("the ledger records %d allowed operations by an observer", acted)
+	}
+
+	// Revoked, it is a stranger at the scrape too, on the next request.
+	if err := credentials.Revoke(ctx, grant.CredentialID); err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := scrapeMetrics(t, m.manage.URL, observer); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a revoked observer still scrapes: %d", resp.StatusCode)
+	}
+}

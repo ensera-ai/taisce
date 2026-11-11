@@ -385,3 +385,58 @@ func TestKnowingATokenNeitherAcceptsItNorDelaysItsRevocation(t *testing.T) {
 		t.Fatalf("a credential minted after the set was read does not resolve: %v", err)
 	}
 }
+
+// An observer names no project and resolves at the metrics door only.
+//
+// The kind is what bounds it, and each door asks for its own: the memory door and the operator door
+// give an observer the answer a stranger gets, and the metrics door gives that answer to a project
+// credential. The registry's own constraint holds the other half — an observer that named a project
+// would be a key to that project's numbers that no door was written for.
+func TestAnObserverResolvesAtTheMetricsDoorAndNoOther(t *testing.T) {
+	ctx := context.Background()
+	s := store(t)
+	observer, grant, err := s.IssueObserver(ctx, "monitoring")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if grant.Project != "" || grant.Access != credential.ReadOnly {
+		t.Fatalf("an observer was issued naming project %q with %s access", grant.Project, grant.Access)
+	}
+	if got, err := s.ResolveScraper(ctx, observer); err != nil || got.CredentialID != grant.CredentialID {
+		t.Fatalf("an observer does not resolve at the metrics door: %v", err)
+	}
+	if _, err := s.ResolveOperator(ctx, observer); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("an observer resolved at the operator door: %v", err)
+	}
+	if _, err := s.Resolve(ctx, observer); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("an observer resolved at the memory door: %v", err)
+	}
+	operator, _, err := s.IssueOperator(ctx, "metrics-door-operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResolveScraper(ctx, operator); err != nil {
+		t.Fatalf("an operator does not resolve at the metrics door: %v", err)
+	}
+	project, _, err := s.Issue(ctx, "metrics-door-project", "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResolveScraper(ctx, project); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("a project credential resolved at the metrics door: %v", err)
+	}
+	if _, _, err := s.IssueObserver(ctx, "  "); err == nil {
+		t.Fatal("an observer with no name was issued")
+	}
+
+	// Written around the store: an observer that names a project, and a kind nobody declared.
+	pool := registry(t)
+	for what, row := range map[string]string{
+		"an observer naming a project": `('00000000-0000-4000-8000-0000000000a1','\x01','tsk_aaaaaaaa','x','alpha','read_only','observer')`,
+		"a kind nobody declared":       `('00000000-0000-4000-8000-0000000000a2','\x02','tsk_bbbbbbbb','x','','read_only','auditor')`,
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO control.credential (credential_id, token_digest, token_prefix, name, project, access, kind) VALUES `+row); err == nil {
+			t.Errorf("the registry stored %s", what)
+		}
+	}
+}
