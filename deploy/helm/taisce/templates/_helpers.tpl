@@ -140,16 +140,47 @@ effective_cache_size: {{ printf "%dMB" (div (mul $mi 11) 16) | quote }}
 maintenance_work_mem: {{ printf "%dMB" (div $mi 16) | quote }}
 max_wal_size: {{ printf "%dMB" (div $mi 2) | quote }}
 {{- end -}}
+{{/* A whole number of MiB, written the way the API server stores it.
+
+     A quantity has many spellings and Kubernetes keeps one: the largest binary suffix that leaves a
+     whole number, so 1024Mi is stored as 1Gi. Anything that compares a declared quantity with a
+     stored one by spelling sees two values where there is one amount, and the database operator
+     compares pod volumes exactly that way — a spelling that differs is a pod it replaces, and the
+     replacement is stored under the same spelling, so it never converges.
+
+     Mi, Gi and Ti are handled. A volume of 1024Ti or more would be respelled in Pi and is not; no
+     memory limit this chart can be given reaches it. */}}
+{{- define "taisce.storedQuantity" -}}
+{{- $mi := . | int -}}
+{{- if eq (mod $mi 1048576) 0 -}}
+{{- printf "%dTi" (div $mi 1048576) -}}
+{{- else if eq (mod $mi 1024) 0 -}}
+{{- printf "%dGi" (div $mi 1024) -}}
+{{- else -}}
+{{- printf "%dMi" $mi -}}
+{{- end -}}
+{{- end -}}
 {{/* The shared-memory volume, derived unless an operator states it.
 
      An eighth of the limit, which is twice maintenance_work_mem at every limit: parallel index
      builds put their work there, so a volume smaller than that bound is one an index build fails in.
-     Keeping it a fraction of the same number keeps that relation true without anyone maintaining it. */}}
+     Keeping it a fraction of the same number keeps that relation true without anyone maintaining it.
+
+     A stated size is read and respelled rather than passed through, and one that cannot be read is
+     refused. Passing it through was the alternative, and it leaves the operator one keystroke from
+     the loop described above: 1024Mi, 1G and 1.5Gi are all valid quantities and none is stored as
+     written. Mi and Gi in whole numbers is what the memory limit beside it is written in, so the
+     rule is one an operator has already met. */}}
 {{- define "taisce.sharedMemory" -}}
-{{- if .Values.postgresql.cnpg.sharedMemory -}}
-{{- .Values.postgresql.cnpg.sharedMemory -}}
+{{- $stated := .Values.postgresql.cnpg.sharedMemory | toString -}}
+{{- if not .Values.postgresql.cnpg.sharedMemory -}}
+{{- include "taisce.storedQuantity" (div (include "taisce.dbMemoryMi" . | int) 8) -}}
+{{- else if regexMatch "^[1-9][0-9]*Gi$" $stated -}}
+{{- include "taisce.storedQuantity" (mul (trimSuffix "Gi" $stated | int) 1024) -}}
+{{- else if regexMatch "^[1-9][0-9]*Mi$" $stated -}}
+{{- include "taisce.storedQuantity" (trimSuffix "Mi" $stated | int) -}}
 {{- else -}}
-{{- printf "%dMi" (div (include "taisce.dbMemoryMi" . | int) 8) -}}
+{{- fail (printf "postgresql.cnpg.sharedMemory is %q: write it as a whole number of Mi or Gi. The database operator compares this size with the one the API server stored, by spelling, and a quantity stored under a different spelling than it was written in makes it replace a replica without end." $stated) -}}
 {{- end -}}
 {{- end -}}
 {{- define "taisce.securityContext" -}}
