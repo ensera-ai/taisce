@@ -458,12 +458,18 @@ func (p *Portal) login(w http.ResponseWriter, r *http.Request) {
 		p.render(w, http.StatusBadRequest, portalPage{Title: "Sign in", Login: true, Refused: true})
 		return
 	}
-	releaseAuth, ok := p.m.admission.authenticate(time.Now())
+	token := strings.TrimSpace(r.PostFormValue("token"))
+	if !credential.WellFormed(token) {
+		p.m.recordRefusedAuth(r)
+		p.render(w, http.StatusUnauthorized, portalPage{Title: "Sign in", Login: true, Refused: true})
+		return
+	}
+	known, _ := p.m.credentials.Known(r.Context(), token, credential.KindOperator)
+	releaseAuth, ok := p.m.admission.authenticate(time.Now(), known)
 	if !ok {
 		p.render(w, http.StatusTooManyRequests, portalPage{Title: "Sign in", Login: true, Refused: true})
 		return
 	}
-	token := strings.TrimSpace(r.PostFormValue("token"))
 	_, err := p.m.credentials.ResolveOperator(r.Context(), token)
 	releaseAuth()
 	if err != nil {

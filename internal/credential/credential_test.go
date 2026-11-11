@@ -320,3 +320,68 @@ func TestACredentialOpensOneDoorByItsKindAndTheRegistryHoldsTheKind(t *testing.T
 		t.Fatal("a revoked operator credential is a stranger")
 	}
 }
+
+// Knowing a token is not the same as accepting it, in either direction.
+//
+// `Known` decides which allowance pays for a lookup, and is allowed to be a few seconds stale. What
+// must not be stale is the lookup itself: a revocation applies to the very next request, and a
+// credential minted a moment ago works at once. This holds both, and holds the two doors apart — an
+// operator's token is not a known caller at the memory door, or one holder could spend the
+// allowance meant for the other's.
+func TestKnowingATokenNeitherAcceptsItNorDelaysItsRevocation(t *testing.T) {
+	ctx := context.Background()
+	issuer := store(t)
+
+	projectToken, projectGrant, err := issuer.Issue(ctx, "known-project", "alpha")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	operatorToken, _, err := issuer.IssueOperator(ctx, "known-operator")
+	if err != nil {
+		t.Fatalf("issue operator: %v", err)
+	}
+
+	// A store that has not read the registry yet reads it on the first question.
+	s := store(t)
+	key, known := s.Known(ctx, projectToken, credential.KindProject)
+	if !known || len(key) != 64 || strings.Contains(key, projectToken) {
+		t.Fatalf("an issued project credential is not known at the memory door, or its key is not a digest: known=%v key length=%d", known, len(key))
+	}
+	if _, known := s.Known(ctx, projectToken, credential.KindOperator); known {
+		t.Fatal("a project credential is a known caller at the management door")
+	}
+	if _, known := s.Known(ctx, operatorToken, credential.KindProject); known {
+		t.Fatal("an operator credential is a known caller at the memory door")
+	}
+	if _, known := s.Known(ctx, operatorToken, credential.KindOperator); !known {
+		t.Fatal("an issued operator credential is not known at the management door")
+	}
+	for _, stranger := range []string{"", "not-a-token", "Bearer x", credential.Prefix + strings.Repeat("A", 43)} {
+		if _, known := s.Known(ctx, stranger, credential.KindProject); known {
+			t.Fatalf("%q is known, and this instance never issued it", stranger)
+		}
+	}
+
+	// Revoked: still in the set for a moment, and refused by the lookup at once.
+	if err := issuer.Revoke(ctx, projectGrant.CredentialID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, known := s.Known(ctx, projectToken, credential.KindProject); !known {
+		t.Fatal("the set was re-read inside its interval, so this test no longer shows that staleness is harmless")
+	}
+	if _, err := s.Resolve(ctx, projectToken); !errors.Is(err, credential.ErrUnknown) {
+		t.Fatalf("a revoked credential that is still in the set resolved: %v", err)
+	}
+
+	// Minted after the set was read: not in it yet, and it works.
+	lateToken, _, err := issuer.Issue(ctx, "known-late", "alpha")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if _, known := s.Known(ctx, lateToken, credential.KindProject); known {
+		t.Fatal("the set was re-read inside its interval, so this test no longer shows a new credential working before it is known")
+	}
+	if _, err := s.Resolve(ctx, lateToken); err != nil {
+		t.Fatalf("a credential minted after the set was read does not resolve: %v", err)
+	}
+}
