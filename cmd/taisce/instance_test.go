@@ -281,6 +281,8 @@ func TestAProcessWaitingForAMigrationSaysSoOnceAndOnceWhenItEnds(t *testing.T) {
 	}
 	if n := strings.Count(logged.String(), "has reached the version"); n != 1 {
 		t.Fatalf("the end of the wait was logged %d times:\n%s", n, logged.String())
+	}
+}
 
 // A generation call is counted under its purpose, and one the provider said nothing about is counted
 // as unknown rather than as free.
