@@ -34,8 +34,8 @@ assumes them.
 **The integrity argument is the product, and it holds everywhere except one place that matters.**
 Evidence to the byte, the closed vocabulary, the counted erasure and the three database identities
 are enforced where a statement cannot get around them, and reading the code did not find a way
-around them. The exception is the first finding: a true fact can be ended by somebody who never saw
-it, and nothing records that it happened.
+around them. The exception is the first finding: in a project whose people do not share a world, a
+true fact can be ended by somebody who never saw it, and nothing tells either of them.
 
 **It is not yet operable by somebody who did not build it.** The four things an operator most needs
 are the four that are missing: a backup, an upgrade that says what it promises, a duration of
@@ -66,13 +66,24 @@ excludes on `(scope, subject_entity_id, predicate, valid, known)` (`0010`, `0032
 who spoke. The person themself is separate; everyone and everything they mention is shared.
 
 **Why it is first.** It is silent — no refusal to count, no receipt, and the citation on the fact
-that did the closing is genuine. It is not repairable later, because a closed interval does not
-record whether the same person closed it. And it lands in the commonest deployment there is: one
-project for one application with many users.
+that did the closing is genuine. And it lands in the commonest deployment there is: one project for
+one application with many users.
 
-**Direction.** Supersession is a property of the speaker: a statement closes an earlier one only when
-the same data subject made both. Two people then hold two current values about one name, which is
-what was said.
+**Corrected after a fix was attempted.** Two things said here at first were wrong. The closure *can*
+be found afterwards: a closed fact records what closed it (`superseded_by`, migration `0029`), so
+facts ended by a different data subject can be counted. And it is not an oversight: two existing
+tests state *"Atlas is in Dublin"* as one data subject and *"Atlas moved to Oslo"* as another, and
+require the second to end the first. That is a project as one shared world, where anybody's newer
+statement updates a thing — the right answer for a team's workspace.
+
+**So it is a decision, not a defect.** A project that is one shared world wants the later statement
+to win whoever made it. A project that holds many people's separate worlds wants each person's
+statements to end only their own. The store cannot tell which it is in, and today it assumes the
+first, silently.
+
+**Direction.** A project states which it is, each fact carries the account it belongs to, and the
+exclusion constraint compares that — so both modes keep the constraint as the backstop. The options
+and the parked attempt are on #210.
 
 ### 2. A caller cannot ask to be answered after its own write — part of #216
 
@@ -325,7 +336,8 @@ and the evidence model cannot show it.
 
 **Now — each one loses or exposes something for every day it waits.**
 
-1. #210 — stop one person's statement ending another's. Not repairable afterwards.
+1. #210 — decide whether a project is one shared world or many separate ones. Until it is decided,
+   one person's statement can end another's without a trace.
 2. #211 — stop printing credentials to a log; replace the ones already there.
 3. #212 — a backup, before there is anything that cannot be re-ingested.
 4. #214 — the two-line change that stops a stranger emptying the bucket.
