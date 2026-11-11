@@ -6,6 +6,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/url"
@@ -14,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -234,5 +237,48 @@ func TestABootstrapToldNotToMintWritesNoTokenAndLeavesNoCredential(t *testing.T)
 	}
 	if strings.Contains(logged.String(), "no credential exists") && strings.Contains(logged.String(), "operator issue") {
 		t.Errorf("a bootstrap on an instance with an operator still says none exists:\n%s", logged.String())
+	}
+}
+
+// A process waiting for a migration says so once, and says once more when the wait is over.
+//
+// The readiness probe answers ready or not and nothing else, so the log is the only place an
+// operator can learn why a new pod is not becoming ready. A line per probe would bury the one that
+// matters; none at all is what there was. Other reasons for not being ready are not this line's to
+// report, and pass through untouched.
+func TestAProcessWaitingForAMigrationSaysSoOnceAndOnceWhenItEnds(t *testing.T) {
+	var logged bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logged, nil))
+	w := &schemaWait{}
+	behind := fmt.Errorf("%w: it is at version 75 and this binary was built for version 76; waiting for the migration", pg.ErrSchemaBehind)
+	other := errors.New("the database is unreachable")
+
+	for i := 0; i < 5; i++ {
+		if err := w.note(log, behind); !errors.Is(err, pg.ErrSchemaBehind) {
+			t.Fatalf("the reason for not being ready was not passed on: %v", err)
+		}
+	}
+	if n := strings.Count(logged.String(), "not ready"); n != 1 {
+		t.Fatalf("five probes during one wait logged the reason %d times:\n%s", n, logged.String())
+	}
+	for _, want := range []string{"version 75", "version 76", "becomes ready on its own"} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("the line does not say %q:\n%s", want, logged.String())
+		}
+	}
+	// A different failure in the middle of the wait is returned and is not mistaken for its end...
+	if err := w.note(log, other); err != other {
+		t.Fatalf("another reason was not passed on unchanged: %v", err)
+	}
+	logged.Reset()
+	// ...so the wait is announced again if it is still going on, and its end is said once.
+	_ = w.note(log, behind)
+	for i := 0; i < 3; i++ {
+		if err := w.note(log, nil); err != nil {
+			t.Fatalf("a ready process was reported as not ready: %v", err)
+		}
+	}
+	if n := strings.Count(logged.String(), "has reached the version"); n != 1 {
+		t.Fatalf("the end of the wait was logged %d times:\n%s", n, logged.String())
 	}
 }

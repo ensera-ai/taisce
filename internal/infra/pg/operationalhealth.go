@@ -72,6 +72,49 @@ func RecordFormationStandDowns(ctx context.Context, db HealthExecutor, schema Sc
 	return nil
 }
 
+// ErrSchemaBehind is returned when the database has not yet been migrated to the version a binary
+// was built for.
+var ErrSchemaBehind = errors.New("the schema is older than this binary was built for")
+
+// CheckSchemaBuiltFor refuses a schema older than the version this binary was built to run against.
+//
+// # What it is for
+//
+// An upgrade starts new processes and a migration at the same moment and nothing orders them. A
+// process that reaches the database first used to report ready, because the checks beside this one
+// ask whether tables exist and they do, and then serve against a schema missing whatever its own
+// release added. With this in the readiness check it reports not ready instead, takes no traffic,
+// and becomes ready on its own when the migration commits — the check is asked again on every
+// probe, so nothing has to restart.
+//
+// # Why it is one-sided
+//
+// Older than the binary is unambiguous: the binary cannot work without what it was built for. Newer
+// than the binary is a process from the previous release still serving after the migration, and
+// whether that is safe depends on what a migration may change between releases, which is a promise
+// this project has not made. Refusing it here would turn every upgrade into a moment with nothing
+// ready at all, on an assumption nobody decided. So this refuses one direction and is silent on the
+// other, and says so here rather than leaving a reader to assume it covers both.
+//
+// A namespace with no record of migrations at all is behind by everything.
+func CheckSchemaBuiltFor(ctx context.Context, pool *pgxpool.Pool, schema Schema, builtFor int) error {
+	var applied int
+	if err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT coalesce(max(version), 0) FROM {schema}.schema_migration`)).Scan(&applied); err != nil {
+		var missing *pgconn.PgError
+		if errors.As(err, &missing) && (missing.Code == "42P01" || missing.Code == "3F000") {
+			return fmt.Errorf("%w: nothing has been migrated yet and this binary was built for version %d; "+
+				"waiting for the migration", ErrSchemaBehind, builtFor)
+		}
+		return fmt.Errorf("read the schema version: %w", err)
+	}
+	if applied < builtFor {
+		return fmt.Errorf("%w: it is at version %d and this binary was built for version %d; "+
+			"waiting for the migration", ErrSchemaBehind, applied, builtFor)
+	}
+	return nil
+}
+
 // CheckServingHealth performs bounded-by-caller checks using the actual serving identities.
 // The registry can be nil for a worker, which does not authenticate client requests.
 func CheckServingHealth(ctx context.Context, memory, registry *pgxpool.Pool, schema Schema, requireFormation bool) error {

@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -316,7 +317,20 @@ func run(ctx context.Context, log *slog.Logger) error {
 		// runs, and the boundary in front of it is the deployment's job rather than a default here.
 		addr = ":8080"
 	}
+	// The schema version this binary was built to run against. Asked for once: it is a property of
+	// the binary, read from the migrations compiled into it.
+	builtFor, err := migrate.BuiltFor()
+	if err != nil {
+		return fmt.Errorf("read the schema version this binary was built for: %w", err)
+	}
+	waiting := &schemaWait{}
 	ready := api.NewReadiness(func(checkCtx context.Context) error {
+		// First, and for every role. A process started by an upgrade can reach the database before
+		// the migration it needs has committed; until then it takes no traffic and forms nothing,
+		// and it becomes ready by itself when the migration lands.
+		if err := waiting.note(log, pg.CheckSchemaBuiltFor(checkCtx, memory, schema, builtFor)); err != nil {
+			return err
+		}
 		if role == roleWorker {
 			if !processHealth.current() {
 				return fmt.Errorf("local formation is not responsive")
@@ -466,6 +480,33 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 		}
 	}()
 	return nil
+}
+
+// schemaWait says, once, that a process is waiting for a migration, and once more when it stops.
+//
+// The readiness probe answers ready or not and nothing else, on purpose: it is unauthenticated, and
+// a probe that reported versions would be a reconnaissance endpoint. So the reason has to go to the
+// log, which is where the operator watching a pod not become ready is looking. Once per change
+// rather than once per probe, because a probe arrives every few seconds and a line each would bury
+// the one that says the wait is over.
+type schemaWait struct {
+	mu      sync.Mutex
+	waiting bool
+}
+
+func (w *schemaWait) note(log *slog.Logger, err error) error {
+	behind := errors.Is(err, pg.ErrSchemaBehind)
+	w.mu.Lock()
+	changed := behind != w.waiting
+	w.waiting = behind
+	w.mu.Unlock()
+	switch {
+	case changed && behind:
+		log.Warn("not ready: "+err.Error(), "next", "this process becomes ready on its own when the migration commits")
+	case changed:
+		log.Info("the schema has reached the version this binary was built for")
+	}
+	return err
 }
 
 // configuredTurnBudget reads how long one formation attempt may take, or keeps the default.
