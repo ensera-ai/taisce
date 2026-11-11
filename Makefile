@@ -18,7 +18,7 @@ PERF_COMPOSE = TAISCE_PORT=$(PERF_PORT) TAISCE_PERF_POSTGRES_PORT=$(PERF_POSTGRE
 	TAISCE_INFERENCE_API_KEY=perf-forms-nothing TAISCE_INFERENCE_ALLOWLIST=forms-nothing.invalid \
 	docker compose --project-name $(PERF_PROJECT) -f compose.yaml -f compose.perf.yaml
 
-.PHONY: substrate db-up db-down test vuln gate gate-image licence signoff version test-inference golden build contract freeze-contract \
+.PHONY: substrate db-up db-down test vuln gate gate-image licence signoff version test-inference golden build contract freeze-contract decisions \
 	perf-config perf-up perf-down perf-reset-stats perf-workload perf-stats site site-serve
 
 substrate:
@@ -134,6 +134,13 @@ licence:
 # disagree, so running this is a deliberate step and never an automatic one.
 contract:
 	go run scripts/contract.go
+
+# Every decision, by number, with what was decided. The register is a file per decision and holds no
+# index on purpose: a list with a line per decision would be one file every pull request that records
+# a decision has to change, and two of them could not then both merge without being reconciled by
+# hand. So the index is read from the files' own headings, here, and is never out of date.
+decisions:
+	@ls docs/decisions | sed -n 's/^D\([0-9]*\)\.md$$/\1/p' | sort -n | while read n; do sed -n 's/^# //p' "docs/decisions/D$$n.md" | head -1; done
 
 # Freezing is a decision, not a regeneration: it writes the snapshot every later build of the
 # version is held to. Run it when a version is declared frozen, and read the diff.

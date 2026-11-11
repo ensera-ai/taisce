@@ -337,6 +337,53 @@ func TestADocumentKeptInTheRepositoryIsNotPublishedAndALinkToItGoesToItsSource(t
 	}
 }
 
+// A kept directory keeps every document in it, and one that holds none is refused.
+//
+// The decisions are a directory of one file each. Naming each file in the kept list would put a line
+// per decision in a file every pull request that records one has to touch, which is the conflict the
+// directory was made to remove. So the list may name a directory, and the name still has to be true:
+// a kept directory with nothing in it is how a moved record goes unnoticed, exactly as a kept file
+// that does not exist is.
+func TestAKeptDirectoryKeepsEveryDocumentInItAndAnEmptyOneIsRefused(t *testing.T) {
+	summary := "- [A](a.md)\n" + keptMarker + "\n\n     Records for contributors.\n\n- records/\n-->\n" + summaryMarker + "\n"
+	root := fixture(t, map[string]string{"SUMMARY.md": summary, "a.md": "# A\n\n[the first](records/R1.md)\n",
+		"records/R1.md": "# R1\n", "records/R2.md": "# R2\n"})
+
+	docs, staged, err := stageDocuments(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := publishedDocuments(staged, docs)
+	if err != nil {
+		t.Fatalf("a kept directory was refused: %v", err)
+	}
+	if len(published) != 1 || published[0].Stage != "a.md" {
+		t.Fatalf("published %+v, want only a.md: every document under a kept directory stays in the repository", published)
+	}
+	if err := checkListed(summary, published); err != nil {
+		t.Errorf("a document under a kept directory was demanded in the navigation: %v", err)
+	}
+	if err := resolveLinks(published, Options{Root: root, Repo: "o/r", Ref: "m"}, nil); err != nil {
+		t.Fatalf("a link into a kept directory was refused: %v", err)
+	}
+	if !strings.Contains(published[0].Body, "[the first](https://github.com/o/r/blob/m/docs/records/R1.md)") {
+		t.Errorf("a link into a kept directory does not go to its source:\n%s", published[0].Body)
+	}
+
+	// Named and empty, and named while one of its documents is also in the navigation.
+	wrong := "- [A](a.md)\n- [R1](records/R1.md)\n" + keptMarker + "\n- records/\n- gone/\n-->\n" + summaryMarker + "\n"
+	root = fixture(t, map[string]string{"SUMMARY.md": wrong, "a.md": "# A\n", "records/R1.md": "# R1\n"})
+	err = buildFixture(t, root)
+	if err == nil {
+		t.Fatal("a kept directory holding nothing, and a document both listed and under a kept directory, were accepted")
+	}
+	for _, want := range []string{"docs/records/R1.md is both listed and kept", "docs/gone/ is kept but holds no document"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%v", want, err)
+		}
+	}
+}
+
 func TestAKeptListThatContradictsTheNavigationOrNamesNothingIsRefused(t *testing.T) {
 	contradicting := "- [A](a.md)\n- [B](b.md)\n" + keptMarker + "\n- b.md\n- gone.md\n-->\n" + summaryMarker + "\n"
 	root := fixture(t, map[string]string{"SUMMARY.md": contradicting, "a.md": "# A\n", "b.md": "# B\n"})

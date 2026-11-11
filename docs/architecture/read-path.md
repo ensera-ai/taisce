@@ -539,7 +539,7 @@ segment, every eight level-1 segments a level-2 segment, up to level six. A cont
 Each turn's size — what the budget spends on it — is read off the observation, where it was counted
 when the turn was written. Summing it from the messages meant joining a table that carries neither
 scope nor subject, so the planner read every message in the project to size the turns of one person
-in it ([D22](../01-decisions.md)).
+in it ([D22](../decisions/D22.md)).
 
 A segment is chosen by the tie recorded when it was written, not by its offset range. The range is
 contiguous because erasure must reach through it, and it can therefore close across a turn the pass
