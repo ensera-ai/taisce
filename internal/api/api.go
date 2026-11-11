@@ -48,6 +48,7 @@ const Version = "v1"
 
 // Server is the HTTP surface over one instance.
 type Server struct {
+	measurements     *pg.Measurements
 	credentials      *credential.Store
 	audit            *pg.AuditStore
 	exporter         *pg.Exporter
@@ -74,6 +75,9 @@ type Server struct {
 
 // Stores names the memory dependencies explicitly so adding a capability cannot shift positional wiring.
 type Stores struct {
+	// Measurements is where this process counts how long its requests take and how many it turned
+	// away. Optional: a server wired without one serves exactly as before and counts nothing.
+	Measurements *pg.Measurements
 	Audit        *pg.AuditStore
 	Exporter     *pg.Exporter
 	Projects     *pg.ProjectStore
@@ -120,7 +124,7 @@ func NewServer(credentials *credential.Store, stores Stores, schema pg.Schema, l
 		citations: stores.Citations, records: stores.Records, feedback: stores.Feedback, artifacts: stores.Artifacts, subjects: stores.Subjects, contexts: stores.Contexts,
 		passages: stores.Passages, entityCandidates: stores.EntityCandidates, reportCandidates: stores.ReportCandidates,
 		notifications: stores.Notifications, notifier: stores.Notifier,
-		schema: schema, log: log, admission: gate,
+		schema: schema, log: log, admission: gate, measurements: stores.Measurements,
 	}
 }
 
@@ -324,7 +328,7 @@ func (s *Server) Handler(readiness ...http.Handler) http.Handler {
 	registerHealth(mux, ready)
 
 	for _, o := range operations {
-		mux.Handle(o.Method+" /"+Version+o.Path, s.authenticated(s.authorized(o.Name, o.handler(s))))
+		mux.Handle(o.Method+" /"+Version+o.Path, s.timed(o.Name, s.authenticated(s.authorized(o.Name, o.handler(s)))))
 	}
 
 	// The MCP door loops back into the operations above, so it is mounted after them and is not
@@ -340,6 +344,40 @@ type grantedHandler func(http.ResponseWriter, *http.Request, credential.Grant)
 //
 // Absent, malformed, unknown and revoked are one answer. Distinguishing them tells a stranger
 // whether a token they hold is real, which is the single fact they cannot obtain any other way.
+// timed counts how long a request to one operation took, whatever became of it.
+//
+// Outermost, on purpose. It starts before the door and stops after the handler has returned, so
+// the number includes the credential lookup, the wait for a work slot's refusal, the work, the
+// ledger row and the response being handed over — which is what a caller waited for. A timer
+// started inside the handler would leave out the parts a caller cannot avoid and an operator most
+// needs to see, because they are the parts shared by every request.
+//
+// The name is the operation's from the surface's own table, a closed set declared in this package.
+// It is never taken from the request, so nothing a caller sends can become a series.
+//
+// Refused requests are timed with the rest. A flood of 401s is fast, and seeing that the fast
+// answers were refusals is what the ledger's allowed and refused counts are for.
+//
+// What it does not measure: time spent before the process accepted the connection, and time the
+// caller spent reading a response already written to the socket.
+func (s *Server) timed(operation string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		next.ServeHTTP(w, r)
+		s.measurements.Observe(pg.OperationDuration, operation, time.Since(started))
+	})
+}
+
+// refuseForCapacity answers a request this process has no room for, and counts it.
+//
+// Counted because nothing else records it. A refusal for capacity writes no ledger row — a flood
+// would otherwise be able to make the instance write one per request — so a process shedding a
+// third of its load was indistinguishable, from outside, from one with nothing to do.
+func (s *Server) refuseForCapacity(w http.ResponseWriter) {
+	s.measurements.Add(pg.CounterAdmissionRefused, 1)
+	writeAdmissionRefusal(w)
+}
+
 func (s *Server) authenticated(next grantedHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCtx, cancelRequest := context.WithTimeout(r.Context(), 30*time.Second)
@@ -355,7 +393,7 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 		}
 		releaseWork, ok := s.admission.acquire(grant.Project, grant.CredentialID)
 		if !ok {
-			writeAdmissionRefusal(w)
+			s.refuseForCapacity(w)
 			return
 		}
 		defer releaseWork()
@@ -386,7 +424,7 @@ func (s *Server) resolveGrant(w http.ResponseWriter, r *http.Request) (credentia
 	releaseAuth, ok := s.admission.authenticate(time.Now(), known)
 	if !ok {
 		cancelAuth()
-		writeAdmissionRefusal(w)
+		s.refuseForCapacity(w)
 		return credential.Grant{}, false
 	}
 	defer releaseAuth()
