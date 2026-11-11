@@ -107,7 +107,8 @@ numbers: `stored` says a turn arrived, and `formed` says it is in memory with no
 it.
 
 The `Driver` in [driver.go](../../internal/formation/driver.go) finds projects with waiting work and
-drains each one under a per-project advisory lock, oldest turn first. A second worker finds the
+forms a bounded slice of each under a per-project advisory lock, oldest turn first, so that one busy
+project does not hold a worker while others wait. A second worker finds the
 project busy and moves on, so several workers are safe without any other coordination.
 
 For each message, the extractor in [`internal/extract`](../../internal/extract/) decides which of the

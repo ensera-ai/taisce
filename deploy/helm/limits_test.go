@@ -341,3 +341,19 @@ func TestTheSharedMemoryVolumeIsSizedInTheFormTheAPIServerStores(t *testing.T) {
 		}
 	}
 }
+
+// A ceiling on what a model may write back reaches the processes only when the operator states one.
+//
+// The binary refuses a ceiling it cannot read, so the chart must not hand it an empty one: every
+// install that did not set the value would fail to start for a setting nobody chose.
+func TestAModelCeilingIsPassedOnlyWhenTheOperatorStatesOne(t *testing.T) {
+	if out := render(t); strings.Contains(out, "TAISCE_INFERENCE_MAX_OUTPUT_TOKENS") {
+		t.Error("with no ceiling stated the chart passes the variable anyway, and an empty one stops the process")
+	}
+	out := render(t, "--set", "inference.maxOutputTokens=8192")
+	if !regexp.MustCompile(`name: TAISCE_INFERENCE_MAX_OUTPUT_TOKENS\s+value: "8192"`).MatchString(out) {
+		// The value is quoted because an environment variable is a string; a bare number is refused
+		// by the API server.
+		t.Errorf("a stated ceiling does not reach the processes as a quoted value:\n%s", out)
+	}
+}

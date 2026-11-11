@@ -22,6 +22,7 @@ func hermetic(t *testing.T) {
 	for _, name := range []string{
 		inference.EnvEndpoint, inference.EnvAPIKey, inference.EnvModel, inference.EnvAllowlist,
 		inference.EnvEmbeddingEndpoint, inference.EnvEmbeddingAPIKey, inference.EnvEmbeddingModel,
+		inference.EnvMaxOutputTokens,
 	} {
 		t.Setenv(name, "")
 	}

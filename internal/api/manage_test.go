@@ -52,6 +52,9 @@ func newManaged(t *testing.T, tenant string) *managed {
 		Health: func(ctx context.Context) (pg.OperationalHealth, error) {
 			return pg.ReadOperationalHealth(ctx, h.pool, h.schema)
 		},
+		Measured: func(ctx context.Context) (pg.Measured, error) {
+			return pg.ReadMeasurements(ctx, h.pool, h.schema)
+		},
 	}, h.schema, nil)
 	m := &managed{harness: h, manage: httptest.NewServer(server.Handler()), manageServer: server, operator: operator}
 	t.Cleanup(m.manage.Close)

@@ -233,6 +233,20 @@ func run(ctx context.Context, log *slog.Logger) error {
 		stats := admission.Stats()
 		log.Info("HTTP admission totals", "accepted", stats.Accepted, "refused", stats.Refused, "anonymous_audit_suppressed", stats.AuditSuppressed)
 	}()
+	// How long requests and turns take, counted here and written down every few seconds for the
+	// management surface to report. Stopped after the listeners and the driver, and before the pool
+	// it writes through is closed, so what was counted in the last seconds of a rolling restart is
+	// not lost on every restart.
+	measurements := pg.NewMeasurements(memory, schema)
+	measuring, stopMeasuring := context.WithCancel(context.Background())
+	measured := make(chan struct{})
+	go func() {
+		defer close(measured)
+		measurements.Run(measuring, measurementInterval, func(err error) {
+			log.Warn("the instance's timings could not be written down; they are kept and tried again", "error", err)
+		})
+	}()
+	defer func() { stopMeasuring(); <-measured }()
 	var passages *passage.Retriever
 	var entityCandidates *entitycandidate.Retriever
 	var reportCandidates *reportcandidate.Retriever
@@ -258,6 +272,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 	if serves {
 		server = api.NewServer(
 			credential.NewStore(registry, string(migrate.ControlSchema)), api.Stores{
+				Measurements: measurements,
 				Audit:        pg.NewAuditStore(memory, schema),
 				Exporter:     pg.NewExporter(memory, schema),
 				Projects:     pg.NewProjectStore(memory, schema),
@@ -306,7 +321,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 		log.Info("formation is not running in this process", "role", role)
 		close(driverStopped)
 	default:
-		if err := startDriver(ctx, log, memory, schema, driverStopped, processHealth.responsive); err != nil {
+		if err := startDriver(ctx, log, memory, schema, measurements, driverStopped, processHealth.responsive); err != nil {
 			return err
 		}
 	}
@@ -431,7 +446,7 @@ func bundleBudget(log *slog.Logger) recall.Budget {
 //
 // What it must not do is look fine. So it says so, loudly, at the level an operator reads.
 func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, schema pg.Schema,
-	stopped chan struct{}, responsive ...func()) error {
+	measurements *pg.Measurements, stopped chan struct{}, responsive ...func()) error {
 
 	inferenceConfig, err := inference.ConfigFromEnv()
 	if err != nil {
@@ -452,6 +467,7 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 		return err
 	}
 	inferenceConfig.Timeout = policy.TurnBudget
+	inferenceConfig.Metered = meterCalls(measurements)
 	observations := pg.NewObservationStore(memory)
 	// Read again at the top of every turn, because this process outlives the vocabulary: an
 	// operator extends it while the worker is running, and a worker holding the set it read at
@@ -462,7 +478,7 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 		extract.NewWith(inference.NewModel(inferenceConfig), vocabulary)).
 		ReadingVocabularyFrom(pg.NewVocabularyReader(memory, schema))
 	driver := formation.NewDriver(
-		formation.NewWorkerWithPolicy(memory, observations, former, policy),
+		formation.NewWorkerWithPolicy(memory, observations, former, policy).Measuring(measurements),
 		observations, pg.NewRetentionStore(memory, schema),
 		pg.NewAuditStore(memory, schema), schema, policy, log, responsive...).
 		WithPasses(
@@ -508,6 +524,36 @@ func (w *schemaWait) note(log *slog.Logger, err error) error {
 	}
 	return err
 }
+
+// meterCalls counts what each generation call cost, by purpose, into the instance's totals.
+//
+// A call the provider reported no usage for is counted as unmetered and adds no tokens: its cost is
+// unknown, which is not the same as nothing, and an operator adding the totals up has to be able to
+// see how much of the picture is missing. A reply that was cut is counted in the tokens as well as
+// on its own, because it was paid for.
+func meterCalls(measurements *pg.Measurements) func(inference.Call) {
+	return func(call inference.Call) {
+		purpose := string(call.Purpose)
+		measurements.Add(pg.PurposeCounter(pg.CounterModelCalls, purpose), 1)
+		if call.Reported {
+			measurements.Add(pg.PurposeCounter(pg.CounterModelPromptTokens, purpose), call.PromptTokens)
+			measurements.Add(pg.PurposeCounter(pg.CounterModelCompletionTokens, purpose), call.CompletionTokens)
+		} else {
+			measurements.Add(pg.PurposeCounter(pg.CounterModelCallsUnmetered, purpose), 1)
+		}
+		if call.Cut {
+			measurements.Add(pg.PurposeCounter(pg.CounterModelRepliesCut, purpose), 1)
+		}
+	}
+}
+
+// measurementInterval is how often a process writes down what it has counted.
+//
+// It is the most a crash can lose and the longest a scrape can lag behind the process, so it is
+// short. It is not shorter because each write is a statement per operation that saw traffic, and a
+// process that wrote every second would be doing that for numbers nothing reads more often than a
+// monitoring system scrapes.
+const measurementInterval = 10 * time.Second
 
 // configuredTurnBudget reads how long one formation attempt may take, or keeps the default.
 //

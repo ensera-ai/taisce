@@ -132,6 +132,9 @@ x-service: &service
     # A hosted provider means somebody's words leave this machine. That is the operator's decision to
     # make and this list is where they make it — deliberately, by writing the host down.
     TAISCE_INFERENCE_ALLOWLIST: ${TAISCE_INFERENCE_ALLOWLIST:-api.deepseek.com}
+    # The most a generation model may write back for one call, in tokens. Empty states none, and
+    # the provider's own limit applies. A reply that reaches a ceiling is refused whole.
+    TAISCE_INFERENCE_MAX_OUTPUT_TOKENS: ${TAISCE_INFERENCE_MAX_OUTPUT_TOKENS:-}
   extra_hosts:
     # For a model served on this host, reached as `host.docker.internal`. Colima and Docker Desktop
     # resolve the name already; declaring it makes it work on plain Linux Docker too.

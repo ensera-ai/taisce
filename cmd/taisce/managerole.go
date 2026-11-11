@@ -63,6 +63,9 @@ func runManage(ctx context.Context, log *slog.Logger) error {
 		Health: func(ctx context.Context) (pg.OperationalHealth, error) {
 			return pg.ReadOperationalHealth(ctx, admin, schema)
 		},
+		Measured: func(ctx context.Context) (pg.Measured, error) {
+			return pg.ReadMeasurements(ctx, admin, schema)
+		},
 	}, schema, log)
 	addr := strings.TrimSpace(os.Getenv(envManageAddr))
 	if addr == "" {

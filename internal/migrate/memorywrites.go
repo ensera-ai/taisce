@@ -39,6 +39,9 @@ var memoryWrites = map[string][]string{
 	// deleted in the same transaction as the deletes. Append-only for the same reason as the
 	// ledger: a receipt that can be rewritten is not evidence.
 	"retention_sweep": {"INSERT"},
+	// The processes that measure add to these totals. No DELETE: a total that can be removed is one
+	// a scrape would read as a counter going backwards.
+	"measurement": {"INSERT", "UPDATE"},
 }
 
 // memoryColumnWrites are privileges held on named columns only.

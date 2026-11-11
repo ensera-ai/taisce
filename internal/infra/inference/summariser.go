@@ -54,7 +54,9 @@ func NewSummariser(config Config) *Summariser {
 
 // Write asks the model to condense one stretch of history.
 func (s *Summariser) Write(ctx context.Context, m compaction.Material) (compaction.Summary, error) {
+	ceiling := s.config.MaxOutputTokens
 	body, err := json.Marshal(chatRequest{
+		MaxTokens:      ceiling,
 		Model:          s.config.Model,
 		Temperature:    compactionPrompt.ModelContract.Temperature,
 		ResponseFormat: &responseFormat{Type: compactionPrompt.ModelContract.ResponseFormat},
@@ -90,10 +92,11 @@ func (s *Summariser) Write(ctx context.Context, m compaction.Material) (compacti
 	if err := json.Unmarshal(raw, &completion); err != nil {
 		return compaction.Summary{}, fmt.Errorf("decode reply: %w", err)
 	}
-	if len(completion.Choices) == 0 {
-		return compaction.Summary{}, fmt.Errorf("the model returned no reply")
+	content, err := s.config.accept(PurposeCompaction, completion, ceiling)
+	if err != nil {
+		return compaction.Summary{}, err
 	}
-	return decodeSummary(completion.Choices[0].Message.Content)
+	return decodeSummary(content)
 }
 
 // compactionSystemPrompt composes the file's sections in their fixed order, the boundary last.

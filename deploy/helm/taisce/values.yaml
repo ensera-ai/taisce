@@ -102,6 +102,12 @@ inference:
   endpoint: ""            # OpenAI-compatible base URL; required for formation
   extractorModel: ""
   allowlist: ""           # hosts permitted to receive somebody's words; empty permits nothing
+  # The most a generation model may write back for one call, in tokens. Empty states none and the
+  # provider's own limit applies. There is no default because the right number depends on the model:
+  # one that reasons before it answers spends this on its reasoning, and a ceiling that suits one
+  # model returns nothing at all from another. Choose it from taisce_model_completion_tokens_total
+  # and taisce_model_replies_cut_total on the scrape. A reply that reaches it is refused whole.
+  maxOutputTokens: ""
   apiKeySecret: ""        # a secret with key apiKey; empty sends no key
   embedding:
     endpoint: ""

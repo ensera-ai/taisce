@@ -5,16 +5,20 @@ package api_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ensera-ai/taisce/internal/api"
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/infra/inference"
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 	"github.com/ensera-ai/taisce/internal/migrate"
 	"github.com/google/uuid"
@@ -46,7 +50,66 @@ var expectedMetrics = []string{
 	"taisce_operations_allowed",
 	"taisce_operations_refused",
 	"taisce_operations_window_seconds",
+	"taisce_admission_refused_total",
 }
+
+// expectedDistributions are the families published as histograms, and what each one measures.
+//
+// The same exact-set argument as above, with one more thing pinned: which family may carry an
+// operation. A family that is not about requests has no business naming one.
+var expectedDistributions = map[string]struct {
+	kind        pg.MeasurementKind
+	byOperation bool
+}{
+	"taisce_operation_duration_milliseconds":      {pg.OperationDuration, true},
+	"taisce_formation_turn_duration_milliseconds": {pg.FormationTurnDuration, false},
+	"taisce_formation_lag_milliseconds":           {pg.FormationLag, false},
+}
+
+// expectedPurposeCounters are the counters published once per purpose a generation model is called
+// for. The third and last label this endpoint carries, and closed like the other two.
+var expectedPurposeCounters = []string{
+	"taisce_model_calls_total",
+	"taisce_model_calls_unmetered_total",
+	"taisce_model_prompt_tokens_total",
+	"taisce_model_completion_tokens_total",
+	"taisce_model_replies_cut_total",
+}
+
+// purposeSample is one line of a per-purpose counter: the label is a purpose, and nothing else fits.
+var purposeSample = regexp.MustCompile(`^(taisce_model_[a-z_]+_total)\{purpose="([a-z]+)"\} ([0-9]+)$`)
+
+// checkPurposeSample holds one such line to the closed set of purposes and of counters.
+func checkPurposeSample(t *testing.T, line string) (string, int64) {
+	t.Helper()
+	m := purposeSample.FindStringSubmatch(line)
+	if m == nil {
+		t.Fatalf("a sample this endpoint must not serve: %q", line)
+	}
+	declared := false
+	for _, name := range expectedPurposeCounters {
+		declared = declared || name == m[1]
+	}
+	known := false
+	for _, purpose := range inference.Purposes() {
+		known = known || string(purpose) == m[2]
+	}
+	if !declared || !known {
+		t.Fatalf("a counter or a purpose nobody declared: %q", line)
+	}
+	value, err := strconv.ParseInt(m[3], 10, 64)
+	if err != nil {
+		t.Fatalf("%q is not an integer: %v", line, err)
+	}
+	name, _, _ := strings.Cut(line, " ")
+	return name, value
+}
+
+// distributionSample is one line of a histogram. The whole of what a label set may be is written
+// into the pattern: an operation, a bucket edge that is digits or +Inf, both or neither, in that
+// order, and nothing else. There is no place in it for a project, a subject or a word.
+var distributionSample = regexp.MustCompile(
+	`^(taisce_[a-z_]+_milliseconds)_(bucket|sum|count)(?:\{(?:operation="([a-z][a-z0-9_.]*)")?(,)?(?:le="([0-9]+|\+Inf)")?\})? ([0-9]+)$`)
 
 // samplePattern is one sample with no label set at all: a prefixed lower-case name, a space, an
 // integer or NaN, and nothing else on the line. A metric that grew a label would not match it.
@@ -59,6 +122,57 @@ type exposed struct {
 	// number and must not be arithmetic on one.
 	numbers map[string]int64
 	absent  map[string]bool
+	// series holds every histogram line by its full name, label set included, exactly as served.
+	series map[string]int64
+}
+
+// checkDistributionSample holds one histogram line to what a histogram line may be, and returns its
+// full name and value. Every refusal here is about what a label could otherwise carry.
+func checkDistributionSample(t *testing.T, line string) (string, int64) {
+	t.Helper()
+	m := distributionSample.FindStringSubmatch(line)
+	if m == nil {
+		t.Fatalf("a sample this endpoint must not serve: %q", line)
+	}
+	family, part, operation, comma, le := m[1], m[2], m[3], m[4], m[5]
+	want, declared := expectedDistributions[family]
+	if !declared {
+		t.Fatalf("%q belongs to a family this endpoint does not declare", line)
+	}
+	if (comma != "") != (operation != "" && le != "") {
+		t.Fatalf("a label set is malformed: %q", line)
+	}
+	if (operation != "") != want.byOperation {
+		t.Fatalf("%s carries an operation where it must not, or lacks one where it must: %q", family, line)
+	}
+	if operation != "" {
+		known := false
+		for _, o := range api.Operations() {
+			known = known || o.Name == operation
+		}
+		if !known {
+			t.Fatalf("a series is labelled with %q, which is not an operation the surface declares: %q", operation, line)
+		}
+	}
+	if (part == "bucket") != (le != "") {
+		t.Fatalf("a bucket has no edge, or a total has one: %q", line)
+	}
+	if le != "" && le != "+Inf" {
+		edge, _ := strconv.ParseInt(le, 10, 64)
+		known := false
+		for _, bound := range pg.Bounds[want.kind] {
+			known = known || bound == edge
+		}
+		if !known {
+			t.Fatalf("a bucket edge of %s is not one of the edges declared for %s: %q", le, family, line)
+		}
+	}
+	value, err := strconv.ParseInt(m[6], 10, 64)
+	if err != nil {
+		t.Fatalf("%q is not an integer: %v", line, err)
+	}
+	name, _, _ := strings.Cut(line, " ")
+	return name, value
 }
 
 // num is one series' value, and fails when the series reported no moment at all.
@@ -100,18 +214,15 @@ func scrapeMetrics(t *testing.T, base, token string) (*http.Response, string) {
 // parseExposition reads a scrape and refuses anything the format does not permit.
 //
 // It is strict on purpose. The claim this endpoint makes is not "a parser accepts the output" but
-// "every line is a name and one number", because a label set is the one piece of syntax through
-// which a project name, a subject or anybody's words could reach a monitoring system. So the first
-// thing checked is that no brace appears anywhere in the body, and the second is that every sample
-// line matches a pattern with no room for one. Both checks walk the body itself rather than a list
-// of names, so they hold over every series the endpoint emits, including ones added after this was
-// written.
+// "every line is a name and one number, and a label is an operation or a bucket edge", because a
+// label set is the one piece of syntax through which a project name, a subject or anybody's words
+// could reach a monitoring system. So a line with a brace must be a histogram line, and a histogram
+// line is held to a pattern with room for exactly those two labels and to the closed sets their
+// values come from. Every check walks the body itself rather than a list of names, so it holds over
+// every series the endpoint emits, including ones added after this was written.
 func parseExposition(t *testing.T, body string) exposed {
 	t.Helper()
-	if strings.ContainsAny(body, "{}") {
-		t.Fatalf("the scrape carries a label set, which is how a project name leaves the instance:\n%s", body)
-	}
-	out := exposed{numbers: map[string]int64{}, absent: map[string]bool{}}
+	out := exposed{numbers: map[string]int64{}, absent: map[string]bool{}, series: map[string]int64{}}
 	helped, typed := map[string]bool{}, map[string]bool{}
 	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
 		switch {
@@ -123,10 +234,33 @@ func parseExposition(t *testing.T, body string) exposed {
 			helped[name] = true
 		case strings.HasPrefix(line, "# TYPE "):
 			name, kind, ok := strings.Cut(strings.TrimPrefix(line, "# TYPE "), " ")
-			if !ok || kind != "gauge" {
-				t.Fatalf("a metric is declared as %q; this endpoint publishes gauges only, because none of its numbers is cumulative: %q", kind, line)
+			// What a series is declared as is a promise about how to read it. A window's count
+			// declared as a counter would have a rate computed over it that is wrong by however far
+			// the window moved; a rising total declared as a gauge would never have one computed.
+			_, distribution := expectedDistributions[name]
+			want := "gauge"
+			switch {
+			case distribution:
+				want = "histogram"
+			case strings.HasSuffix(name, "_total"):
+				want = "counter"
+			}
+			if !ok || kind != want {
+				t.Fatalf("%s is declared as %q and is a %s: %q", name, kind, want, line)
 			}
 			typed[name] = true
+		case strings.Contains(line, "_milliseconds_"):
+			name, value := checkDistributionSample(t, line)
+			if _, seen := out.series[name]; seen {
+				t.Fatalf("%s is served twice", name)
+			}
+			out.series[name] = value
+		case strings.HasPrefix(line, "taisce_model_"):
+			name, value := checkPurposeSample(t, line)
+			if _, seen := out.series[name]; seen {
+				t.Fatalf("%s is served twice", name)
+			}
+			out.series[name] = value
 		default:
 			match := samplePattern.FindStringSubmatch(line)
 			if match == nil {
@@ -144,6 +278,53 @@ func parseExposition(t *testing.T, body string) exposed {
 				t.Fatalf("%q is not an integer: %v", line, err)
 			}
 			out.numbers[match[1]] = value
+		}
+	}
+	// Each histogram family is declared whether or not anything has been measured yet, so that a
+	// monitoring system learns the series exists before it has a value, and each is internally
+	// consistent: buckets never fall as the edge rises, and the last one is the count.
+	for family, want := range expectedDistributions {
+		if !helped[family] || !typed[family] {
+			t.Fatalf("%s is not declared with a HELP and a TYPE line", family)
+		}
+		groups := map[string]bool{}
+		for name := range out.series {
+			if rest, ok := strings.CutPrefix(name, family+"_count"); ok {
+				groups[rest] = true
+			}
+		}
+		for group := range groups {
+			prefix := ""
+			if group != "" {
+				prefix = strings.TrimSuffix(strings.TrimPrefix(group, "{"), "}") + ","
+			}
+			var previous int64
+			for _, bound := range pg.Bounds[want.kind] {
+				at, ok := out.series[family+"_bucket{"+prefix+`le="`+strconv.FormatInt(bound, 10)+`"}`]
+				if !ok || at < previous {
+					t.Fatalf("%s%s: the bucket at %d is missing or below the one before it (%d < %d)", family, group, bound, at, previous)
+				}
+				previous = at
+			}
+			total, ok := out.series[family+"_bucket{"+prefix+`le="+Inf"}`]
+			if !ok || total < previous || total != out.series[family+"_count"+group] {
+				t.Fatalf("%s%s: the last bucket (%d) is not the count (%d)", family, group, total, out.series[family+"_count"+group])
+			}
+			if _, ok := out.series[family+"_sum"+group]; !ok {
+				t.Fatalf("%s%s has a count and no sum", family, group)
+			}
+		}
+	}
+	// Every per-purpose counter is served for every purpose, whether or not a call has been made, so
+	// the series exist before the first call.
+	for _, family := range expectedPurposeCounters {
+		if !helped[family] || !typed[family] {
+			t.Fatalf("%s is not declared with a HELP and a TYPE line", family)
+		}
+		for _, purpose := range inference.Purposes() {
+			if _, ok := out.series[family+`{purpose="`+string(purpose)+`"}`]; !ok {
+				t.Fatalf("%s is not served for %s", family, purpose)
+			}
 		}
 	}
 	served := len(out.numbers) + len(out.absent)
@@ -293,7 +474,7 @@ func TestInstanceMetricsAreRefusedToEveryCallerThatIsNotALiveOperator(t *testing
 	}
 }
 
-// The scrape carries no label at all, and nothing from memory. A project exists, a turn has been
+// The scrape carries no label drawn from memory, and nothing else from memory either. A project exists, a turn has been
 // stored under a subject with words in it, and none of those strings is anywhere in the body —
 // asserted against the whole body, because a scrape goes to a monitoring system whose access and
 // retention are not the operator credential's.
@@ -320,8 +501,9 @@ func TestInstanceMetricsCarryNoProjectLabelAndNothingFromMemory(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("the scrape returned %d: %s", resp.StatusCode, body)
 	}
-	// parseExposition refuses a brace anywhere and refuses any sample line that is not a name and
-	// one number, so a per-project label set cannot pass it on any series.
+	// parseExposition refuses any sample line that is not a name and one number, and any label set
+	// that is not an operation the surface declares or a bucket edge, so a per-project label cannot
+	// pass it on any series.
 	values := parseExposition(t, body)
 	// The instance now holds a project, a subject and a turn, so this is the state in which a leak
 	// would happen rather than an idle one.
@@ -348,6 +530,16 @@ func TestInstanceMetricsCarryNoProjectLabelAndNothingFromMemory(t *testing.T) {
 	}
 	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
 		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "_milliseconds_") {
+			// A histogram line: held to the two labels it may carry and the closed sets their values
+			// come from, which is the same argument with a label set allowed in exactly one shape.
+			checkDistributionSample(t, line)
+			continue
+		}
+		if strings.HasPrefix(line, "taisce_model_") {
+			checkPurposeSample(t, line)
 			continue
 		}
 		name, value, ok := strings.Cut(line, " ")
@@ -441,5 +633,212 @@ func TestInstanceMetricsFollowTheBacklogAndTheLedgerRatherThanBeingConstants(t *
 	}
 	if beat := beating.num(t, "taisce_formation_heartbeat_timestamp_seconds"); beat < stamped.Unix() {
 		t.Fatalf("the heartbeat is dated %d, before this test ran", beat)
+	}
+}
+
+// The scrape says how long requests took, by operation, and how long formation took and waited.
+//
+// Nothing recorded a duration before this. An operator whose agents felt slow had nothing to look
+// at, and a backlog said formation was behind without saying whether that was a slow model or a deep
+// queue. The numbers are counted in the processes that do the work and read here from the totals
+// they write down, so this test drives real requests through the memory door, forms a real turn,
+// and reads what the management door then reports.
+func TestTheScrapeSaysHowLongRequestsAndFormationTook(t *testing.T) {
+	m := newManaged(t, "api_metrics_durations")
+	ctx := context.Background()
+
+	// Before anything has been measured the families are declared and hold no series, which is how
+	// a monitoring system learns a series exists without being told a number nobody measured.
+	_, body := scrapeMetrics(t, m.manage.URL, m.operator)
+	for name, value := range parseExposition(t, body).series {
+		if strings.Contains(name, "_milliseconds_") || value != 0 {
+			t.Fatalf("nothing has been measured and the scrape reports %s = %d", name, value)
+		}
+	}
+
+	for i := 0; i < 3; i++ {
+		m.do(t, http.MethodGet, "/v1/freshness", nil, http.StatusOK, nil)
+	}
+	// A refused request is a request somebody waited for, and is timed with the rest.
+	if status, _ := m.raw(t, http.MethodGet, "/v1/freshness", nil, "not-a-token"); status != http.StatusUnauthorized {
+		t.Fatalf("a request with no usable credential was answered %d", status)
+	}
+	m.do(t, http.MethodPost, "/v1/observations", map[string]any{
+		"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "I work at Ensera."}},
+	}, http.StatusCreated, nil)
+	m.form(t)
+	if err := m.measurements.Flush(ctx); err != nil {
+		t.Fatalf("write down what was counted: %v", err)
+	}
+
+	_, body = scrapeMetrics(t, m.manage.URL, m.operator)
+	values := parseExposition(t, body)
+	for name, want := range map[string]int64{
+		`taisce_operation_duration_milliseconds_count{operation="freshness"}`: 4,
+		`taisce_operation_duration_milliseconds_count{operation="observe"}`:   1,
+		`taisce_formation_turn_duration_milliseconds_count`:                   1,
+		`taisce_formation_lag_milliseconds_count`:                             1,
+	} {
+		if got, ok := values.series[name]; !ok || got != want {
+			t.Errorf("%s is %d (served: %v), want %d", name, got, ok, want)
+		}
+	}
+	// An operation nobody called has no series: a zero for every operation the surface declares
+	// would be sixty series saying nothing on every scrape.
+	if _, ok := values.series[`taisce_operation_duration_milliseconds_count{operation="recall"}`]; ok {
+		t.Error("an operation nobody called is reported as measured")
+	}
+
+	// Totals rise and never restart: a second flush with more work adds to what is there, which is
+	// what makes a rate over them the rate it says it is.
+	m.do(t, http.MethodGet, "/v1/freshness", nil, http.StatusOK, nil)
+	if err := m.measurements.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, body = scrapeMetrics(t, m.manage.URL, m.operator)
+	if got := parseExposition(t, body).series[`taisce_operation_duration_milliseconds_count{operation="freshness"}`]; got != 5 {
+		t.Errorf("after one more request the total is %d, want 5", got)
+	}
+	// Scraping is not itself measured: the scrape is on the management door, and the durations are
+	// of memory operations.
+	if strings.Contains(body, "metrics") {
+		t.Errorf("the scrape reports on itself:\n%s", body)
+	}
+}
+
+// A request turned away for capacity is counted, and the count is the number turned away.
+//
+// A refusal for capacity writes no ledger row — a flood could otherwise make the instance write one
+// per request — so a process refusing a third of its load looked, on the scrape, exactly like an
+// idle one. The count is compared with the 429s the callers actually received, because a counter
+// that merely moves is not evidence it counts the right thing.
+func TestARequestTurnedAwayForCapacityIsCounted(t *testing.T) {
+	m := newManaged(t, "api_metrics_refused")
+	ctx := context.Background()
+
+	// Unknown tokens, many at once. Every stranger together may hold one lookup slot, so most of
+	// these are refused at the door however fast the registry answers.
+	var refused atomic.Int64
+	var wg sync.WaitGroup
+	for worker := 0; worker < 32; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for i := 0; i < 20; i++ {
+				stranger := credential.Prefix + fmt.Sprintf("%021d%022d", worker, i)
+				req, err := http.NewRequest(http.MethodGet, m.server.URL+"/v1/freshness", nil)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				req.Header.Set("Authorization", "Bearer "+stranger)
+				resp, err := m.server.Client().Do(req)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusTooManyRequests {
+					refused.Add(1)
+				}
+			}
+		}(worker)
+	}
+	wg.Wait()
+	if refused.Load() == 0 {
+		t.Fatal("640 concurrent requests with unknown tokens were all admitted, so this run cannot show a refusal being counted")
+	}
+	if err := m.measurements.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, body := scrapeMetrics(t, m.manage.URL, m.operator)
+	if got := parseExposition(t, body).num(t, "taisce_admission_refused_total"); got != refused.Load() {
+		t.Fatalf("the callers received %d refusals for capacity and the scrape counts %d", refused.Load(), got)
+	}
+}
+
+// A stored measurement the surface cannot vouch for fails the scrape rather than becoming a series.
+//
+// The totals are written by the serving processes, and the scrape is the last place a value nobody
+// declared could be stopped before it reaches a monitoring system. A name that is not a declared
+// operation, or buckets that are not this binary's, is therefore an error — and the scrape fails as
+// a whole, because a partial one reads as a condition that stopped happening.
+func TestAMeasurementTheSurfaceDoesNotDeclareFailsTheScrape(t *testing.T) {
+	m := newManaged(t, "api_metrics_undeclared")
+	ctx := context.Background()
+	buckets := make([]int64, len(pg.Bounds[pg.OperationDuration])+1)
+
+	if _, err := m.pool.Exec(ctx, m.schema.SQL(
+		`INSERT INTO {schema}.measurement(kind,name,buckets,sum_ms,count) VALUES('operation_duration','scrapeproj',$1,0,0)`), buckets); err != nil {
+		t.Fatal(err)
+	}
+	if resp, body := scrapeMetrics(t, m.manage.URL, m.operator); resp.StatusCode != http.StatusServiceUnavailable || strings.Contains(body, "scrapeproj") {
+		t.Fatalf("a measurement named for something the surface does not declare was served, or its name was: %d %s", resp.StatusCode, body)
+	}
+	if _, err := m.pool.Exec(ctx, m.schema.SQL(`DELETE FROM {schema}.measurement`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.pool.Exec(ctx, m.schema.SQL(
+		`INSERT INTO {schema}.measurement(kind,name,buckets,sum_ms,count) VALUES('operation_duration','recall','{1,2}',0,3)`)); err != nil {
+		t.Fatal(err)
+	}
+	if resp, body := scrapeMetrics(t, m.manage.URL, m.operator); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("a measurement with buckets this binary does not use was served: %d %s", resp.StatusCode, body)
+	}
+	// And the substrate refuses a name that could be read as label syntax, whoever writes it.
+	if _, err := m.pool.Exec(ctx, m.schema.SQL(
+		`INSERT INTO {schema}.measurement(kind,name,buckets,sum_ms,count) VALUES('operation_duration','x",project="p1',$1,0,0)`), buckets); err == nil {
+		t.Fatal("a measurement whose name is label syntax was stored")
+	}
+}
+
+// The scrape says what generation calls cost, by purpose, and tells unknown from nothing.
+//
+// A generation call's length is decided by text somebody else wrote, and nothing counted what was
+// spent: an operator on a metered provider learned what formation cost from the provider's invoice.
+// The counts are kept per purpose because the three have different remedies — a costly extraction is
+// about what is being stored, a costly report about how often reports are rewritten.
+//
+// A call the provider reported no usage for is counted as a call and as unmetered, and adds no
+// tokens, so a reader adding up the tokens can see how much of the picture is missing.
+func TestTheScrapeSaysWhatGenerationCallsCostByPurpose(t *testing.T) {
+	m := newManaged(t, "api_metrics_tokens")
+	ctx := context.Background()
+	add := func(counter string, purpose inference.Purpose, n int64) {
+		m.measurements.Add(pg.PurposeCounter(counter, string(purpose)), n)
+	}
+	add(pg.CounterModelCalls, inference.PurposeExtraction, 3)
+	add(pg.CounterModelPromptTokens, inference.PurposeExtraction, 900)
+	add(pg.CounterModelCompletionTokens, inference.PurposeExtraction, 120)
+	add(pg.CounterModelCallsUnmetered, inference.PurposeExtraction, 1)
+	add(pg.CounterModelCalls, inference.PurposeReport, 1)
+	add(pg.CounterModelRepliesCut, inference.PurposeReport, 1)
+	if err := m.measurements.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, body := scrapeMetrics(t, m.manage.URL, m.operator)
+	values := parseExposition(t, body)
+	for name, want := range map[string]int64{
+		`taisce_model_calls_total{purpose="extraction"}`:             3,
+		`taisce_model_calls_unmetered_total{purpose="extraction"}`:   1,
+		`taisce_model_prompt_tokens_total{purpose="extraction"}`:     900,
+		`taisce_model_completion_tokens_total{purpose="extraction"}`: 120,
+		`taisce_model_calls_total{purpose="report"}`:                 1,
+		`taisce_model_replies_cut_total{purpose="report"}`:           1,
+		`taisce_model_calls_total{purpose="compaction"}`:             0,
+	} {
+		if got := values.series[name]; got != want {
+			t.Errorf("%s is %d, want %d", name, got, want)
+		}
+	}
+
+	// A stored counter nobody declared fails the scrape, for the reason an undeclared operation
+	// does, and its name is not served.
+	m.measurements.Add("model_calls.scrapeproject", 1)
+	if err := m.measurements.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if resp, body := scrapeMetrics(t, m.manage.URL, m.operator); resp.StatusCode != http.StatusServiceUnavailable || strings.Contains(body, "scrapeproject") {
+		t.Fatalf("a counter for a purpose nobody declared was served, or its name was: %d %s", resp.StatusCode, body)
 	}
 }

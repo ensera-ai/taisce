@@ -245,6 +245,15 @@ type Policy struct {
 	TurnBudget time.Duration
 	// Interval is how long the driver waits after a pass that found nothing.
 	Interval time.Duration
+	// TurnsPerScope is how many turns a worker attempts for one project before it moves to the
+	// next. Zero is no bound, which is what draining a project by hand wants.
+	//
+	// It exists because a worker used to stay with a project until that project had nothing left.
+	// A deep backlog, or a project written to as fast as it formed, held the worker for the whole
+	// of it while every other project's turns waited behind it — and with as many such projects as
+	// workers, the rest did not form at all. Attempts are counted rather than turns formed, because
+	// a project whose every turn fails slowly holds a worker just as long as one that succeeds.
+	TurnsPerScope int
 	// RetentionInterval is how often expiry is swept. Separate from Interval because expiry is a
 	// daily-scale concern and running it every few seconds would scan an index for nothing.
 	RetentionInterval time.Duration
@@ -277,10 +286,15 @@ type Policy struct {
 // measured.
 func DefaultPolicy() Policy {
 	return Policy{
-		MaxAttempts:          6,
-		RetryAfter:           10 * time.Second,
-		TurnBudget:           5 * time.Minute,
-		Interval:             5 * time.Second,
+		MaxAttempts: 6,
+		RetryAfter:  10 * time.Second,
+		TurnBudget:  5 * time.Minute,
+		Interval:    5 * time.Second,
+		// Small against a backlog and large against the cost of moving on. A project waits at most
+		// this many turns for each other project with work, per worker; moving on costs one query
+		// and a lock, against a model call per message. The number is not measured: no throughput
+		// target exists to measure it against, and a different one is a one-line change.
+		TurnsPerScope:        8,
 		RetentionInterval:    time.Hour,
 		SealInterval:         5 * time.Minute,
 		ReportsPerPass:       4,
@@ -299,6 +313,15 @@ type Worker struct {
 	former       *Former
 	policy       Policy
 	health       func(context.Context, pg.HealthExecutor, int64, int64)
+	// timings is where this worker counts how long a turn took to form and how long it had waited.
+	// Nil counts nothing.
+	timings *pg.Measurements
+}
+
+// Measuring gives the worker somewhere to count how long formation takes.
+func (w *Worker) Measuring(m *pg.Measurements) *Worker {
+	w.timings = m
+	return w
 }
 
 // NewWorker builds a worker over a pool, a store and a former.
@@ -335,7 +358,10 @@ var ErrScopeBusy = errors.New("another worker holds this scope")
 // leave the oldest unformed and pin that number at the bottom while everything above it completed —
 // a scope reported as entirely behind when it is nearly current.
 func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]Report, error) {
-	out, err := w.drain(ctx, schema, scope)
+	// No bound: this is "form everything waiting in this project", asked for by name. The bound
+	// belongs to the driver, which is sharing one worker between projects; a caller draining one
+	// project by hand is sharing it with nobody.
+	out, err := w.drain(ctx, schema, scope, 0, true)
 	return out.reports, err
 }
 
@@ -346,9 +372,15 @@ func (w *Worker) Drain(ctx context.Context, schema pg.Schema, scope string) ([]R
 // scope that failed every turn exactly as it sees a scope with nothing waiting, and says nothing
 // about either.
 type drained struct {
+	// reports is kept only for a caller that asked for them. The driver reads how many turns formed
+	// and nothing else, and a drain that runs for as long as a project keeps being written to would
+	// otherwise hold a report for every turn it had ever formed.
 	reports []Report
-	failed  int
-	parked  int
+	formed  int
+	// more says the drain stopped at its bound with turns still waiting.
+	more   bool
+	failed int
+	parked int
 	// status is the HTTP status of the latest failure that carried one, and zero when none did.
 	status int
 }
@@ -359,8 +391,9 @@ type drained struct {
 // that reaches a model, and any adapter whose errors carry a status is reported the same way.
 type httpStatus interface{ HTTPStatus() int }
 
-func (w *Worker) drain(ctx context.Context, schema pg.Schema, scope string) (drained, error) {
+func (w *Worker) drain(ctx context.Context, schema pg.Schema, scope string, limit int, keepReports bool) (drained, error) {
 	var out drained
+	attempts := 0
 	conn, err := w.pool.Acquire(ctx)
 	if err != nil {
 		return out, fmt.Errorf("acquire connection: %w", err)
@@ -394,13 +427,23 @@ func (w *Worker) drain(ctx context.Context, schema pg.Schema, scope string) (dra
 		if !found {
 			return out, nil
 		}
+		// Checked once a turn is known to be waiting, so "more" is true only when there is more: a
+		// project whose backlog was exactly the bound is finished, and saying otherwise would send
+		// the driver straight back for nothing.
+		if limit > 0 && attempts >= limit {
+			out.more = true
+			return out, nil
+		}
+		attempts++
 
 		// A budget per turn, applied here rather than in the extractor. Extraction is a model call
 		// per message, so a turn with two hundred messages is a request that never ends — and
 		// whether to abandon it or keep waiting is a decision about this backlog, which the
 		// extractor knows nothing about.
 		attemptCtx, cancel := context.WithTimeout(ctx, w.policy.TurnBudget)
+		started := time.Now()
 		report, err := w.former.Form(attemptCtx, schema, observation)
+		took := time.Since(started)
 		cancel()
 
 		if err != nil {
@@ -433,8 +476,32 @@ func (w *Worker) drain(ctx context.Context, schema pg.Schema, scope string) (dra
 		if err := w.observations.MarkFormed(ctx, schema, observation.ID); err != nil {
 			return out, err
 		}
+		// Two numbers, because they answer different questions. How long the turn took to form is
+		// the model's speed and the writes after it. How long it waited since it was stored is what
+		// an agent experiences as memory not yet knowing what it was just told, and it includes the
+		// time behind every turn ahead of it — so a slow model and a deep backlog, which call for
+		// different remedies, can be told apart.
+		//
+		// The wait is measured against the time the storing process stamped, on this process's
+		// clock. Two hosts whose clocks disagree skew it by that much; a negative wait is counted
+		// as none rather than published.
+		//
+		// Only for a turn that formed. A failed attempt's duration is how long a failure took, and
+		// averaging it into how long formation takes would make a provider outage look like speed.
+		w.timings.Observe(pg.FormationTurnDuration, "", took)
+		w.timings.Observe(pg.FormationLag, "", time.Since(observation.IngestedAt))
+		// Written down per turn rather than at the end of the drain: a drain can run for as long as
+		// a project keeps being written to, and totals that appeared only when it finished would
+		// say nothing for exactly as long as there was most to say. A failed write keeps the counts
+		// for the next turn.
+		flushCtx, cancelFlush := context.WithTimeout(ctx, time.Second)
+		_ = w.timings.Flush(flushCtx)
+		cancelFlush()
 		w.heartbeat(ctx, conn, 1, 0)
-		out.reports = append(out.reports, report)
+		out.formed++
+		if keepReports {
+			out.reports = append(out.reports, report)
+		}
 	}
 }
 

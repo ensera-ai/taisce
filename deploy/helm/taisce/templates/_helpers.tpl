@@ -65,6 +65,12 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
   value: {{ $root.Values.inference.extractorModel | quote }}
 - name: TAISCE_INFERENCE_ALLOWLIST
   value: {{ $root.Values.inference.allowlist | quote }}
+{{- /* Stated only when the operator states one. The binary refuses a ceiling it cannot read, so an
+       empty variable here would be a setting somebody has to explain rather than an absent one. */}}
+{{- with $root.Values.inference.maxOutputTokens }}
+- name: TAISCE_INFERENCE_MAX_OUTPUT_TOKENS
+  value: {{ . | toString | quote }}
+{{- end }}
 {{- if $root.Values.inference.apiKeySecret }}
 - name: TAISCE_INFERENCE_API_KEY
   valueFrom: {secretKeyRef: {name: {{ $root.Values.inference.apiKeySecret | quote }}, key: apiKey}}

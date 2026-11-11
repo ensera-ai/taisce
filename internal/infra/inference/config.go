@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,6 +49,13 @@ const (
 	// and it should need one variable.
 	EnvEmbeddingEndpoint = "TAISCE_INFERENCE_EMBEDDING_ENDPOINT"
 	EnvEmbeddingAPIKey   = "TAISCE_INFERENCE_EMBEDDING_API_KEY"
+	// EnvMaxOutputTokens is the most a generation model may write back for one call. Unset, nothing
+	// is stated and the provider's own limit applies.
+	//
+	// The operator's to set because the right number depends on the model: one that reasons before
+	// it answers spends the allowance on reasoning, and a ceiling that suits one model returns
+	// nothing at all from another. The token counts on the scrape are what to choose it from.
+	EnvMaxOutputTokens = "TAISCE_INFERENCE_MAX_OUTPUT_TOKENS"
 )
 
 // Config is where inference happens and what is permitted to see it.
@@ -79,6 +87,12 @@ type Config struct {
 	// to its turn budget so that the deadline that fires is the one the operator configured and
 	// the one the failure reports, rather than a second, lower number hidden in the client.
 	Timeout time.Duration
+	// MaxOutputTokens, when positive, is the ceiling stated on every generation request. Zero states
+	// none, and the provider's own limit applies.
+	MaxOutputTokens int
+	// Metered is told what each generation call cost, as far as the provider said. Optional. Called
+	// for a reply that is then refused as well as for one that is used, because both were paid for.
+	Metered func(Call)
 }
 
 // ConfigFromEnv reads the configuration and refuses anything that would send message content
@@ -107,6 +121,16 @@ func ConfigFromEnv() (Config, error) {
 	allowlist := os.Getenv(EnvAllowlist)
 	if err := permitted(cfg.Endpoint, allowlist); err != nil {
 		return Config{}, err
+	}
+	// A ceiling that cannot be read is refused rather than ignored. Ignoring it would run with no
+	// ceiling while the operator believed theirs was in force.
+	if raw := strings.TrimSpace(os.Getenv(EnvMaxOutputTokens)); raw != "" {
+		tokens, err := strconv.Atoi(raw)
+		if err != nil || tokens <= 0 || tokens > MaxOutputTokensLimit {
+			return Config{}, fmt.Errorf("%s is %q: it is a whole number of tokens between 1 and %d, "+
+				"or unset to state no ceiling", EnvMaxOutputTokens, raw, MaxOutputTokensLimit)
+		}
+		cfg.MaxOutputTokens = tokens
 	}
 	// Both roles must be allowed when the configuration is used for generation and embedding.
 	if cfg.EmbeddingEndpoint != "" && cfg.EmbeddingEndpoint != cfg.Endpoint {
