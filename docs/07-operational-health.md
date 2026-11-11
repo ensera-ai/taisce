@@ -161,7 +161,11 @@ The report above answers a question you asked. Metrics answer the one you are no
 management surface serves the exposition format Prometheus and everything compatible with it reads:
 
 ```sh
-curl -s -H "Authorization: Bearer $TAISCE_OPERATOR_TOKEN" \
+taisce observer issue monitoring          # a credential that scrapes and does nothing else
+```
+
+```sh
+curl -s -H "Authorization: Bearer $TAISCE_OBSERVER_TOKEN" \
   http://127.0.0.1:8081/manage/v1/metrics
 ```
 
@@ -171,11 +175,18 @@ curl -s -H "Authorization: Bearer $TAISCE_OPERATOR_TOKEN" \
 taisce_formation_backlog 12
 ```
 
-A scrape presents the operator credential like any other management call. It is on the management
-listener, not the memory port, because these are the operator's numbers: on the memory port every
-agent holding a project credential could read how far behind the instance is and how much capacity
-is left. A project credential, an unknown token and a revoked operator credential all get the same
-`401` a stranger gets, and the memory port has no `/metrics` to find.
+**Give your monitoring an observer credential, not the operator's.** An observer opens this one
+route. It cannot create a project, issue a credential, seal the ledger, open the portal or reach any
+memory route — each of those answers it exactly as it answers a stranger. The operator credential
+also scrapes, and a monitoring system should not hold it: it is the credential that can mint a key
+for any project, and a scrape configuration is read by whoever administers monitoring
+([D48](decisions/D48.md)). On a cluster, mint one through `exec` into the management surface, like
+any other credential.
+
+The scrape is on the management listener, not the memory port, because these are the operator's
+numbers: on the memory port every agent holding a project credential could read how far behind the
+instance is and how much capacity is left. A project credential, an unknown token and a revoked
+credential all get the same `401` a stranger gets, and the memory port has no `/metrics` to find.
 
 In Prometheus:
 
@@ -184,7 +195,7 @@ scrape_configs:
   - job_name: taisce
     metrics_path: /manage/v1/metrics
     authorization:
-      credentials_file: /etc/prometheus/taisce-operator-token
+      credentials_file: /etc/prometheus/taisce-observer-token
     static_configs:
       - targets: ["taisce-manage:8081"]
 ```
