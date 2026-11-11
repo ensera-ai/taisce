@@ -313,6 +313,15 @@ type Worker struct {
 	former       *Former
 	policy       Policy
 	health       func(context.Context, pg.HealthExecutor, int64, int64)
+	// timings is where this worker counts how long a turn took to form and how long it had waited.
+	// Nil counts nothing.
+	timings *pg.Measurements
+}
+
+// Measuring gives the worker somewhere to count how long formation takes.
+func (w *Worker) Measuring(m *pg.Measurements) *Worker {
+	w.timings = m
+	return w
 }
 
 // NewWorker builds a worker over a pool, a store and a former.
@@ -432,7 +441,9 @@ func (w *Worker) drain(ctx context.Context, schema pg.Schema, scope string, limi
 		// whether to abandon it or keep waiting is a decision about this backlog, which the
 		// extractor knows nothing about.
 		attemptCtx, cancel := context.WithTimeout(ctx, w.policy.TurnBudget)
+		started := time.Now()
 		report, err := w.former.Form(attemptCtx, schema, observation)
+		took := time.Since(started)
 		cancel()
 
 		if err != nil {
@@ -465,6 +476,27 @@ func (w *Worker) drain(ctx context.Context, schema pg.Schema, scope string, limi
 		if err := w.observations.MarkFormed(ctx, schema, observation.ID); err != nil {
 			return out, err
 		}
+		// Two numbers, because they answer different questions. How long the turn took to form is
+		// the model's speed and the writes after it. How long it waited since it was stored is what
+		// an agent experiences as memory not yet knowing what it was just told, and it includes the
+		// time behind every turn ahead of it — so a slow model and a deep backlog, which call for
+		// different remedies, can be told apart.
+		//
+		// The wait is measured against the time the storing process stamped, on this process's
+		// clock. Two hosts whose clocks disagree skew it by that much; a negative wait is counted
+		// as none rather than published.
+		//
+		// Only for a turn that formed. A failed attempt's duration is how long a failure took, and
+		// averaging it into how long formation takes would make a provider outage look like speed.
+		w.timings.Observe(pg.FormationTurnDuration, "", took)
+		w.timings.Observe(pg.FormationLag, "", time.Since(observation.IngestedAt))
+		// Written down per turn rather than at the end of the drain: a drain can run for as long as
+		// a project keeps being written to, and totals that appeared only when it finished would
+		// say nothing for exactly as long as there was most to say. A failed write keeps the counts
+		// for the next turn.
+		flushCtx, cancelFlush := context.WithTimeout(ctx, time.Second)
+		_ = w.timings.Flush(flushCtx)
+		cancelFlush()
 		w.heartbeat(ctx, conn, 1, 0)
 		out.formed++
 		if keepReports {
