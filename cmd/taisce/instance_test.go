@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ensera-ai/taisce/internal/credential"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -164,5 +165,74 @@ func TestABootstrapThatMintsNothingShowsNoTokenAndStillNamesTheWayToMintOne(t *t
 	}
 	if !strings.Contains(logged.String(), "taisce credential issue <name> -project first") {
 		t.Errorf("the log does not name the command that mints one:\n%s", logged.String())
+	}
+}
+
+// A bootstrap told not to mint writes no token anywhere, and leaves the door for the operator.
+//
+// A container's standard output is not a place that forgets. On a cluster that ships logs it is
+// copied to the log store the moment it is written, and kept under that store's retention and that
+// store's access rules. The first operator credential — the one that can mint a credential for any
+// project — was printed there by every install, and outlived the Job that printed it, the release
+// that ran the Job, and the argument that deleting the Job removed it.
+//
+// So where output is a log, bootstrap provisions and mints nothing, and the first credential is
+// minted by a command the operator runs themselves, whose output goes to their terminal.
+func TestABootstrapToldNotToMintWritesNoTokenAndLeavesNoCredential(t *testing.T) {
+	ctx, admin := isolatedInstance(t)
+	var shown, logged bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logged, nil))
+
+	for run := 1; run <= 2; run++ {
+		if err := bootstrap(ctx, log, []string{"--project", "first", "--mint-credentials=false"}, &shown); err != nil {
+			t.Fatalf("bootstrap %d: %v", run, err)
+		}
+	}
+	for name, written := range map[string]string{"standard output": shown.String(), "the log": logged.String()} {
+		if strings.Contains(written, credential.Prefix) {
+			t.Errorf("a bootstrap told not to mint wrote a token to %s", name)
+		}
+	}
+	if shown.Len() != 0 {
+		t.Errorf("a bootstrap that minted nothing printed something:\n%s", shown.String())
+	}
+	operators, err := operatorCredentials(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := credentialsForProject(ctx, admin, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if operators != 0 || projects != 0 {
+		t.Fatalf("a bootstrap told not to mint left %d operator and %d project credentials", operators, projects)
+	}
+	// An instance nobody can reach has to say how to reach it, in the one place an operator looks
+	// when nothing works: the log of the thing that just ran.
+	for _, want := range []string{
+		"no credential exists",
+		"taisce operator issue <name>",
+		"taisce credential issue <name> -project first",
+	} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("the log does not say %q:\n%s", want, logged.String())
+		}
+	}
+
+	// And the way it names works: the direct path mints against the instance bootstrap left.
+	if err := operatorCommand(ctx, []string{"issue", "first-operator"}); err != nil {
+		t.Fatalf("the command the log names did not mint an operator credential: %v", err)
+	}
+	if operators, err = operatorCredentials(ctx, admin); err != nil || operators != 1 {
+		t.Fatalf("after the operator minted one, %d operator credentials are live (%v)", operators, err)
+	}
+
+	// Once somebody can reach it, a later bootstrap has nothing to say about minting.
+	logged.Reset()
+	if err := bootstrap(ctx, log, []string{"--project", "first", "--mint-credentials=false"}, &shown); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logged.String(), "no credential exists") && strings.Contains(logged.String(), "operator issue") {
+		t.Errorf("a bootstrap on an instance with an operator still says none exists:\n%s", logged.String())
 	}
 }

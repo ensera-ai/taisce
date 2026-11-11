@@ -180,18 +180,20 @@ func notes(t *testing.T, args ...string) string {
 	return after
 }
 
-// The tokens bootstrap prints exist in one Job's log and nowhere else, and the next upgrade deletes
-// that Job. An operator who learns this after the fact has lost nothing they cannot mint again, but
-// only if the notes said both halves: copy it now, and here is how to replace it. This test is what
-// a later reader re-runs to find out whether they still do.
-func TestTheNotesSayTheFirstTokensAreTheOnlyCopyAndHowToReplaceThem(t *testing.T) {
+// A token is shown once, to whoever minted it, and the notes say what to do about losing one.
+//
+// Only digests are stored, so a lost token is not recovered: another is minted, by the same command
+// that minted the first, and the lost one is revoked by name. An operator who learns that at the
+// moment they discover the loss has lost nothing they cannot replace — but only if the notes said
+// so. This test is what a later reader re-runs to find out whether they still do.
+func TestTheNotesSayATokenIsShownOnceAndHowToReplaceOne(t *testing.T) {
 	out := notes(t)
 	for _, want := range []string{
-		"the only copy",
-		"the next upgrade",
+		"shown once",
+		"only digests are stored",
 		"mints nothing",
-		"exec deploy/t-taisce-manage -- /taisce operator issue replacement",
-		"exec deploy/t-taisce-manage -- /taisce credential issue replacement -project default",
+		"exec deploy/t-taisce-manage -- /taisce operator issue <name>",
+		"exec deploy/t-taisce-manage -- /taisce credential issue <name> -project default",
 		"Minting does not revoke what was lost",
 		"/taisce credential revoke <id>",
 	} {
@@ -203,16 +205,47 @@ func TestTheNotesSayTheFirstTokensAreTheOnlyCopyAndHowToReplaceThem(t *testing.T
 
 // With no management surface there is no workload holding the administrative connection, so the
 // recipe above would name a deployment that does not exist. The notes have to say that instead of
-// printing a command that cannot work — a recovery instruction that fails is worse than none,
-// because it is read as evidence that recovery was tried.
+// printing a command that cannot work — an instruction that fails is worse than none, because it is
+// read as evidence that the step was tried. It matters more now that the recipe is the only way to a
+// first credential and not only to a replacement.
 func TestTheNotesDoNotOfferAnExecRecipeWhenNoWorkloadHoldsTheAdminConnection(t *testing.T) {
 	out := notes(t, "--set", "manage.enabled=false")
 	if strings.Contains(out, "exec deploy/t-taisce-manage") {
 		t.Errorf("the notes offer an exec into a management surface that is disabled:\n%s", out)
 	}
-	for _, want := range []string{"the only copy", "it is disabled", "--set manage.enabled=true"} {
+	for _, want := range []string{"No credential exists yet", "it is disabled", "--set manage.enabled=true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the notes do not say %q with the management surface off:\n%s", want, out)
+		}
+	}
+}
+
+// No container this chart runs writes a credential to its log.
+//
+// A cluster ships container output to a log store, where it is kept under retention and access
+// rules this deployment did not choose. So the Job is told to mint nothing, and the notes send the
+// operator to a command whose output reaches their terminal and no log.
+func TestNoContainerInTheChartWritesACredentialToItsLog(t *testing.T) {
+	job := render(t, "--show-only", "templates/bootstrap-job.yaml")
+	if !strings.Contains(job, `"-mint-credentials=false"`) {
+		t.Errorf("the bootstrap Job is not told to mint nothing, so it prints the first tokens to a log:\n%s", job)
+	}
+	out := notes(t)
+	for _, gone := range []string{"logs job/", "grep token", "printed once"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the notes still send an operator to a log for a token (%q):\n%s", gone, out)
+		}
+	}
+	for _, want := range []string{
+		"No credential exists yet",
+		"exec deploy/t-taisce-manage -- /taisce operator issue",
+		"exec deploy/t-taisce-manage -- /taisce credential issue",
+		"-project default",
+		"to your terminal and to no log",
+		"/taisce credential revoke <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the notes do not say %q:\n%s", want, out)
 		}
 	}
 }

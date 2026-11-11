@@ -36,7 +36,10 @@ Every deployment arranges the same four things:
    - provisions the first project (`migrate.ProvisionScope`);
    - mints the first operator credential and the first project credential, but only when none can
      reach them yet. Each token is printed once, and only its digest is stored
-     ([commands.go](../../cmd/taisce/commands.go), `bootstrap`).
+     ([commands.go](../../cmd/taisce/commands.go), `bootstrap`). The chart tells it not to
+     (`-mint-credentials=false`): a Job's output is a container log, shipped and kept somewhere the
+     release did not choose, so on a cluster the operator mints the first credentials through `exec`,
+     whose output reaches their terminal and no log.
 
    Bootstrap is idempotent, because both deployment styles run it on every start or upgrade.
 3. **Serving identities that cannot change the schema.** The API and the workers connect as
