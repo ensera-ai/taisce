@@ -17,7 +17,7 @@ import (
 
 func render(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("helm", append([]string{"template", "t", "taisce"}, args...)...)
+	cmd := exec.Command("helm", append([]string{"template", "t", "taisce"}, withoutABackup(args)...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template %v: %v\n%s", args, err, out)
@@ -25,8 +25,24 @@ func render(t *testing.T, args ...string) string {
 	return string(out)
 }
 
+// withoutABackup states that the release has no backup, unless the caller said something about
+// backups itself.
+//
+// A release that says nothing is refused, so "the chart's defaults" no longer render at all, and
+// every test here that reads a rendering needs one. This is the one setting they are given, and it
+// is the answer that adds no object to what they read. The refusal itself is held by
+// TestAReleaseStatesWhereItsBackupsGoOrSaysItHasNone, which does not come through here.
+func withoutABackup(args []string) []string {
+	for _, a := range args {
+		if strings.Contains(a, "postgresql.cnpg.backup.") || a == "values-small.yaml" {
+			return args
+		}
+	}
+	return append([]string{"--set", "postgresql.cnpg.backup.acknowledgedNone=true"}, args...)
+}
+
 func TestTheChartLintsAndItsDefaultsAreHighlyAvailableAndClosed(t *testing.T) {
-	if out, err := exec.Command("helm", "lint", "taisce").CombinedOutput(); err != nil {
+	if out, err := exec.Command("helm", "lint", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true").CombinedOutput(); err != nil {
 		t.Fatalf("helm lint: %v\n%s", err, out)
 	}
 	out := render(t)
@@ -68,7 +84,7 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 		t.Error("the external rendering must reach the named secret and declare no cluster")
 	}
 	// The portal's ingress cannot be enabled while the portal is off: that would expose the surface's door.
-	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example").CombinedOutput(); err == nil || !strings.Contains(string(out), "manage.portal") {
+	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example").CombinedOutput(); err == nil || !strings.Contains(string(out), "manage.portal") {
 		t.Errorf("the portal ingress must be refused while the portal is off, got %v\n%s", err, out)
 	}
 	exposed := render(t, "--set", "manage.portal=on", "--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example",
@@ -76,7 +92,7 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 	if strings.Count(exposed, "kind: Ingress") != 2 || !strings.Contains(exposed, "path: /portal") || !strings.Contains(exposed, `value: "on"`) {
 		t.Error("enabling both ingresses renders both, the portal at its prefix")
 	}
-	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "ingress.api.enabled=true").CombinedOutput(); err == nil || !strings.Contains(string(out), "host is required") {
+	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set", "ingress.api.enabled=true").CombinedOutput(); err == nil || !strings.Contains(string(out), "host is required") {
 		t.Errorf("an ingress without a host is refused, got %v\n%s", err, out)
 	}
 }
@@ -106,7 +122,7 @@ func TestThePortalIngressAcceptsOnTheWayTheBinaryDoes(t *testing.T) {
 		}
 	}
 	for _, value := range []string{"off", "onn", "yes", ""} {
-		out, err := exec.Command("helm", "template", "t", "taisce", "--set-string", "manage.portal="+value,
+		out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set-string", "manage.portal="+value,
 			"--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example").CombinedOutput()
 		if err == nil || !strings.Contains(string(out), "manage.portal") {
 			t.Errorf("manage.portal=%q does not switch the portal on, and its ingress was not refused: %v\n%s", value, err, out)
@@ -167,7 +183,7 @@ func TestTheChartAsksForAnImageTheReleasePushed(t *testing.T) {
 // runner would not share.
 func notes(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("helm", append([]string{"install", "t", "taisce", "--dry-run=client", "-n", "taisce"}, args...)...)
+	cmd := exec.Command("helm", append([]string{"install", "t", "taisce", "--dry-run=client", "-n", "taisce"}, withoutABackup(args)...)...)
 	cmd.Env = append(os.Environ(), "KUBECONFIG=/dev/null")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -49,6 +49,7 @@ log "installing the chart at its default topology, small resources, no model"
 helm upgrade --install memory deploy/helm/taisce -n taisce --create-namespace --wait --timeout 20m \
   --set image.repository="${image%:*}" --set image.tag="${image##*:}" --set image.pullPolicy=Never \
   --set postgresql.cnpg.storage.size=2Gi --set postgresql.cnpg.sharedMemory=256Mi \
+  --set postgresql.cnpg.backup.acknowledgedNone=true \
   --set postgresql.cnpg.resources.requests.cpu=250m --set postgresql.cnpg.resources.requests.memory=512Mi --set postgresql.cnpg.resources.limits.memory=2Gi \
   --set postgresql.cnpg.parameters.shared_buffers=128MB --set postgresql.cnpg.parameters.effective_cache_size=512MB --set postgresql.cnpg.parameters.maintenance_work_mem=64MB --set postgresql.cnpg.parameters.max_wal_size=1GB \
   --set api.requireFormation=false --set worker.replicas=0 > "$results/helm-install.log" 2>&1

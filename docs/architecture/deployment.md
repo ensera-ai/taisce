@@ -401,8 +401,16 @@ formation is deliberately off.
 
 ```sh
 helm install memory deploy/helm/taisce \
-  --set postgresql.cnpg.instances=1 --set api.replicas=1 --set worker.replicas=1
+  --set postgresql.cnpg.instances=1 --set api.replicas=1 --set worker.replicas=1 \
+  --set postgresql.cnpg.backup.acknowledgedNone=true
 ```
+
+The last line is the chart's one question that has no default. A release must either name where its
+backups go (`postgresql.cnpg.backup.objectStore`) or state that it has none, and one that says
+neither is refused before anything is applied. Replicas are not a backup: they protect against
+losing a node, and everything else — a wrong erasure, a failed migration, an uninstall — reaches
+every instance within a second. [The chart's README](../../deploy/helm/README.md) covers both
+settings and what the chart cannot check.
 
 That makes every tier a single point of failure, and the chart renders it as asked. The default is
 the large shape so that nobody deploys the small one believing it was the large one.
