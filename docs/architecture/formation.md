@@ -93,19 +93,31 @@ took.
 ## The driver's pass
 
 `Driver.Run` in [driver.go](../../internal/formation/driver.go) runs a pass, waits one `Interval`, and
-repeats. The wait is the same whether the pass found work or not, so a busy backlog does not turn the
-driver into a tight loop hammering the database.
+repeats. The one exception is a pass that stopped at its per-project bound and left turns waiting:
+the next pass starts at once, because that work is model calls and waiting out the interval would
+turn the bound into a throttle. A pass that found nothing, or found only turns still inside their
+retry wait, waits the interval as before, so an idle or failing backlog does not become a tight loop
+against the database.
 
 Each pass, in `Driver.Once`:
 
 1. Records a heartbeat (see [health and progress](#health-and-progress)).
-2. Asks `ScopesWithBacklog` which projects have turns that are neither formed nor parked. Projects
-   are discovered from the log rather than configured, so a project created after the worker started
-   is picked up.
-3. For each of those projects, calls `Worker.Drain`. If the drain finished cleanly, it then runs the
-   derived passes for that project: subjects and reports, compaction, and recording which
-   notifications are owed. A project another replica is draining is counted as busy and skipped. A
-   project that fails is logged and does not stop the others.
+2. Asks `ScopesWithBacklog` which projects have turns that are neither formed nor parked, the one
+   whose oldest turn has waited longest first. Projects are discovered from the log rather than
+   configured, so a project created after the worker started is picked up.
+3. For each of those projects, attempts up to `TurnsPerScope` turns (eight by default) and moves on.
+   If that emptied the project's backlog cleanly, it then runs the derived passes for that project:
+   subjects and reports, compaction, and recording which notifications are owed. A project another
+   replica is working on is counted as busy and skipped. A project that fails is logged and does not
+   stop the others.
+
+   **A worker does not stay with one project until it is empty.** It used to, and a deep backlog —
+   or a project written to as fast as it formed, which never empties — held the worker for the whole
+   of it while every other project's turns sat stored and unformed behind it. With as many such
+   projects as workers, the rest did not form at all. Attempts are counted rather than turns formed,
+   because a project whose every turn fails slowly holds a worker just as long. A pass that stopped
+   at the bound anywhere starts the next pass at once instead of waiting out the interval, so the
+   bound shares the worker without slowing it ([D45](../decisions/D45.md)).
 4. Attempts up to `NotificationsPerPass` due deliveries, across all projects.
 
 Every `SealInterval`, the driver also seals the audit ledger and logs the head digest. Every
@@ -116,7 +128,8 @@ while it was down.
 > [!NOTE]
 > The derived passes run only for projects that had a backlog, and only after that project drained
 > without error. A quiet project, with no new turns, gets no subject, compaction or notification
-> pass.
+> pass. A project whose backlog never empties gets none either, for as long as that lasts: its
+> reports, segments and formed-memory notifications wait for the backlog, not for a slice of it.
 
 That has three effects:
 
@@ -139,8 +152,9 @@ call returns `ErrScopeBusy` at once, and the driver moves on to the next project
 
 The lock is held across the whole drain, model calls included. A lock taken inside the transaction
 that picks a turn would be released before the model call it was meant to protect. The lock is per
-project, not per instance, so a busy project cannot starve a quiet one. Different projects form in
-parallel on different workers; within one worker, projects are drained one after another.
+project, not per instance, and it is held for one slice of a project's backlog and then given up, so
+a busy project cannot hold a worker while a quiet one waits. Different projects form in parallel on
+different workers; within one worker, projects take turns, a slice each per pass.
 
 A few details:
 
