@@ -215,9 +215,6 @@ func TestAnonymousBurstsCannotQueueUnboundedRegistryQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer held.Rollback(ctx)
-	if _, err := held.Exec(ctx, `LOCK TABLE api_auth_capacity.credential IN ACCESS EXCLUSIVE MODE`); err != nil {
-		t.Fatal(err)
-	}
 	request := func(ctx context.Context) (int, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/v1/freshness", nil)
 		if err != nil {
@@ -234,14 +231,23 @@ func TestAnonymousBurstsCannotQueueUnboundedRegistryQueries(t *testing.T) {
 		}
 		return resp.StatusCode, nil
 	}
+	// The set of issued credentials is read once before the registry is made to block, so what
+	// follows measures lookups and not that read.
+	if status, err := request(ctx); err != nil || status != http.StatusUnauthorized {
+		t.Fatalf("an unknown token before the registry blocked: %d %v", status, err)
+	}
+	if _, err := held.Exec(ctx, `LOCK TABLE api_auth_capacity.credential IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
 	blocked, cancel := context.WithCancel(ctx)
 	defer cancel()
-	finished := make(chan struct{}, 2)
-	for i := 0; i < 2; i++ {
-		go func() { request(blocked); finished <- struct{}{} }()
-	}
+	finished := make(chan struct{}, 1)
+	go func() { request(blocked); finished <- struct{}{} }()
+	// One, not two. Every stranger together is one caller, and one caller may hold all the slots
+	// but one, so a stuck lookup for an unknown token leaves a slot for somebody who holds a
+	// credential. Two here would mean a flood could occupy the registry entirely.
 	deadline := time.Now().Add(time.Second)
-	for gate.Stats().ActiveAuthentication != 2 {
+	for gate.Stats().ActiveAuthentication != 1 {
 		if time.Now().After(deadline) {
 			t.Fatal("authentication never reached its bound")
 		}
@@ -259,7 +265,7 @@ func TestAnonymousBurstsCannotQueueUnboundedRegistryQueries(t *testing.T) {
 		if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE application_name='taisce_test_auth_capacity' AND wait_event_type='Lock'`).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
-		if waiting == 2 {
+		if waiting == 1 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -276,7 +282,6 @@ func TestAnonymousBurstsCannotQueueUnboundedRegistryQueries(t *testing.T) {
 		t.Fatal("admission hid liveness")
 	}
 	cancel()
-	<-finished
 	<-finished
 	deadline = time.Now().Add(5 * time.Second)
 	for gate.Stats().ActiveAuthentication != 0 {
@@ -298,4 +303,84 @@ func TestAnonymousBurstsCannotQueueUnboundedRegistryQueries(t *testing.T) {
 	if status, err := request(ctx); err != nil || status != http.StatusUnauthorized {
 		t.Fatalf("registry capacity did not recover: %d %v", status, err)
 	}
+}
+
+// A flood from somebody holding nothing does not refuse a caller who holds a credential.
+//
+// Through the door itself, against a real registry. Three kinds of stranger: no header at all,
+// something that cannot be a token, and a well-formed token this instance never issued. The first
+// two have nothing to look up and cost nothing. The third costs a lookup, is bounded by rate, and
+// is refused once the allowance is spent — and through all of it the holder is answered.
+//
+// Before this held, every request spent from one bucket before its credential was read: the
+// headerless flood below emptied it in a fraction of a second and the holder's next request was
+// answered 429.
+func TestAStrangersFloodDoesNotRefuseACallerWhoHoldsACredential(t *testing.T) {
+	h := newHarness(t, "api_stranger_flood")
+
+	holder := func(when string) {
+		t.Helper()
+		if status, body := h.raw(t, http.MethodGet, "/v1/freshness", nil, h.token); status != http.StatusOK {
+			t.Fatalf("%s, the caller holding a credential was answered %d: %s", when, status, body)
+		}
+	}
+	holder("before any flood")
+
+	for i := 0; i < 1500; i++ {
+		if status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, ""); status != http.StatusUnauthorized {
+			t.Fatalf("a request with no credential was answered %d at request %d; it has nothing to look up and nothing to be limited for", status, i)
+		}
+		if i%100 == 0 {
+			holder("during a flood of requests with no credential")
+		}
+	}
+	holder("after 1500 requests with no credential")
+
+	for i := 0; i < 1500; i++ {
+		if status, _ := h.raw(t, http.MethodGet, "/v1/freshness", nil, "not-a-token"); status != http.StatusUnauthorized {
+			t.Fatalf("something that cannot be a token was answered %d at request %d", status, i)
+		}
+	}
+	holder("after 1500 requests carrying something that cannot be a token")
+
+	// Well-formed and never issued: each is a registry lookup that finds nothing. These are what the
+	// allowance exists to bound, so the flood must eventually be refused — and the holder must not.
+	limited := 0
+	for i := 0; i < 1200; i++ {
+		stranger := credential.Prefix + fmt.Sprintf("%043d", i)
+		switch status, body := h.raw(t, http.MethodGet, "/v1/freshness", nil, stranger); status {
+		case http.StatusUnauthorized:
+		case http.StatusTooManyRequests:
+			limited++
+		default:
+			t.Fatalf("an unknown token was answered %d: %s", status, body)
+		}
+		if i%50 == 0 {
+			holder("during a flood of well-formed unknown tokens")
+		}
+	}
+	holder("after a flood of well-formed unknown tokens")
+	t.Logf("of 1200 unknown tokens, %d were refused by the allowance; the holder was never refused", limited)
+}
+
+// A caller holding a credential is not bounded by the allowance that bounds strangers.
+//
+// The bucket holds 256 and refills at 128 a second. Charged on every request, it made that the
+// service's own ceiling: one caller asking for freshness in a loop was refused after a few hundred
+// requests, on a process doing nothing else.
+func TestACredentialHolderIsNotBoundedByTheStrangersAllowance(t *testing.T) {
+	h := newHarness(t, "api_holder_ceiling")
+	started := time.Now()
+	const requests = 2000
+	for i := 0; i < requests; i++ {
+		if status, body := h.raw(t, http.MethodGet, "/v1/freshness", nil, h.token); status != http.StatusOK {
+			t.Fatalf("request %d of %d from one credential, %.1fs in, was answered %d: %s",
+				i, requests, time.Since(started).Seconds(), status, body)
+		}
+	}
+	// Reported, not asserted: how fast a development machine answered is not evidence of anything,
+	// and it is what says whether this run could have reached the old ceiling at all.
+	elapsed := time.Since(started).Seconds()
+	t.Logf("%d sequential requests in %.1fs; the old allowance would have covered %.0f of them",
+		requests, elapsed, 256+128*elapsed)
 }

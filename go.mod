@@ -1,6 +1,6 @@
 // Taisce — memory for agents.
 //
-// Go 1.27.3, pinned exactly. The `go` directive is the oldest release the source needs; the
+// Go 1.27.4, pinned exactly. The `go` directive is the oldest release the source needs; the
 // `toolchain` line is the release that builds it, and it is what makes a build on any other version
 // fetch this one instead of proceeding. A `go` directive alone is a minimum, so without the second
 // line a machine holding something newer builds with that and reports success — which is how a local
@@ -10,6 +10,11 @@
 // standard library — `html/template` through the operator portal's renderer, `http2` through the
 // server's own Serve, through `writeJSON` and through the notification sender. Measured with
 // govulncheck on 2026-11-09: thirteen reachable here, zero under 1.27.3 with #163 in (#162).
+//
+// And 1.27.4 rather than 1.27.3 because an advisory published on 2026-11-11 — a crash in the HTTP/1
+// server, GO-2026-6859 — is reachable from both listeners under 1.27.3 and fixed in 1.27.4 (#208). The
+// pin is exact, so it does not follow a patch release on its own: an advisory against the pinned
+// version turns every build red until this line moves, which is the pin working rather than failing.
 //
 // What this does not cover: the line binds `GOTOOLCHAIN=auto`, which is the default. `GOTOOLCHAIN=local`
 // or an explicit version overrides it, deliberately — that override is how both toolchains were
@@ -23,7 +28,7 @@ module github.com/ensera-ai/taisce
 
 go 1.27.1
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/google/uuid v1.6.0

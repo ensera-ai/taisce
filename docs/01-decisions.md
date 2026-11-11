@@ -2210,6 +2210,7 @@ message's length. Security is unchanged rather than improved: the guards that st
 still stand on them, and this change's first attempt is the reason that sentence is here. Erasure's
 guarantees are exactly as they were, which is the condition it had to meet.
 
+<<<<<<< HEAD
 ## D38 — A recall explains itself when asked, and the explanation carries references rather than text
 
 **Date.** 2026-11-09. **Issue.** [#160](https://github.com/ensera-ai/taisce/issues/160).
@@ -2267,3 +2268,68 @@ new version rather than a patch, which is the ordinary cost of publishing anythi
 control is on, and the collector is a nil value otherwise, so a recall that did not ask allocates
 nothing. It touches security by stating a boundary rather than moving one — the budget bounds what
 crosses the wire, and the explanation is held to it.
+=======
+## D39 — A lookup is charged to strangers' allowance only when the token is not one the instance issued
+
+**Date.** 2026-11-11. **Issue.** [#214](https://github.com/ensera-ai/taisce/issues/214).
+
+**Why it was open.** Every protected request took a token from one bucket — 256, refilled at 128 a
+second, per process — on the first line of the door, before its `Authorization` header was read. Two
+things followed, and neither depended on hardware. A process served at most 128 requests a second
+whatever it ran on, freshness polls included. And anyone who could reach the port could empty the
+bucket without a credential: a request with no header spent a token and was then refused, so about
+130 of those a second left nothing for callers who held credentials, who were answered `429`.
+Measured against the door on a real registry: a flood with no credential was itself refused at
+request 259, and one credential asking for freshness in a loop was refused at request 341, 0.7
+seconds in.
+
+**Decided.**
+- **What cannot be a token is refused before anything is spent.** No header, or a value without the
+  token prefix, has nothing to look up. It costs the registry nothing, so there is nothing for a rate
+  limit to protect, and it is answered `401` without one.
+- **A token the instance issued spends nothing from the strangers' allowance.** The store holds the
+  digests of the credentials the registry had unrevoked when it was last read, at most five seconds
+  ago. A token whose SHA-256 is in that set is bounded by the lookup slots and then by the work
+  slots, which are sized from the memory pool and shared between projects. Any other well-formed
+  token is bounded by the bucket, as before.
+- **The set decides who pays, never who is let in.** Every admitted request is still resolved against
+  the registry. A revocation applies to the next request, exactly as the security model promises, and
+  a credential minted a second ago works before the set has heard of it. Staleness therefore costs
+  one thing in each direction: a new credential pays from the strangers' allowance for up to five
+  seconds, and a revoked one has its refusals go unbilled for up to five seconds.
+- **No one caller holds every lookup slot**, where every stranger together is one caller. Lookups are
+  not queued, so a slot held is a request refused. A flood of unknown tokens can take all the slots
+  but one, and so can one credential sent as fast as its holder can send it.
+- **Each door knows only its own kind.** An operator token is not a known caller at the memory door,
+  or a holder of one could spend the allowance meant for the other.
+
+**Rejected: remembering a resolved grant for a second or two.** It is the usual answer and it would
+also take two round trips off most requests. It costs the property that a revocation applies to the
+very next request, which the security page states as a guarantee. The set gives the fairness without
+that trade, because it never stands in for the lookup.
+
+**Rejected: classifying by the stored token prefix.** Cheaper — no hash before the decision — and the
+prefix is already held to tell credentials apart. It is also shown in every credential list, so anyone
+who had seen one could craft tokens that ride its holder's allowance. A digest in the set means
+holding a token the instance issued, and nothing less does.
+
+**Rejected: charging the bucket only when a lookup fails.** It removes the ceiling and leaves the
+outage: a flood of well-formed unknown tokens still empties the bucket, and the next request is
+refused at the door before anybody knows whether it is a customer's.
+
+**Rejected: a queue for lookups.** It would end the case where two holders arriving together refuse a
+third. It also turns a refusal into a wait on the path every request passes, bounded by a queue length
+somebody has to choose without a latency target to choose it against (#155). Left as a stated limit.
+
+**Undo cost.** Low. The set, the classification and the per-caller bound are in two files and no
+schema; reverting them restores the single bucket. Nothing stored depends on it.
+
+**Impact.** Security: a stranger's volume no longer becomes a credential holder's refusal, and what a
+stranger may do is unchanged — the same allowance, and one fewer lookup slot. What it does not cover
+is beside the mechanism: with one registry connection there is one slot and nothing to hold back;
+several issued credentials acting together can hold every slot; and a slot is refused rather than
+waited for. Performance: the door no longer caps a process at 128 requests a second. No figure is
+claimed for what it now serves — that is whatever the work slots and the database allow, and nothing
+here measured it. The cost added to every request is one SHA-256 and a map lookup, and one registry
+read every five seconds per process.
+>>>>>>> origin/main

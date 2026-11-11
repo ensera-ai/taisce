@@ -370,19 +370,26 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 // without holding a work slot the looped-back request then needs, which with a per-credential
 // limit of one would refuse every tool call as busy.
 func (s *Server) resolveGrant(w http.ResponseWriter, r *http.Request) (credential.Grant, bool) {
-	releaseAuth, ok := s.admission.authenticate(time.Now())
-	if !ok {
-		writeAdmissionRefusal(w)
-		return credential.Grant{}, false
-	}
-	defer releaseAuth()
+	// The header is read before anything is spent. A request with no token, or with something that
+	// cannot be one, has nothing to look up, so it is refused here and costs the registry nothing —
+	// and it takes nothing from the allowance that bounds lookups, which it was never going to make.
 	token, ok := bearer(r.Header.Get("Authorization"))
-	if !ok {
+	if !ok || !credential.WellFormed(token) {
 		s.recordRefusedAuth(r)
 		writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 		return credential.Grant{}, false
 	}
 	authCtx, cancelAuth := context.WithTimeout(r.Context(), 2*time.Second)
+	// Which allowance pays for the lookup, decided before the lookup. It is not a verdict on the
+	// credential: the registry is still asked, below, on every request.
+	known, _ := s.credentials.Known(authCtx, token, credential.KindProject)
+	releaseAuth, ok := s.admission.authenticate(time.Now(), known)
+	if !ok {
+		cancelAuth()
+		writeAdmissionRefusal(w)
+		return credential.Grant{}, false
+	}
+	defer releaseAuth()
 	grant, err := s.credentials.Resolve(authCtx, token)
 	cancelAuth()
 	if errors.Is(err, credential.ErrUnknown) {

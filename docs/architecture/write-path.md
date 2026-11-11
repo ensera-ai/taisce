@@ -97,7 +97,8 @@ from the memory and registry pool sizes when the server starts.
 | Concurrent work for one project | half the process bound, rounded down, at least 1 | `NewAdmission` |
 | Concurrent work for one credential | half the project bound, at least 1 | `NewAdmission` |
 | Concurrent credential lookups | `min(2, registry pool max)` | `NewAdmission` |
-| Authentication rate | refill of 128 per second, burst of 256 | `authRequestsPerSecond`, `authRequestBurst` |
+| Lookups one caller may hold | all the slots but one, at least 1; every stranger together is one caller | `NewAdmission` |
+| Lookup rate for tokens the instance did not issue | refill of 128 per second, burst of 256; an issued token spends none of it | `authRequestsPerSecond`, `authRequestBurst` |
 | Smallest pools an API process accepts | 3 memory connections, 1 registry connection | `NewAdmission` |
 | Deadline on a protected request | 30 seconds, carried into every database call | `Server.authenticated` |
 | Deadline on the credential lookup | 2 seconds | `Server.resolveGrant` |

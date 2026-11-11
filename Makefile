@@ -89,7 +89,7 @@ test: licence
 # licence, the full suite with the coverage floor, vet, and the reachable-advisory check — in a Linux
 # container under colima, against a fresh substrate and a clean clone of the commit. The hosted
 # workflow is kept, run by hand only, for when the account's Actions minutes are available.
-GATE_IMAGE ?= taisce-gate:1.27.3
+GATE_IMAGE ?= taisce-gate:1.27.4
 
 gate-image:
 	docker build -t $(GATE_IMAGE) deploy/gate
