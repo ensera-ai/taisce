@@ -32,6 +32,9 @@ postgresql:
       storageClass: ""
     # The shared-memory volume. Empty derives it from the memory limit, at an eighth — which is
     # always twice maintenance_work_mem, the bound a parallel index build needs it to clear.
+    # Stated, it is a whole number of Mi or Gi and anything else is refused: the operator compares
+    # this size by spelling with the one the API server stored, and a mismatch replaces a replica
+    # without end.
     sharedMemory: ""
     # The size of the database, and the one number the parameters below follow.
     #

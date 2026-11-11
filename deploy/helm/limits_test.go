@@ -242,7 +242,7 @@ func TestTheDatabasesMemoryParametersFollowItsMemoryLimit(t *testing.T) {
 	out := render(t, "--show-only", "templates/postgresql.yaml")
 	for _, want := range []string{
 		`shared_buffers: "8192MB"`, `effective_cache_size: "22528MB"`,
-		`maintenance_work_mem: "2048MB"`, `max_wal_size: "16384MB"`, `shm: "4096Mi"`,
+		`maintenance_work_mem: "2048MB"`, `max_wal_size: "16384MB"`, `shm: "4Gi"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("at a 32Gi limit the derivation must reproduce the chart's own defaults; it lacks %q", want)
@@ -254,7 +254,7 @@ func TestTheDatabasesMemoryParametersFollowItsMemoryLimit(t *testing.T) {
 	for _, c := range []struct{ limit, buffers, maintenance, shm string }{
 		{"2Gi", `"512MB"`, `"128MB"`, `"256Mi"`},
 		{"4096Mi", `"1024MB"`, `"256MB"`, `"512Mi"`},
-		{"64Gi", `"16384MB"`, `"4096MB"`, `"8192Mi"`},
+		{"64Gi", `"16384MB"`, `"4096MB"`, `"8Gi"`},
 	} {
 		out := render(t, "--set-string", "postgresql.cnpg.resources.limits.memory="+c.limit, "--show-only", "templates/postgresql.yaml")
 		if !strings.Contains(out, "shared_buffers: "+c.buffers) || !strings.Contains(out, "maintenance_work_mem: "+c.maintenance) || !strings.Contains(out, "shm: "+c.shm) {
@@ -275,5 +275,69 @@ func TestTheDatabasesMemoryParametersFollowItsMemoryLimit(t *testing.T) {
 	refused, err := exec.Command("helm", "template", "t", "taisce", "--set-string", "postgresql.cnpg.resources.limits.memory=32G").CombinedOutput()
 	if err == nil || !strings.Contains(string(refused), "write it in Gi or Mi") {
 		t.Errorf("a memory limit in an unreadable unit must be refused: %v\n%s", err, refused)
+	}
+}
+
+// The shared-memory volume's size is written the way the API server stores it.
+//
+// A quantity has many spellings and Kubernetes keeps one: the largest binary suffix that leaves a
+// whole number, so 1024Mi is stored as 1Gi. The database operator decides whether a pod needs
+// replacing by comparing the pod it finds with the pod it would build from the cluster's spec. With
+// the chart writing 1024Mi it built one, found the other, and replaced the replica — whose
+// replacement was stored as 1Gi again. Measured on a three-instance cluster with an 8Gi limit: one
+// replica replaced every fourteen seconds, 329 times in 77 minutes of operator log, for as long as
+// the release existed. The primary is rolled last, so it was never reached and the service answered
+// throughout; the only sign was a replica whose age was always a few seconds.
+//
+// It happened at every limit whose eighth is a whole number of gibibytes, which is 8Gi, 16Gi, 24Gi
+// and the chart's own default of 32Gi.
+//
+// The check does not ask a Kubernetes library what canonical means, because the property is small
+// enough to state: a binary quantity is in stored form when its number is not a multiple of 1024.
+//
+// What this does not cover: a quantity an operator writes anywhere else in the values file. Only the
+// shared-memory volume is known to be compared by spelling, and only it is derived by this chart.
+func TestTheSharedMemoryVolumeIsSizedInTheFormTheAPIServerStores(t *testing.T) {
+	shm := regexp.MustCompile(`shm: "(\d+)(Mi|Gi|Ti)"`)
+	stored := func(t *testing.T, out, why string) string {
+		t.Helper()
+		m := shm.FindStringSubmatch(out)
+		if m == nil {
+			t.Fatalf("%s: no shared-memory size in the rendering:\n%s", why, out)
+		}
+		n := 0
+		for _, d := range m[1] {
+			n = n*10 + int(d-'0')
+		}
+		if n == 0 || n%1024 == 0 {
+			t.Errorf("%s: shm is %s%s, which the API server stores under a different spelling, so the operator replaces the pod without end", why, m[1], m[2])
+		}
+		return m[1] + m[2]
+	}
+	// Derived, across the limits an operator is likely to pick and two whose eighth is not a whole
+	// gibibyte. The amount is asserted as well as the form: canonical and wrong is still wrong.
+	for _, c := range []struct{ limit, want string }{
+		{"2Gi", "256Mi"}, {"4096Mi", "512Mi"}, {"12Gi", "1536Mi"},
+		{"8Gi", "1Gi"}, {"16Gi", "2Gi"}, {"24Gi", "3Gi"}, {"32Gi", "4Gi"}, {"64Gi", "8Gi"},
+	} {
+		out := render(t, "--set-string", "postgresql.cnpg.resources.limits.memory="+c.limit, "--show-only", "templates/postgresql.yaml")
+		if got := stored(t, out, "at a "+c.limit+" limit"); got != c.want {
+			t.Errorf("at a %s limit the volume is an eighth of it, %s; rendered %s", c.limit, c.want, got)
+		}
+	}
+	// Stated by the operator in a spelling that is not the stored one: the same amount, respelled.
+	for _, c := range []struct{ stated, want string }{{"1024Mi", "1Gi"}, {"3072Mi", "3Gi"}, {"1Gi", "1Gi"}, {"768Mi", "768Mi"}} {
+		out := render(t, "--set-string", "postgresql.cnpg.sharedMemory="+c.stated, "--show-only", "templates/postgresql.yaml")
+		if got := stored(t, out, "stated as "+c.stated); got != c.want {
+			t.Errorf("sharedMemory stated as %s must render as %s; rendered %s", c.stated, c.want, got)
+		}
+	}
+	// A stated size this chart cannot respell is refused. Passing it through unread is how the loop
+	// comes back: 1G, 1000M and 1.5Gi are all valid quantities and none is stored as written.
+	for _, bad := range []string{"1G", "1000M", "1.5Gi", "0Gi", "Gi", "1073741824"} {
+		out, err := exec.Command("helm", "template", "t", "taisce", "--set-string", "postgresql.cnpg.sharedMemory="+bad).CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "postgresql.cnpg.sharedMemory") || !strings.Contains(string(out), "whole number of Mi or Gi") {
+			t.Errorf("sharedMemory=%q must be refused with the reason: %v\n%s", bad, err, out)
+		}
 	}
 }
