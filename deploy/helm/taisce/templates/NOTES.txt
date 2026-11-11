@@ -22,5 +22,23 @@ and it is disabled. Enable it, mint, then disable it again:
   helm upgrade {{ .Release.Name }} <chart> --reuse-values --set manage.enabled=true
 {{- end }}
 
+{{- if eq .Values.postgresql.mode "cnpg" }}
+{{ if .Values.postgresql.cnpg.backup.objectStore }}
+Backups go to the ObjectStore {{ .Values.postgresql.cnpg.backup.objectStore }}: the write-ahead log continuously, and a base backup on
+"{{ .Values.postgresql.cnpg.backup.schedule }}" and once now. This rendering could not check that the store exists or that a
+backup has completed. Check both:
+  kubectl -n {{ .Release.Namespace }} get backup
+  kubectl -n {{ .Release.Namespace }} get cluster {{ include "taisce.db" . }} -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")]}'
+A backup nobody has restored from is a hope. Rehearse a restore into a second cluster before you
+depend on this one. A restore also brings back everything erased since the backup was taken, and
+nothing here erases it again.
+{{- else }}
+THIS DEPLOYMENT HAS NO BACKUP. postgresql.cnpg.backup.acknowledgedNone is true, so it holds only
+what its {{ .Values.postgresql.cnpg.instances }} database instance(s) hold. An erasure of the wrong subject, a failed migration, a dropped
+schema or an uninstall cannot be recovered from. To change that, create an ObjectStore and set
+postgresql.cnpg.backup.objectStore to its name.
+{{- end }}
+{{- end }}
+
 No RTO or RPO is claimed: this is a topology with a failover path, and the recovery time is what
 the failover script measures on your cluster (deploy/helm/README.md).

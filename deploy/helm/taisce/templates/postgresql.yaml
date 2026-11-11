@@ -36,6 +36,23 @@
 {{- fail (printf "this release declares %d client connections and max_connections is %d: %d replicas of the API at %d+%d, %d workers at %d, the ops centre at %d and bootstrap at 3, which needs max_connections of at least %d to leave the 25%% headroom operators and migrations connect through. Raise postgresql.cnpg.parameters.max_connections, or lower the pools or the replica counts."
      $demand $slots (int .Values.api.replicas) (int .Values.api.memoryPool) (int .Values.api.registryPool) (int .Values.worker.replicas) (int .Values.worker.memoryPool) (int .Values.manage.adminPool) (div (mul $demand 125) 100)) }}
 {{- end }}
+{{/* A release states where its backups go, or says it has none.
+
+     Refused at render for the reason the connection sum is: it is cheaper to correct before
+     anything is applied than to discover on the day something has to be recovered. Both at once is
+     refused too, because the alternative is guessing which was meant.
+
+     What this does not cover. It checks that an object store was named, not that it exists, that
+     its credentials work, or that a backup has ever completed — those are true or false on a
+     cluster, not in a rendering, and the notes say how to check. And it says nothing about restoring:
+     a backup nobody has restored from is a hope, and the restore is the operator's to rehearse. */}}
+{{- $backup := .Values.postgresql.cnpg.backup }}
+{{- if and $backup.objectStore $backup.acknowledgedNone }}
+{{- fail "postgresql.cnpg.backup states both an objectStore and acknowledgedNone=true. State one: the object store if this deployment is backed up, acknowledgedNone if it is not." }}
+{{- end }}
+{{- if not (or $backup.objectStore $backup.acknowledgedNone) }}
+{{- fail (printf "this release declares %d database instance(s) and no backup. Replicas protect against losing a node and nothing else: an erasure of the wrong subject, a failed migration, a dropped schema and an uninstall are on every instance within a second. Set postgresql.cnpg.backup.objectStore to the name of an ObjectStore in this namespace, or set postgresql.cnpg.backup.acknowledgedNone=true to state that this deployment has no backup on purpose." (int .Values.postgresql.cnpg.instances)) }}
+{{- end }}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -43,6 +60,16 @@ metadata:
   labels: {{- include "taisce.labels" . | nindent 4 }}
 spec:
   instances: {{ .Values.postgresql.cnpg.instances }}
+  {{- if $backup.objectStore }}
+  # Continuous archiving through the Barman Cloud plugin rather than the operator's own
+  # `backup.barmanObjectStore`: the in-tree integration is deprecated by the operator and marked for
+  # removal, and a chart written against it would render a field a later operator refuses.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ $backup.objectStore | quote }}
+  {{- end }}
   imageName: {{ .Values.postgresql.cnpg.image | quote }}
   enableSuperuserAccess: false
   primaryUpdateStrategy: unsupervised
@@ -70,4 +97,25 @@ spec:
         - CREATE EXTENSION IF NOT EXISTS btree_gist
         - CREATE EXTENSION IF NOT EXISTS pg_stat_statements
         - ALTER ROLE taisce_admin CREATEROLE
+{{- if $backup.objectStore }}
+---
+# The base backup. Archived write-ahead log is only replayable on top of one, so without this the
+# archive above is a record of changes to a starting point nobody kept.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ include "taisce.db" . }}
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $backup.schedule | quote }}
+  immediate: true
+  # Owned by this schedule, so removing the schedule removes the Backup objects it made. The
+  # backups themselves stay in the object store, under its own retention.
+  backupOwnerReference: self
+  cluster:
+    name: {{ include "taisce.db" . }}
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+{{- end }}
 {{- end }}

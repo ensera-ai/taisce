@@ -757,6 +757,13 @@ type RejectedClaim struct {
 type Anchor struct {
 	Entity  Entity
 	Matched string
+	// Similarity is what the meaning arm scored this entity, and zero for a name that matched
+	// exactly — an exact match has nothing to score.
+	//
+	// It is not in the published bundle: `matched` carries the arm's own string form there, which
+	// version 1 froze. This is the number, for the explanation an `explain` recall returns, and it
+	// exists because a bad answer from the meaning arm is unexplainable without it.
+	Similarity float64
 }
 
 // DegradedCitationContext says at least one returned fact came back without the words around its
@@ -943,6 +950,12 @@ type Bundle struct {
 	// turn and is not a precondition for one. An agent handed less keeps working; an agent handed an
 	// error stops.
 	Degraded []string
+	// Explain is the per-stage view of this recall, present only when the caller asked for it.
+	//
+	// Nil is the ordinary case and means it was not asked for, which is why it is a pointer rather
+	// than a zero value: an empty explanation and no explanation are different answers, and the same
+	// discipline that makes `degraded` present-and-empty makes this absent until requested.
+	Explain *Explain
 	// Reach says how the bundle was arrived at: what the question offered, what of it was found, and
 	// where the facts came from.
 	//

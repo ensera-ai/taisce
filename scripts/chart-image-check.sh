@@ -22,7 +22,7 @@ repo="${2:?usage: chart-image-check.sh <packaged chart .tgz> <image repository> 
 pushed="${3:?usage: chart-image-check.sh <packaged chart .tgz> <image repository> <pushed refs, comma-separated>}"
 
 # The colon right after the repository keeps a sibling such as taisce-postgres out of the match.
-wanted="$(helm template check "$chart" | grep -oE "${repo//./\\.}:[^\"'[:space:]]+" | sort -u || true)"
+wanted="$(helm template check "$chart" --set postgresql.cnpg.backup.acknowledgedNone=true | grep -oE "${repo//./\\.}:[^\"'[:space:]]+" | sort -u || true)"
 if [ -z "$wanted" ]; then
   echo "chart-image-check: the chart names no ${repo} image, so there is nothing it could install" >&2
   exit 1

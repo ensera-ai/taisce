@@ -370,19 +370,26 @@ func (s *Server) authenticated(next grantedHandler) http.Handler {
 // without holding a work slot the looped-back request then needs, which with a per-credential
 // limit of one would refuse every tool call as busy.
 func (s *Server) resolveGrant(w http.ResponseWriter, r *http.Request) (credential.Grant, bool) {
-	releaseAuth, ok := s.admission.authenticate(time.Now())
-	if !ok {
-		writeAdmissionRefusal(w)
-		return credential.Grant{}, false
-	}
-	defer releaseAuth()
+	// The header is read before anything is spent. A request with no token, or with something that
+	// cannot be one, has nothing to look up, so it is refused here and costs the registry nothing —
+	// and it takes nothing from the allowance that bounds lookups, which it was never going to make.
 	token, ok := bearer(r.Header.Get("Authorization"))
-	if !ok {
+	if !ok || !credential.WellFormed(token) {
 		s.recordRefusedAuth(r)
 		writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 		return credential.Grant{}, false
 	}
 	authCtx, cancelAuth := context.WithTimeout(r.Context(), 2*time.Second)
+	// Which allowance pays for the lookup, decided before the lookup. It is not a verdict on the
+	// credential: the registry is still asked, below, on every request.
+	known, _ := s.credentials.Known(authCtx, token, credential.KindProject)
+	releaseAuth, ok := s.admission.authenticate(time.Now(), known)
+	if !ok {
+		cancelAuth()
+		writeAdmissionRefusal(w)
+		return credential.Grant{}, false
+	}
+	defer releaseAuth()
 	grant, err := s.credentials.Resolve(authCtx, token)
 	cancelAuth()
 	if errors.Is(err, credential.ErrUnknown) {
@@ -658,6 +665,63 @@ type recallResponse struct {
 	// Reach is how this bundle was arrived at. Always present, because an empty bundle without it
 	// cannot say whether the question named something unknown or something known-and-silent.
 	Reach reachPayload `json:"reach"`
+	// Explain is the per-stage view, present only when the request asked for it. Absent rather than
+	// empty, because an explanation nobody asked for and an explanation with nothing in it are
+	// different answers — and this is the one field whose presence is the caller's choice.
+	Explain *explainPayload `json:"explain,omitempty"`
+}
+
+// explainPayload is one recall, stage by stage: what each arm proposed, what each stage offered, and
+// what the cuts took.
+//
+// It carries no text the bundle itself withheld. A fact the caller's own budget cut is a fact they
+// were not given, and naming its words here would hand it back through the other door and make the
+// budget a suggestion. So a dropped candidate is a reference, a size and whatever the stage scored
+// it — enough to look up through record inspection, which is authorised in its own right.
+type explainPayload struct {
+	Anchors []explainAnchorPayload `json:"anchors"`
+	Stages  []explainStagePayload  `json:"stages"`
+}
+
+type explainAnchorPayload struct {
+	EntityID string `json:"entity_id"`
+	Name     string `json:"name"`
+	// Arm is `name` for a term in the question that matched a stored name or alias, and `meaning`
+	// for the semantic surface's proposal.
+	Arm string `json:"arm"`
+	// Matched is the term that reached it, for the name arm; empty for the meaning arm, which
+	// matched the question rather than a term in it.
+	Matched string `json:"matched"`
+	// Score is the meaning arm's similarity, and zero for the name arm, which matched exactly.
+	Score float64 `json:"score"`
+	// Kept says the anchor survived into the bundle. An anchor that was proposed and dropped is the
+	// row the bundle cannot show, because the bundle lists only what survived.
+	Kept  bool `json:"kept"`
+	Facts int  `json:"facts"`
+}
+
+type explainStagePayload struct {
+	Surface string `json:"surface"`
+	// Ran says the stage executed. False when it was selected and then skipped, and `degraded` says
+	// why.
+	Ran bool `json:"ran"`
+	// Offered is what the stage produced before anything in this process cut it; Kept is what
+	// reached the caller.
+	Offered int                  `json:"offered"`
+	Kept    int                  `json:"kept"`
+	Dropped []explainDropPayload `json:"dropped"`
+}
+
+type explainDropPayload struct {
+	// Ref identifies the candidate: a fact id, a report id, a passage's chunk id. Never its text.
+	Ref string `json:"ref"`
+	// Cut is `rows` for the query's own row bound and `budget` for the caller's character budget.
+	Cut string `json:"cut"`
+	// Characters is what it would have cost. It is the number that explains the cut: a first
+	// dropped candidate costing more than the whole remaining budget says to ask for more
+	// characters rather than to doubt the retrieval.
+	Characters int     `json:"characters"`
+	Score      float64 `json:"score"`
 }
 
 // reachPayload reports the shape rather than a verdict.
@@ -875,6 +939,38 @@ func renderBundle(b domain.Bundle) recallResponse {
 			ChunkID: p.ChunkID, SourceID: p.SourceID, Ordinal: p.Ordinal, Role: p.Role, Quote: p.Quote,
 			Similarity: p.Similarity, OccurredAt: p.OccurredAt, Complete: p.Complete,
 		})
+	}
+	out.Explain = renderExplain(b.Explain)
+	return out
+}
+
+// renderExplain shapes the per-stage view for the wire, or nothing when none was asked for.
+//
+// Every list is present and empty rather than absent, for the reason the bundle's own lists are: a
+// stage that offered nothing and a stage that did not run are different answers, and a caller that
+// cannot tell them apart cannot debug either.
+func renderExplain(e *domain.Explain) *explainPayload {
+	if e == nil {
+		return nil
+	}
+	out := &explainPayload{Anchors: []explainAnchorPayload{}, Stages: []explainStagePayload{}}
+	for _, a := range e.Anchors {
+		out.Anchors = append(out.Anchors, explainAnchorPayload{
+			EntityID: a.EntityID, Name: a.Name, Arm: a.Arm, Matched: a.Matched,
+			Score: a.Score, Kept: a.Kept, Facts: a.Facts,
+		})
+	}
+	for _, s := range e.Stages {
+		stage := explainStagePayload{
+			Surface: s.Surface, Ran: s.Ran, Offered: s.Offered, Kept: s.Kept,
+			Dropped: []explainDropPayload{},
+		}
+		for _, d := range s.Dropped {
+			stage.Dropped = append(stage.Dropped, explainDropPayload{
+				Ref: d.Ref, Cut: d.Cut, Characters: d.Characters, Score: d.Score,
+			})
+		}
+		out.Stages = append(out.Stages, stage)
 	}
 	return out
 }

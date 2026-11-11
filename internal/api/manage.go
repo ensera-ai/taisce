@@ -153,13 +153,22 @@ func (m *ManagementServer) operated(next grantedHandler) http.Handler {
 		requestCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		r = r.WithContext(requestCtx)
-		releaseAuth, ok := m.admission.authenticate(time.Now())
-		if !ok {
-			writeAdmissionRefusal(w)
+		// Read before anything is spent, for the reason the memory door gives: what cannot be a
+		// token has nothing to look up and nothing to be rate-limited for.
+		token, ok := bearer(r.Header.Get("Authorization"))
+		if !ok || !credential.WellFormed(token) {
+			m.recordRefusedAuth(r)
+			writeError(w, http.StatusUnauthorized, codeUnauthenticated, "a credential is required")
 			return
 		}
 		authCtx, cancelAuth := context.WithTimeout(r.Context(), 2*time.Second)
-		token, _ := bearer(r.Header.Get("Authorization"))
+		known, _ := m.credentials.Known(authCtx, token, credential.KindOperator)
+		releaseAuth, ok := m.admission.authenticate(time.Now(), known)
+		if !ok {
+			cancelAuth()
+			writeAdmissionRefusal(w)
+			return
+		}
 		grant, err := m.credentials.ResolveOperator(authCtx, token)
 		cancelAuth()
 		releaseAuth()

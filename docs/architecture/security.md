@@ -227,7 +227,8 @@ sequenceDiagram
   participant M as Memory role
   participant H as Handler
   C->>D: request with a bearer token
-  D-->>C: 429 when authentication capacity is spent
+  D-->>C: 401 at once for no token, or for something that cannot be one
+  D-->>C: 429 when an unknown token finds the strangers' allowance spent, or no lookup slot is free
   D->>R: select by SHA-256 digest where not revoked
   R-->>D: kind, project, access
   D-->>C: 401 for absent, malformed, unknown, revoked or wrong kind
@@ -337,7 +338,8 @@ ceilings, not measured capacity.
 
 | Limit | Value | Lives in | What it prevents |
 |---|---|---|---|
-| Concurrent credential lookups | 2 per process, with a 256-request burst refilled at 128 per second | `Admission.authenticate`, [admission.go](../../internal/api/admission.go) | An anonymous flood occupying registry connections |
+| Concurrent credential lookups | 2 per process, and no one caller more than 1 of them, every stranger together counting as one caller | `Admission.authenticate`, [admission.go](../../internal/api/admission.go) | A flood, or one credential, occupying every registry connection |
+| Lookups for tokens this instance did not issue | A 256-lookup burst refilled at 128 per second, per process. A token the instance issued never spends from it | `Admission.authenticate`; `Store.Known` in [credential.go](../../internal/credential/credential.go) | Guessing at speed, and a stranger's volume becoming a credential holder's refusal |
 | Concurrent memory work | `min(64, memory pool − 1)` per process | `Admission.acquire` | Requests holding every memory connection |
 | Per project | half the work limit | `Admission.acquire` | One project starving the others |
 | Per credential | half the project limit | `Admission.acquire` | Rotating a project's credentials to escape the project limit |
@@ -353,6 +355,20 @@ observation with the same idempotency key is safe. The backlog reservation is du
 and the runtime roles can read the budget but not change it or forge a reservation. When the database
 itself has no connection left, a request gets `503 no_database_capacity`, a separate code, because an
 operator fixes that differently from a rate limit.
+
+**Who pays for a lookup.** Before the registry is asked, a stranger's random token and a
+customer's real one look the same, and a limit that cannot tell them apart is spent by whoever
+sends most. So the door classifies a token before it charges for it. `Store.Known` holds the digests
+of the credentials the registry had unrevoked when it was last read, at most five seconds ago. A
+token whose digest is in that set spends nothing from the strangers' allowance; any other token
+does. A request with no token, or with something that cannot be one, has nothing to look up and is
+refused without spending anything.
+
+The set decides which allowance pays and nothing else. Every admitted request is still resolved
+against the registry, so a revoked credential is refused on its next request even while it is still
+in the set, and a credential minted a second ago works before it is in it. The key is a SHA-256
+digest because that is what cannot be forged: the stored 12-character prefix is shown in credential
+lists, and anyone who had seen one could ride its holder's allowance.
 
 Every admission gate is per process. Several API replicas have separate gates, and none of this
 replaces traffic protection in front of the deployment.
@@ -696,8 +712,12 @@ These are today's limits, stated plainly.
   recorded. Unsealed entries are unprotected, and a full rebuild is caught only by a head digest kept
   elsewhere.
 - **Fleet-wide denial of service.** Admission is per process. Several replicas have separate gates,
-  authentication is not fair under a hostile flood, and nothing here replaces upstream traffic
-  protection.
+  and nothing here replaces upstream traffic protection. A stranger's flood no longer refuses a
+  credential holder, but three limits remain: a lookup slot is refused rather than waited for, so two
+  holders arriving in the same instant can refuse a third; several issued credentials acting together
+  can hold every slot; and with one registry connection there is one slot and nothing to hold back.
+  A credential minted within the last five seconds pays from the strangers' allowance until the set
+  is next read, so during a flood it can be refused for that long.
 - **Notification secrets at rest.** Each destination's HMAC key is stored in the memory schema,
   because signing needs it, so the memory login and the database administrator can forge deliveries.
   Delivery is at least once, and replay protection depends on the receiver enforcing its timestamp
