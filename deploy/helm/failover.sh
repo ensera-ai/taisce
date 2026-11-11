@@ -56,10 +56,11 @@ helm upgrade --install memory deploy/helm/taisce -n taisce --create-namespace --
 kubectl -n taisce get pods -o wide | tee "$results/pods-before.txt"
 revision="$(helm -n taisce list -o json | python3 -c 'import sys,json; print([r for r in json.load(sys.stdin) if r["name"]=="memory"][0]["revision"])')"
 kubectl -n taisce wait --for=condition=complete "job/memory-taisce-bootstrap-${revision}" --timeout=600s > /dev/null
-# Bootstrap prints two tokens: the operator's, which opens the management surface and no project,
-# and the project's. The probe below walks through the project door, so it is the line that says
-# "token:" and not the one that says "operator token:".
-token="$(kubectl -n taisce logs "job/memory-taisce-bootstrap-${revision}" | grep -E '^token: tsk_' | head -1 | awk '{print $2}')"
+# Bootstrap mints nothing on a cluster, because a Job's output is a shipped log. The probe's
+# credential is minted here, through the management surface, the way an operator mints one: the
+# token is read from the exec stream into a shell variable and is never written to a log or a file.
+kubectl -n taisce rollout status deployment/memory-taisce-manage --timeout=600s > /dev/null
+token="$(kubectl -n taisce exec deploy/memory-taisce-manage -- /taisce credential issue failover-probe -project default | awk '/^token: tsk_/ {print $2}')"
 test -n "$token"
 kubectl -n taisce rollout status deployment/memory-taisce-api --timeout=600s > /dev/null
 # The port-forward is the laptop's path to the service; it dies when the endpoints it forwards to

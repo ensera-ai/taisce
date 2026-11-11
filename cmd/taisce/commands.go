@@ -213,10 +213,30 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 // printed once, to stdout, and is not recoverable afterwards: only its digest is stored. That is the
 // property being bought, so the message says it plainly rather than leaving an operator to discover
 // it when they lose the value.
+//
+// # Why it can be told not to
+//
+// "Printed once" is only true where standard output is a terminal or a file somebody owns. In a
+// cluster it is a container log, and a container log is shipped to a log store the moment it is
+// written and kept under that store's retention and that store's access rules. The first operator
+// credential — the one that can mint a credential for any project — was found there, outliving the
+// Job that printed it and the release that ran the Job.
+//
+// So `-mint-credentials=false` provisions everything and mints nothing. The instance is then one
+// nobody can reach, deliberately, until an operator mints the first credential themselves with a
+// command whose output goes to their own terminal. The log says so, with the commands, because an
+// instance that is unreachable on purpose and silent about it is indistinguishable from a broken
+// one.
+//
+// The default stays true. On one machine the container's output is on that machine's disk, beside
+// the database volume and the environment file holding its passwords, and whoever can read one can
+// read the others.
 func bootstrap(ctx context.Context, log *slog.Logger, args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 	project := flags.String("project", "default", "the project to create")
 	credentialName := flags.String("credential", "bootstrap", "the name of the first credential")
+	mint := flags.Bool("mint-credentials", true, "mint the first credentials and print them once; "+
+		"false where standard output is a shipped log, so that an operator mints them instead")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -275,6 +295,20 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string, out io.Writ
 	operators, err := operatorCredentials(ctx, admin)
 	if err != nil {
 		return err
+	}
+	if !*mint {
+		// Said only while it is true. Once somebody can reach the instance this is every later
+		// start's log line, and a line that keeps saying "nobody can get in" after somebody has is
+		// one an operator learns to skip.
+		if operators == 0 {
+			log.Info("no credential exists that reaches the management surface; none was minted, because this output is a log",
+				"mint-one", "taisce operator issue <name>")
+		}
+		if existing == 0 {
+			log.Info("no credential exists that reaches this project; none was minted, because this output is a log",
+				"project", *project, "mint-one", "taisce credential issue <name> -project "+*project)
+		}
+		return nil
 	}
 	if operators == 0 {
 		token, grant, err := store.IssueOperator(ctx, "operator")
