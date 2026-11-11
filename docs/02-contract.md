@@ -473,12 +473,13 @@ POST `/v1/recalls` → 200
 | `hops` | integer |
 | `surfaces` | array of string |
 | `themes` | boolean |
+| `explain` | boolean |
 
 ### Response
 
 | Field | Type |
 |---|---|
-| `controls` | {max_characters: integer, max_rows: integer, source_roles: array of string, hops: integer, surfaces: array of string, themes: boolean} |
+| `controls` | {max_characters: integer, max_rows: integer, source_roles: array of string, hops: integer, surfaces: array of string, themes: boolean, explain: boolean} |
 | `anchors` | array of {entity_id: string, name: string, type: string, matched: string} |
 | `facts` | array of {fact_id: string, subject: string, predicate: string, object: string, statement: string, confidence: number, valid_from: timestamp (RFC 3339), valid_until: timestamp (RFC 3339), optional, anchored_on: string, source_role: string, hops: integer, path: array of string, via: array of string, co_derived_with: array of string, evidence: {observation_id: string, source_ordinal: integer, quote: string, byte_start: integer, byte_end: integer, context: string, context_start: integer, context_complete: boolean}} |
 | `reports` | array of {community_id: string, report_id: string, title: string, summary: string, importance: number, similarity: number, level: integer, parent: string, sources: array of string} |
@@ -487,6 +488,7 @@ POST `/v1/recalls` → 200
 | `characters` | integer |
 | `degraded` | array of string |
 | `reach` | {terms: integer, anchored: integer, named_nothing_known: boolean, facts_per_anchor: object of integer, neighbourhood_capped: boolean} |
+| `explain` | {anchors: array of {entity_id: string, name: string, arm: string, matched: string, score: number, kept: boolean, facts: integer}, stages: array of {surface: string, ran: boolean, offered: integer, kept: integer, dropped: array of {ref: string, cut: string, characters: integer, score: number}}}, optional |
 
 
 ## `context.assemble`

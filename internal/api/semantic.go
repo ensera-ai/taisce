@@ -50,6 +50,9 @@ func (s *semanticSurfaces) EntityAnchors(ctx context.Context, scope, question st
 		anchors = append(anchors, domain.Anchor{
 			Entity:  domain.Entity{ID: c.EntityID, Scope: scope, CanonicalName: c.NamePreview},
 			Matched: fmt.Sprintf("semantic:%.2f", c.Similarity),
+			// The same number, as a number. `matched` keeps the string form version 1 published;
+			// an explanation needs something it can compare.
+			Similarity: c.Similarity,
 		})
 	}
 	return anchors, nil

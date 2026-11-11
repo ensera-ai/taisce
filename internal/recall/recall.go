@@ -90,6 +90,9 @@ type Recaller struct {
 	// selects every surface and no forced theme lookup.
 	surfaces map[string]bool
 	themes   bool
+	// explain asks the path to record what each stage did. Off by default, and it changes nothing
+	// about what is returned.
+	explain bool
 }
 
 // There is deliberately no constructor taking a bare number.
@@ -214,11 +217,13 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 		return domain.Bundle{}, nil
 	}
 	reach := domain.Reach{Terms: len(terms), FactsPerAnchor: map[string]int{}}
+	explain := newExplanation(r.explain)
 
 	anchors, err := r.store.AnchorsForSubject(ctx, scopes, terms, subject)
 	if err != nil {
 		return domain.Bundle{}, err
 	}
+	explain.proposed(anchors, domain.ExplainArmName)
 	if len(anchors) > domain.MaxRecallMatches {
 		return domain.Bundle{}, domain.ErrRecallMatches
 	}
@@ -253,6 +258,7 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 					degrade(domain.DegradedSemanticAnchors)
 					break
 				}
+				explain.proposed(proposed, domain.ExplainArmMeaning)
 				for _, a := range proposed {
 					semantic[a.Entity.ID] = true
 				}
@@ -270,14 +276,20 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 		// are still counted, because matching them is true.
 		reach.Anchored = exact
 		bundle.Reach = reach
-		return r.composeRest(ctx, scopes, question, sources, subject, bundle, 0, exact == 0), nil
+		// No facts stage in the explanation: the caller deselected this surface, so it was never a
+		// stage of this recall. A stage that was selected and could not run is a different thing,
+		// and is reported with ran false.
+		explain.kept(bundle.Anchors, reach.FactsPerAnchor)
+		return r.composeRest(ctx, scopes, question, sources, subject, bundle, 0, exact == 0, explain), nil
 	}
 	if len(anchors) == 0 {
 		// Nothing to walk from. "We have never heard of what you asked about" and "we know that and
 		// have nothing to say" are different answers, and a caller that cannot tell them apart
 		// cannot decide whether to write something or ask differently. Themes and passages may
 		// still answer below, which is what makes an unanchored question answerable at all.
-		return r.composeUnanchored(ctx, scopes, question, sources, subject, bundle, reach)
+		explain.stage(SurfaceFacts, false)
+		explain.kept(bundle.Anchors, reach.FactsPerAnchor)
+		return r.composeUnanchored(ctx, scopes, question, sources, subject, bundle, reach, explain)
 	}
 
 	ids := make([]string, 0, len(anchors))
@@ -292,9 +304,16 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	if err != nil {
 		return domain.Bundle{}, err
 	}
+	// What the walk offered, before either cut. The read asks for one row more than the bound, and
+	// that extra row is a signal rather than a candidate — so it is counted as offered and recorded
+	// as dropped by the row cut, which is what it was.
+	explain.offered(SurfaceFacts, len(facts))
 
 	bundle.Anchors = anchors
 	if len(facts) > r.budget.MaxRows {
+		for _, f := range facts[r.budget.MaxRows:] {
+			explain.dropped(SurfaceFacts, f.ID, domain.ExplainCutRows, factSize(f), float64(f.Confidence))
+		}
 		facts = facts[:r.budget.MaxRows]
 		bundle.Truncated = true
 	}
@@ -316,15 +335,21 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	// the unit matters: arbitrary measured in characters is usable, arbitrary measured in rows is
 	// not, because one fact is a two-word quote and another is a paragraph.
 	spent := 0
-	for _, f := range facts {
+	for i, f := range facts {
 		size := factSize(f)
 		if size > r.budget.Characters-spent {
 			// Never exceed a caller's context allowance, including for the first fact. Truncated
 			// distinguishes an empty budget cut from an ordinary question with no matching facts.
 			bundle.Truncated = true
+			// Everything from here on, not just this one: the cut ends the bundle, and an
+			// explanation that named only the fact that did not fit would understate it.
+			for _, cut := range facts[i:] {
+				explain.dropped(SurfaceFacts, cut.ID, domain.ExplainCutBudget, factSize(cut), float64(cut.Confidence))
+			}
 			break
 		}
 		bundle.Facts = append(bundle.Facts, f)
+		explain.keptOne(SurfaceFacts)
 		spent += size
 	}
 	bundle.Characters = spent
@@ -362,15 +387,16 @@ func (r *Recaller) RecallForSubjectAsOf(ctx context.Context, scopes []string, qu
 	// question named nothing this memory holds.
 	reach.Anchored = len(bundle.Anchors)
 	bundle.Reach = reach
-	return r.composeRest(ctx, scopes, question, sources, subject, bundle, spent, exact == 0), nil
+	explain.kept(bundle.Anchors, reach.FactsPerAnchor)
+	return r.composeRest(ctx, scopes, question, sources, subject, bundle, spent, exact == 0, explain), nil
 }
 
 // composeUnanchored answers a question that anchored nothing: reports by theme, then passages, each
 // charged to the budget. The reach still says nothing was anchored, because that is still true.
 func (r *Recaller) composeUnanchored(ctx context.Context, scopes []string, question string, sources []string,
-	subject string, bundle domain.Bundle, reach domain.Reach) (domain.Bundle, error) {
+	subject string, bundle domain.Bundle, reach domain.Reach, explain *explanation) (domain.Bundle, error) {
 	bundle.Reach = reach
-	return r.composeRest(ctx, scopes, question, sources, subject, bundle, 0, true), nil
+	return r.composeRest(ctx, scopes, question, sources, subject, bundle, 0, true, explain), nil
 }
 
 // composeRest adds the report and passage surfaces after the facts, in that order, under what the
@@ -380,7 +406,7 @@ func (r *Recaller) composeUnanchored(ctx context.Context, scopes []string, quest
 // unanchored is whether the question matched no name exactly; reports answer such a question by
 // theme, and a semantic anchor does not change that.
 func (r *Recaller) composeRest(ctx context.Context, scopes []string, question string, sources []string,
-	subject string, bundle domain.Bundle, spent int, unanchored bool) domain.Bundle {
+	subject string, bundle domain.Bundle, spent int, unanchored bool, explain *explanation) domain.Bundle {
 	wants := func(surface string) bool { return r.surfaces == nil || r.surfaces[surface] }
 	degrade := func(name string) {
 		for _, d := range bundle.Degraded {
@@ -389,6 +415,14 @@ func (r *Recaller) composeRest(ctx context.Context, scopes []string, question st
 			}
 		}
 		bundle.Degraded = append(bundle.Degraded, name)
+	}
+	if wants(SurfaceReports) {
+		// Selected, so it is in the explanation whatever happens next — including the case where it
+		// was selected and the question anchored, which is a stage that did not run.
+		explain.stage(SurfaceReports, false)
+	}
+	if wants(SurfacePassages) {
+		explain.stage(SurfacePassages, false)
 	}
 	if wants(SurfaceReports) && (r.themes || unanchored) {
 		if subject != "" {
@@ -406,13 +440,19 @@ func (r *Recaller) composeRest(ctx context.Context, scopes []string, question st
 					degrade(domain.DegradedReports)
 					break
 				}
-				for _, h := range hits {
+				explain.offered(SurfaceReports, len(hits))
+				for i, h := range hits {
 					size := reportSize(h)
 					if size > r.budget.Characters-spent {
 						bundle.Truncated = true
+						for _, cut := range hits[i:] {
+							explain.dropped(SurfaceReports, cut.ReportID, domain.ExplainCutBudget,
+								reportSize(cut), cut.Similarity)
+						}
 						break
 					}
 					bundle.Reports = append(bundle.Reports, h)
+					explain.keptOne(SurfaceReports)
 					spent += size
 				}
 			}
@@ -430,19 +470,26 @@ func (r *Recaller) composeRest(ctx context.Context, scopes []string, question st
 					degrade(domain.DegradedPassages)
 					break
 				}
-				for _, p := range passages {
+				explain.offered(SurfacePassages, len(passages))
+				for i, p := range passages {
 					size := passageSize(p)
 					if size > r.budget.Characters-spent {
 						bundle.Truncated = true
+						for _, cut := range passages[i:] {
+							explain.dropped(SurfacePassages, cut.ChunkID, domain.ExplainCutBudget,
+								passageSize(cut), cut.Similarity)
+						}
 						break
 					}
 					bundle.Passages = append(bundle.Passages, p)
+					explain.keptOne(SurfacePassages)
 					spent += size
 				}
 			}
 		}
 	}
 	bundle.Characters = spent
+	bundle.Explain = explain.explained()
 	return bundle
 }
 

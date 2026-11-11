@@ -656,7 +656,7 @@ definitions are in [indexing and plans](../postgresql/indexing-and-plans.md).
 
 | Stage | Statements | What serves it | Bounded by |
 |---|---|---|---|
-| Credential | 1, registry pool | The credential digest lookup | 2-second deadline; per process, at most 2 concurrent lookups and 128 per second |
+| Credential | 1, registry pool | The credential digest lookup | 2-second deadline; per process, at most 2 concurrent lookups. A token the instance did not issue is also bounded to 128 lookups per second; an issued one is not |
 | Project active | 1 | The project row | n/a |
 | Expansion | 0 | In process | 8192 bytes, 512 candidates |
 | Exact anchors | 1 | `(scope, normalized_name)` unique index, one probe per candidate; `(scope, speaker_subject_id)` for the speaker; `projection_dependency (scope, projection_kind, projection_id)` for the subject check | 257 rows fetched; more than 256 refuses |
