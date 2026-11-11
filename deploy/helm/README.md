@@ -118,7 +118,7 @@ copied to the cluster's log store as it is written, and kept there under retenti
 this release did not choose — which is where the first operator token of an earlier install was
 found, after the Job that printed it had been deleted. The two commands above give the token to the
 person who asked for it and to nothing else
-([D15 and D42](../../docs/01-decisions.md)).
+([D15](../../docs/decisions/D15.md) and [D42](../../docs/decisions/D42.md)).
 
 **A role password is kept and a token is not, and the difference is who has to read it back.** The
 deployment itself presents `dataPassword` and `controlPassword` on every connection it opens, so
@@ -152,7 +152,7 @@ named in this file on purpose: one written here is one that goes stale and leave
 tell whether it is the current release, an example, or the last version known to work.
 
 Charts 0.3.0 and 0.3.1 ask for their image without the `v` and so name a tag that was never pushed
-([D5](../../docs/01-decisions.md)); installing either needs `--set image.tag=v0.3.1`.
+([D5](../../docs/decisions/D5.md)); installing either needs `--set image.tag=v0.3.1`.
 
 ## What this deployment states about itself
 

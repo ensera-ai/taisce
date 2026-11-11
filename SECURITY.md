@@ -50,7 +50,7 @@ read 2026-09-13.
 
 **What this release reaches: Build Level 2, not Level 3.** The job that runs `go build`,
 `docker buildx` and `helm package` is the same job that holds the identity used to sign and attest.
-Why that is the choice rather than an oversight is in [D6](docs/01-decisions.md).
+Why that is the choice rather than an oversight is in [D6](docs/decisions/D6.md).
 
 **What Level 2 gives you.** An artifact that verifies below was built on GitHub's hosted runners by
 this repository's release workflow, at the tag you name. One built anywhere else — a laptop, a fork,

@@ -81,8 +81,15 @@ else. If the reasoning cannot be stated without naming another system, the reaso
 
 ## 5. Decisions go in the register
 
-`docs/01-decisions.md` is the authority. If another document appears to leave a choice open, that is a
-defect in that document.
+The register is the authority: [`docs/01-decisions.md`](docs/01-decisions.md) says how it works, and
+each decision is a file of its own in `docs/decisions/`, named for its number — D12 is
+`docs/decisions/D12.md`. If another document appears to leave a choice open, that is a defect in that
+document.
+
+**A decision is added as a new file, never appended to a shared one.** Two changes that each record a
+decision then touch different files and do not conflict; two that take the same number add the same
+file, which is the one collision worth having. Take the next number, and check it against the remote
+before committing.
 
 **Every entry carries what was rejected.** A decision recorded without its alternatives gets reopened
 by whoever has only heard the winning argument — and they are usually right to, because nothing told
@@ -345,5 +352,5 @@ part of rule 11. This applies to availability too:
 "highly available" is a topology until somebody states how much downtime and how much data loss is
 acceptable, and only then is it a requirement that can be tested.
 
-Start with [`docs/01-decisions.md`](docs/01-decisions.md) for what is settled and what was rejected. The
-roadmap is the issue list.
+Start with [`docs/01-decisions.md`](docs/01-decisions.md) and the files in `docs/decisions/` for what is
+settled and what was rejected; `make decisions` lists them. The roadmap is the issue list.

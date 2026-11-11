@@ -189,7 +189,7 @@ The worker is not part of that run. Without a model it can never become healthy,
 what the suite tests — so a green conformance run says the adapter keeps its contract with the
 deployment, and says nothing about extraction. That is the same limit the suite has when a person
 runs it, stated here because a workflow that runs on its own is read by people who did not set it up
-([D23](../docs/01-decisions.md)).
+([D23](../docs/decisions/D23.md)).
 
 ## How the suite is proved
 

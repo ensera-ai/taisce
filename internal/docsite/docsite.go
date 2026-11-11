@@ -259,11 +259,32 @@ func checkListed(summary string, docs []page) error {
 // rather than documentation for the people using it. The list is a comment so that GitHub, where the
 // same file reads as a table of contents, shows nothing for it.
 //
-// A list rather than a directory: the register's path is the one the project's rules and code
-// comments cite, and moving files to change what a website shows would break every one of those.
+// A list rather than a rule about where files live: the register's path is the one the project's
+// rules and code comments cite, and moving files to change what a website shows would break every
+// one of those.
+//
+// An entry names a document, or a directory with a trailing slash, which keeps every document under
+// it. The directory form exists for records that are one file each and grow by a file at a time —
+// the decisions. A line per file there would put every pull request that records a decision into
+// this one file, and two such pull requests could then not both merge without being reconciled by
+// hand, which is the conflict a file per decision exists to remove.
 const keptMarker = "<!-- kept in the repository, not on the site"
 
-var keptEntry = regexp.MustCompile(`^-\s+(\S+\.md)$`)
+var keptEntry = regexp.MustCompile(`^-\s+(\S+\.md|\S+/)$`)
+
+// keptBy returns the kept-list entry that keeps a staged document: its own name, or the directory
+// it is under. Empty when nothing keeps it.
+func keptBy(kept map[string]bool, stage string) string {
+	if kept[stage] {
+		return stage
+	}
+	for name := range kept {
+		if strings.HasSuffix(name, "/") && strings.HasPrefix(stage, name) {
+			return name
+		}
+	}
+	return ""
+}
 
 // publishedDocuments removes the kept documents from docs. A document is on the site or kept, never
 // both and never neither; checkListed refuses neither, and this refuses both, together with a kept
@@ -279,17 +300,24 @@ func publishedDocuments(summary string, docs []page) ([]page, error) {
 	var problems []string
 	found := map[string]bool{}
 	for _, d := range docs {
-		if !kept[d.Stage] {
+		by := keptBy(kept, d.Stage)
+		if by == "" {
 			published = append(published, d)
 			continue
 		}
-		found[d.Stage] = true
+		found[by] = true
 		if strings.Contains(summary, "]("+d.Stage+")") {
 			problems = append(problems, d.Repo+" is both listed and kept")
 		}
 	}
 	for name := range kept {
-		if !found[name] {
+		switch {
+		case found[name]:
+		case strings.HasSuffix(name, "/"):
+			// The same failure as a kept file that does not exist, for the same reason: a list
+			// naming nothing is how a moved record goes unnoticed.
+			problems = append(problems, "docs/"+name+" is kept but holds no document")
+		default:
 			problems = append(problems, "docs/"+name+" is kept but is not a document")
 		}
 	}
@@ -300,7 +328,8 @@ func publishedDocuments(summary string, docs []page) ([]page, error) {
 	return published, nil
 }
 
-// keptDocuments reads the kept comment: one "- name.md" line per document, up to the comment's close.
+// keptDocuments reads the kept comment: one "- name.md" line per document, or "- name/" for every
+// document under a directory, up to the comment's close.
 func keptDocuments(summary string) (map[string]bool, error) {
 	kept := map[string]bool{}
 	start := strings.Index(summary, keptMarker)

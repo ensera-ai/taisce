@@ -93,6 +93,7 @@
      to one from a published page goes to the file on GitHub.
 
 - 01-decisions.md
+- decisions/
 - 02-contract.md
 - 03-market.md
 - 23-gpu-qualification.md
