@@ -14,9 +14,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -87,7 +89,29 @@ type Grant struct {
 type Store struct {
 	registry *pgxpool.Pool
 	schema   string
+
+	live       atomic.Pointer[liveCredentials]
+	refreshing atomic.Bool
+	// retryAt is when a failed read of the set may be tried again, in nanoseconds. Without it a
+	// registry that cannot be read would be asked again by the very next request, each one waiting
+	// out the read's deadline on a connection the lookups need.
+	retryAt atomic.Int64
 }
+
+// liveCredentials is the set of digests the registry held unrevoked when it was last read.
+type liveCredentials struct {
+	read  time.Time
+	kinds map[[sha256.Size]byte]Kind
+}
+
+// knownFor is how long the set is used before it is read again.
+//
+// It bounds two things and neither is whether a credential works. A credential issued within the
+// last few seconds is not yet in the set, so its lookup is paid for from the allowance strangers
+// share; a credential revoked within the last few seconds is still in it, so its lookup — which
+// refuses it — is not. Short enough that both windows are a moment, long enough that reading the
+// set is not a cost every request pays.
+const knownFor = 5 * time.Second
 
 // NewStore takes the REGISTRY pool. Handing it the memory pool would silently work — both reach the
 // same database — and would defeat the grant that makes the boundary real, so the parameter is named
@@ -105,6 +129,98 @@ func NewStore(registry *pgxpool.Pool, schema string) *Store {
 func Digest(token string) []byte {
 	sum := sha256.Sum256([]byte(token))
 	return sum[:]
+}
+
+// WellFormed reports whether a presented value could be a token at all. What cannot be one is
+// refused without a query and without spending anything, because there is nothing to look up.
+func WellFormed(token string) bool {
+	return strings.HasPrefix(strings.TrimSpace(token), Prefix)
+}
+
+// Known reports whether a token's digest is one this instance issued for the given door and had
+// not revoked when the registry was last read, and returns the key that names it.
+//
+// # What it decides, and what it must never decide
+//
+// It decides which allowance pays for the lookup. It does not decide whether the credential is
+// good: every admitted request is still resolved against the registry, so a revocation applies to
+// the very next request exactly as before, and a credential minted a second ago works exactly as
+// before. The set is allowed to be a few seconds stale for that reason and no other.
+//
+// # Why a set of digests rather than charging everybody alike
+//
+// Before a lookup, a stranger's random token and a customer's real one are both forty-seven
+// characters with the right prefix. A limit that cannot tell them apart is spent by whoever sends
+// most, and that is the stranger: one bucket, charged before anything was known about the request,
+// let anybody who could reach the port refuse service to everybody who held a credential.
+//
+// The digest is what tells them apart without trusting the caller. It is unforgeable in the only
+// sense that matters here — presenting a token whose SHA-256 is in the set means holding a token
+// the instance issued. The stored prefix would be cheaper and is not used: it is shown in every
+// credential list, so anyone who has seen one could ride the allowance meant for its holder.
+//
+// The key is the hex digest, never the token. It is used to count one credential's lookups in
+// flight and is dropped when the count returns to zero.
+//
+// # What happens when the set cannot be read
+//
+// The previous set is kept. With no set at all every token is unknown, which is the behaviour this
+// replaced: strangers and customers share one allowance. Failing to that side means a registry
+// that cannot be read never widens what a stranger may do.
+func (s *Store) Known(ctx context.Context, token string, kind Kind) (string, bool) {
+	token = strings.TrimSpace(token)
+	if !strings.HasPrefix(token, Prefix) {
+		return "", false
+	}
+	live := s.live.Load()
+	now := time.Now()
+	if (live == nil || now.Sub(live.read) > knownFor) && now.UnixNano() >= s.retryAt.Load() &&
+		s.refreshing.CompareAndSwap(false, true) {
+		// One reader at a time. Everybody else uses the set already held, so a slow registry costs
+		// one request a wait and the rest nothing — and after a failed read, nobody waits again
+		// until the interval has passed.
+		if fresh, err := s.readLive(ctx); err == nil {
+			s.live.Store(fresh)
+			live = fresh
+		} else {
+			s.retryAt.Store(now.Add(knownFor).UnixNano())
+		}
+		s.refreshing.Store(false)
+	}
+	if live == nil {
+		return "", false
+	}
+	digest := sha256.Sum256([]byte(token))
+	if live.kinds[digest] != kind {
+		return "", false
+	}
+	return hex.EncodeToString(digest[:]), true
+}
+
+func (s *Store) readLive(ctx context.Context) (*liveCredentials, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	rows, err := s.registry.Query(ctx, fmt.Sprintf(
+		`SELECT token_digest, kind FROM %s.credential WHERE revoked_at IS NULL`, s.schema))
+	if err != nil {
+		return nil, fmt.Errorf("read live credentials: %w", err)
+	}
+	defer rows.Close()
+	out := &liveCredentials{read: time.Now(), kinds: map[[sha256.Size]byte]Kind{}}
+	for rows.Next() {
+		var digest []byte
+		var kind Kind
+		if err := rows.Scan(&digest, &kind); err != nil {
+			return nil, fmt.Errorf("read live credentials: %w", err)
+		}
+		if len(digest) == sha256.Size {
+			out.kinds[[sha256.Size]byte(digest)] = kind
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read live credentials: %w", err)
+	}
+	return out, nil
 }
 
 // Resolve turns a presented token into a grant.
