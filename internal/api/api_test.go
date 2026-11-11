@@ -459,6 +459,9 @@ type harness struct {
 	pool   *pgxpool.Pool
 	schema pg.Schema
 	token  string
+	// What the server and the scripted worker count. A test flushes it itself, so that what a
+	// scrape reads does not depend on a timer.
+	measurements *pg.Measurements
 	// Set only by newHarnessWithNotifications: the endpoint a delivery goes to, and the pass that
 	// sends it. Absent everywhere else, which is what an unconfigured deployment looks like.
 	receiver      *receiver
@@ -511,8 +514,10 @@ func newHarness(t *testing.T, tenant string) *harness {
 		t.Fatalf("issue credential: %v", err)
 	}
 
+	measurements := pg.NewMeasurements(pool, schema)
 	server := httptest.NewServer(api.NewServer(
 		credentials, api.Stores{
+			Measurements: measurements,
 			Audit:        pg.NewAuditStore(pool, schema),
 			Exporter:     pg.NewExporter(pool, schema),
 			Projects:     pg.NewProjectStore(pool, schema),
@@ -528,7 +533,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 	).Handler())
 	t.Cleanup(server.Close)
 
-	return &harness{server: server, pool: pool, schema: schema, token: token}
+	return &harness{server: server, pool: pool, schema: schema, token: token, measurements: measurements}
 }
 
 // form runs the backlog the way the driver will, with a scripted model.
@@ -543,7 +548,7 @@ func (h *harness) form(t *testing.T) {
 		pg.NewObservationStore(h.pool), pg.NewFactStore(h.pool),
 		extract.New(scriptedModel{}, vocabulary),
 	)
-	if _, err := formation.NewWorker(h.pool, pg.NewObservationStore(h.pool), former).
+	if _, err := formation.NewWorker(h.pool, pg.NewObservationStore(h.pool), former).Measuring(h.measurements).
 		Drain(ctx, h.schema, "p1"); err != nil {
 		t.Fatalf("form: %v", err)
 	}

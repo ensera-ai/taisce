@@ -40,12 +40,14 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ensera-ai/taisce/internal/credential"
+	"github.com/ensera-ai/taisce/internal/infra/pg"
 )
 
 // MetricsPath is the scrape, under the management prefix with every other operator route: these
@@ -78,13 +80,20 @@ const operationsWindow = 5 * time.Minute
 // exposition writes the Prometheus text exposition format.
 //
 // It is a type rather than three string appends at each call site so that the shape of a sample is
-// stated once: a name, no labels, an integer. There is no label parameter, which is the boundary
-// this file's whole argument rests on — a per-project or per-subject label cannot be added by
-// filling in an argument that is already there, only by changing this type, which is a change a
-// reviewer sees and the exposition test refuses.
+// stated once. There is no parameter that takes a label as a string, which is the boundary this
+// file's whole argument rests on — a per-project or per-subject label cannot be added by filling in
+// an argument that is already there, only by changing this type, which is a change a reviewer sees
+// and the exposition test refuses.
 //
-// Integers only. Every number published here is a count, a limit or a flag, so nothing needs a
-// float, and a formatter that cannot produce one cannot accidentally publish a timing.
+// Two labels exist, and neither is a string a caller of this type can supply freely. `le` is a
+// bucket's upper edge, taken from a fixed list of integers. `operation` is taken from the surface's
+// own operation table and checked against it before it is written. A distribution is how timings
+// are published at all; without `le` the only thing that could be published is an average, and an
+// average of request times says nothing about the requests an operator is being asked about.
+//
+// Integers only. A duration is published in milliseconds so that nothing here needs a float: a
+// formatter that cannot produce one cannot publish a value with false precision, and a bucket edge
+// is a number somebody chose rather than one that was computed.
 type exposition struct {
 	b strings.Builder
 }
@@ -120,6 +129,66 @@ func (e *exposition) timestamp(name, help string, at *time.Time) {
 		value = strconv.FormatInt(at.Unix(), 10)
 	}
 	e.b.WriteString(metricPrefix + name + " " + value + "\n")
+}
+
+// counter writes a count that only rises, from a total the instance keeps durably.
+//
+// The one place `_total` appears. A gauge above is a window's count and must not be read as
+// cumulative; this is cumulative, kept in the database rather than in a process so that it does not
+// fall to zero when one restarts, and a rate over it is the rate it says it is.
+func (e *exposition) counter(name, help string, value int64) {
+	e.b.WriteString("# HELP " + metricPrefix + name + "_total " + help + "\n")
+	e.b.WriteString("# TYPE " + metricPrefix + name + "_total counter\n")
+	e.b.WriteString(metricPrefix + name + "_total " + strconv.FormatInt(value, 10) + "\n")
+}
+
+// distributions writes one family of histograms: how long a kind of thing took.
+//
+// Every distribution in the slice is of one kind, and the family is declared once. A name on a
+// distribution becomes the `operation` label, and only if the surface declares an operation by
+// that name: a row in the table with any other name is an error rather than a series, because the
+// table is written by the serving processes and this is the last place a value nobody declared
+// could be stopped before it reaches a monitoring system.
+//
+// Buckets are cumulative and end with +Inf, which is the count. Totals come from rows that only
+// rise, so this is a histogram in the format's own sense and `rate()` over it means what it says.
+func (e *exposition) distributions(name, help string, all []pg.Distribution) error {
+	family := metricPrefix + name + "_milliseconds"
+	e.b.WriteString("# HELP " + family + " " + help + "\n")
+	e.b.WriteString("# TYPE " + family + " histogram\n")
+	for _, d := range all {
+		label, prefix := "", ""
+		if d.Name != "" {
+			if !declaredOperation(d.Name) {
+				return fmt.Errorf("a stored measurement is named %q, which is not an operation this surface declares", d.Name)
+			}
+			label = `operation="` + d.Name + `"`
+			prefix = label + ","
+		}
+		for i, bound := range d.Bounds {
+			e.b.WriteString(family + "_bucket{" + prefix + `le="` + strconv.FormatInt(bound, 10) + `"} ` +
+				strconv.FormatInt(d.Cumulative[i], 10) + "\n")
+		}
+		e.b.WriteString(family + "_bucket{" + prefix + `le="+Inf"} ` + strconv.FormatInt(d.Count, 10) + "\n")
+		braces := ""
+		if label != "" {
+			braces = "{" + label + "}"
+		}
+		e.b.WriteString(family + "_sum" + braces + " " + strconv.FormatInt(d.SumMs, 10) + "\n")
+		e.b.WriteString(family + "_count" + braces + " " + strconv.FormatInt(d.Count, 10) + "\n")
+	}
+	return nil
+}
+
+// declaredOperation reports whether the memory surface declares an operation by this name. The
+// table is the closed set a label may be drawn from.
+func declaredOperation(name string) bool {
+	for _, o := range Operations() {
+		if o.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *exposition) String() string { return e.b.String() }
@@ -216,6 +285,44 @@ func (m *ManagementServer) metrics(w http.ResponseWriter, r *http.Request, _ cre
 	e.gauge("operations_allowed", "Operations the ledger recorded as allowed in the recent window.", activity.Current.Operations-activity.Current.Refused)
 	e.gauge("operations_refused", "Operations the ledger recorded as refused in the recent window.", activity.Current.Refused)
 	e.gauge("operations_window_seconds", "How far back the operation counts look.", int64(operationsWindow/time.Second))
+
+	// How long things take. Totals the serving and forming processes add to every few seconds, so
+	// these are a little behind the processes and are not an exact count of anything — the ledger
+	// is that. They are what says whether the instance is slow, which nothing above can: a backlog
+	// says formation is behind, and not whether that is a slow model or a deep queue; an operation
+	// count says requests were served, and not how long anybody waited.
+	if m.stores.Measured == nil {
+		m.log.Error("a metrics scrape arrived at a deployment with no reader for its timings")
+		writeError(w, http.StatusServiceUnavailable, codeInternal, "the instance's numbers could not be read")
+		return
+	}
+	measured, err := m.stores.Measured(r.Context())
+	if err != nil {
+		m.log.Error("metrics: read the measurements", "error", err)
+		writeError(w, http.StatusServiceUnavailable, codeInternal, "the instance's numbers could not be read")
+		return
+	}
+	byKind := map[pg.MeasurementKind][]pg.Distribution{}
+	for _, d := range measured.Distributions {
+		byKind[d.Kind] = append(byKind[d.Kind], d)
+	}
+	for _, family := range []struct {
+		kind       pg.MeasurementKind
+		name, help string
+	}{
+		{pg.OperationDuration, "operation_duration", "How long a request to a memory operation took, from the door to the response."},
+		{pg.FormationTurnDuration, "formation_turn_duration", "How long a turn took to form, for turns that formed."},
+		{pg.FormationLag, "formation_lag", "How long a turn waited between being stored and being formed."},
+	} {
+		if err := e.distributions(family.name, family.help, byKind[family.kind]); err != nil {
+			m.log.Error("metrics: write the measurements", "error", err)
+			writeError(w, http.StatusServiceUnavailable, codeInternal, "the instance's numbers could not be read")
+			return
+		}
+	}
+	// Turned away at the door for want of capacity. No ledger row is written for one, so without
+	// this a process refusing a third of its requests looks exactly like an idle one.
+	e.counter("admission_refused", "Requests refused because the process had no capacity for them.", measured.Counters[pg.CounterAdmissionRefused])
 
 	w.Header().Set("Content-Type", metricsContentType)
 	// A scrape is a reading of now. A cached one is a reading of whenever it was taken, which an

@@ -66,6 +66,11 @@ type ManagementStores struct {
 	// Optional: a deployment wired without it loses the panel and keeps every other one, which is
 	// the right failure for a monitoring read.
 	Health func(ctx context.Context) (pg.OperationalHealth, error)
+	// Measured reads what the serving and forming processes have counted: how long requests and
+	// turns took, and how many requests were turned away for capacity. A function for the reason
+	// Health is one. Optional in the same way; a scrape at a deployment wired without it is refused
+	// rather than served short.
+	Measured func(ctx context.Context) (pg.Measured, error)
 }
 
 // ManagementServer serves the operator surface.
