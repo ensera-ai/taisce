@@ -24,7 +24,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # The whole history, with its tags. `make test` ends by running the previous release on this
+      # tree's migrations, and finds that release by its tag; a checkout one commit deep has none,
+      # and the check refuses to pass for want of something to compare against (D58).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod

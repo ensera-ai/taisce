@@ -331,6 +331,27 @@ refused connection — from a pod in another namespace, `nc -z -w 4 <release>-ta
 should time out. If the operator runs somewhere other than `cnpg-system`, say so in
 `networkPolicy.database.operatorNamespace`, or the database will run with nobody managing it.
 
+## What an upgrade promises
+
+`helm upgrade` runs the new revision's bootstrap Job, which migrates the schema, and rolls the pods
+at the same time. Nothing orders the two, and nothing needs to:
+
+- **A new pod is not ready until the schema is the one it was built for**, and says which version it
+  is waiting for.
+- **A pod of the previous release keeps serving on the new schema** until the roll replaces it. A
+  release's migrations are checked against the release before it; what a release removes is
+  something the one before had already stopped using.
+
+That holds from one release to the next. **Upgrade one release at a time.** An upgrade that skips a
+release is not promised to roll cleanly: pods two releases old may fail requests until they are
+replaced. To skip, scale `api`, `worker` and `manage` to zero for the upgrade.
+
+Going back is the same promise read the other way: the previous release's image runs on the new
+schema, so `helm rollback` by one release does not need a restore. The schema itself never goes
+backwards, and the promise is about the schema: rows the newer release wrote while it ran are the
+one thing the older one was never tested against. [The migrations page](../../docs/postgresql/migrations.md#what-an-upgrade-promises) has
+the rule and what it does not cover.
+
 ## Upgrading from 0.6
 
 Four things in 0.7 change what an upgrade does. Each is a default that was chosen for a new

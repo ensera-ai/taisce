@@ -91,10 +91,14 @@ var ErrSchemaBehind = errors.New("the schema is older than this binary was built
 //
 // Older than the binary is unambiguous: the binary cannot work without what it was built for. Newer
 // than the binary is a process from the previous release still serving after the migration, and
-// whether that is safe depends on what a migration may change between releases, which is a promise
-// this project has not made. Refusing it here would turn every upgrade into a moment with nothing
-// ready at all, on an assumption nobody decided. So this refuses one direction and is silent on the
-// other, and says so here rather than leaving a reader to assume it covers both.
+// that is safe by a promise held elsewhere: a release's schema is one the previous release can
+// serve on, and scripts/upgrade-check.sh runs the previous release on every migration to keep it so
+// (D58). Refusing a newer schema here would take every old process out of service the instant the
+// migration commits, before a new one has been probed — a moment with nothing ready, on every
+// upgrade, to guard against something that check already refuses.
+//
+// What that leaves is a process two or more releases old, which the promise does not cover and this
+// does not refuse (#257).
 //
 // A namespace with no record of migrations at all is behind by everything.
 func CheckSchemaBuiltFor(ctx context.Context, pool *pgxpool.Pool, schema Schema, builtFor int) error {
