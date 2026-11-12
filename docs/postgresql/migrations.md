@@ -327,6 +327,34 @@ scripts and workflows.
   dropped what it reads. [#257](https://github.com/ensera-ai/taisce/issues/257) is that gap.
 - **Locks and duration**, as the table says.
 
+### The check, run against a real release — 2026-11-12
+
+The fixture test shows the check's mechanics. This is it run for real, on a development machine,
+against v0.7.0 and a real database: once with an addition and once with a removal. Both migrations
+were scratch files and are not in the tree.
+
+| Migration added on top of v0.7.0's schema | v0.7.0's packages | Result |
+|---|---|---|
+| `ALTER TABLE formation_health ADD COLUMN note text`, and a new table | 8 run, 8 pass | `v0.7.0 passes on this tree's schema`, exit 0 |
+| `ALTER TABLE formation_health RENAME COLUMN heartbeat_at TO beat_at` | 8 run, 4 fail, 21 tests | `v0.7.0 does not pass on this tree's schema`, exit 1 |
+
+The eight packages are `cmd/taisce`, `internal/api`, `internal/conformance`, `internal/credential`,
+`internal/formation`, `internal/infra/inference`, `internal/infra/pg` and `internal/recall`. The
+rename failed four of them — `cmd/taisce`, `internal/api`, `internal/formation` and
+`internal/infra/pg` — and the first failure names the cause in the previous release's own words:
+
+```
+--- FAIL: TestOperatorHealthCommandReturnsOnlyAggregates
+    health_test.go:132: read operational health: ERROR: column h.heartbeat_at does not exist (SQLSTATE 42703)
+```
+
+That is a v0.7.0 process failing its health read on the new schema, which is what an operator would
+have seen during the roll.
+
+One thing the first attempt taught: the two runs were started against one database and interfered,
+because some of that release's tests use fixed namespace names. The check is one run on one database,
+after the suite, which is how `make test` calls it. Two at once need two databases.
+
 ### Writing a change that removes something
 
 | To do this | This release | The next release |
