@@ -732,7 +732,7 @@ allowed:
 | `principal` | A credential id, or an operator invocation id |
 | `principal_kind` | `credential`, `operator` or `system` |
 | `project` | The project the operation touched |
-| `magnitude` | How much it touched: rows deleted, records changed, facts returned |
+| `magnitude` | How much it touched: rows deleted, records changed, facts returned. For a freshness read, how many reads the row stands for |
 | `outcome` | Allowed or refused |
 | `occurred_at` | When |
 
@@ -751,6 +751,27 @@ the constraint does not allow is an insert the database refuses. So a route cann
 operation the ledger cannot record. Migrations
 [0056](../../internal/migrate/sql/0056_the_ledger_admits_what_an_operator_does.sql) and
 [0057](../../internal/migrate/sql/0057_the_ledger_admits_withdrawing_an_entity.sql) are examples.
+
+**One row is one act, with one exception that is counted instead (D56).** A freshness read
+discloses two offsets and a count about the caller's own project, to a caller already entitled to
+all of it, and it is the one operation built to be polled. Listed one by one, an agent polling once
+a second writes 86,400 rows a day that can never be removed. So:
+
+- the **first** freshness read by a credential in a minute is a row, written at once — the
+  credential is on the ledger the moment it acts;
+- the **rest** of that minute are counted in the serving process and written as one more row when
+  the minute closes, whose `magnitude` is how many there were.
+
+Everything that counts *operations* over the ledger — the activity panel, the per-project ranking,
+`taisce_operations_allowed` — reads a freshness row as the number of reads it stands for, so
+activity is what happened and not how it was stored. Everything that counts the ledger *as a
+ledger* — what a seal covers, how many entries are unsealed — counts rows.
+
+What it costs, stated: a serving process that dies loses the count of the minute it was in, though
+not the first read; the count's row is stamped up to a minute after the reads it counts; and each
+serving process counts for itself, so one credential polling through two replicas is two first-rows
+and two counts a minute. Nothing else is counted this way. A recall discloses memory and is listed
+every time; so is every refusal.
 
 **Two write paths.**
 

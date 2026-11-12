@@ -295,6 +295,18 @@ func run(ctx context.Context, log *slog.Logger) error {
 			}
 		}()
 	}
+	// Freshness reads are counted on the ledger, not listed: a credential's first read in a minute
+	// is a row at once and the rest of that minute is one more. Stopped the way the timings are —
+	// after the listeners, before the pool closes — so the counts a process was holding when it
+	// was told to stop are written and not lost on every restart.
+	var reads *api.EntitledReads
+	if serves {
+		reads = api.NewEntitledReads(pg.NewAuditStore(memory, schema), log)
+		counting, stopCounting := context.WithCancel(context.Background())
+		counted := make(chan struct{})
+		go func() { defer close(counted); reads.Run(counting) }()
+		defer func() { stopCounting(); <-counted }()
+	}
 	if serves {
 		waker = pg.NewTurnWaker(memory, schema)
 		go waker.Run(ctx, func(err error) {
@@ -307,6 +319,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 				Measurements: measurements,
 				Waker:        waker,
 				Drain:        drain,
+				Reads:        reads,
 				Audit:        pg.NewAuditStore(memory, schema),
 				Exporter:     pg.NewExporter(memory, schema),
 				Projects:     pg.NewProjectStore(memory, schema),

@@ -464,6 +464,8 @@ type harness struct {
 	measurements *pg.Measurements
 	// What the server reads to say how long a writer refused for capacity should wait.
 	drain *api.DrainRate
+	// The count of freshness reads, which a test closes onto the ledger when it wants to read it.
+	reads *api.EntitledReads
 	// Set only by newHarnessWithNotifications: the endpoint a delivery goes to, and the pass that
 	// sends it. Absent everywhere else, which is what an unconfigured deployment looks like.
 	receiver      *receiver
@@ -522,6 +524,9 @@ func newHarness(t *testing.T, tenant string) *harness {
 	// Fed by the test that wants a rate, rather than by a timer: a process samples the formed-turn
 	// count every few seconds, and a test says what was read and when.
 	drain := api.NewDrainRate()
+	// Counted as a serving process counts them. No goroutine closes the windows: a test that
+	// wants the count on the ledger closes them itself, as of a moment it chooses.
+	reads := api.NewEntitledReads(pg.NewAuditStore(pool, schema), nil)
 	waker := pg.NewTurnWaker(pool, schema)
 	announcing, stopAnnouncing := context.WithCancel(context.Background())
 	announced := make(chan struct{})
@@ -532,6 +537,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 			Measurements: measurements,
 			Waker:        waker,
 			Drain:        drain,
+			Reads:        reads,
 			Audit:        pg.NewAuditStore(pool, schema),
 			Exporter:     pg.NewExporter(pool, schema),
 			Projects:     pg.NewProjectStore(pool, schema),
@@ -547,7 +553,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 	).Handler())
 	t.Cleanup(server.Close)
 
-	return &harness{server: server, pool: pool, schema: schema, token: token, measurements: measurements, drain: drain}
+	return &harness{server: server, pool: pool, schema: schema, token: token, measurements: measurements, drain: drain, reads: reads}
 }
 
 // form runs the backlog the way the driver will, with a scripted model.

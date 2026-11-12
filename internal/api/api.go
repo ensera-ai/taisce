@@ -51,6 +51,7 @@ type Server struct {
 	measurements     *pg.Measurements
 	waker            *pg.TurnWaker
 	drain            *DrainRate
+	reads            *EntitledReads
 	credentials      *credential.Store
 	audit            *pg.AuditStore
 	exporter         *pg.Exporter
@@ -85,7 +86,10 @@ type Stores struct {
 	Waker *pg.TurnWaker
 	// Drain is what a writer refused for capacity is told to wait. Optional: without one the
 	// refusal states the ceiling, since nothing is known about how fast the backlog is moving.
-	Drain        *DrainRate
+	Drain *DrainRate
+	// Reads gathers each credential's freshness reads into a first row and a count. Optional:
+	// without it every freshness read is a ledger row of its own, as it was.
+	Reads        *EntitledReads
 	Audit        *pg.AuditStore
 	Exporter     *pg.Exporter
 	Projects     *pg.ProjectStore
@@ -132,7 +136,7 @@ func NewServer(credentials *credential.Store, stores Stores, schema pg.Schema, l
 		citations: stores.Citations, records: stores.Records, feedback: stores.Feedback, artifacts: stores.Artifacts, subjects: stores.Subjects, contexts: stores.Contexts,
 		passages: stores.Passages, entityCandidates: stores.EntityCandidates, reportCandidates: stores.ReportCandidates,
 		notifications: stores.Notifications, notifier: stores.Notifier,
-		schema: schema, log: log, admission: gate, measurements: stores.Measurements, waker: stores.Waker, drain: stores.Drain,
+		schema: schema, log: log, admission: gate, measurements: stores.Measurements, waker: stores.Waker, drain: stores.Drain, reads: stores.Reads,
 	}
 }
 
@@ -648,7 +652,12 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request, grant credent
 			Skipped:               f.Rebuilding.Skipped,
 		}
 	}
-	s.record(r, domain.AuditFreshness, grant, domain.OutcomeAllowed, 0)
+	// The first read of a window is a row at once, so the credential is on the ledger the moment it
+	// acts; the rest of the window is counted and written as one row when it closes. A magnitude of
+	// one says the row stands for one read, which a count's row says of however many it stands for.
+	if s.reads == nil || s.reads.noted(grant, time.Now()) {
+		s.record(r, domain.AuditFreshness, grant, domain.OutcomeAllowed, 1)
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
