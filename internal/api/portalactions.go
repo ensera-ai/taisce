@@ -218,7 +218,7 @@ func (p *Portal) issue(r *http.Request, _ credential.Grant) (string, string, err
 	// The token is deliberately not carried to the page. It is shown once, by the CLI, to whoever
 	// ran it; a token rendered into a browser page is a token in a screenshot, a scroll buffer and
 	// a printer queue. The portal says a credential exists and what it may do.
-	_, _, err := p.m.issueProjectCredential(r.Context(), label, name, access)
+	_, _, err := p.m.issueProjectCredential(r.Context(), label, name, access, credential.NoExpiry)
 	if errors.Is(err, pg.ErrNoSuchProject) {
 		// A project that does not exist, or is suspended, gets the same refusal as a malformed name,
 		// as every other target on these pages does.

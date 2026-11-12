@@ -163,19 +163,40 @@ manage:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {memory: 512Mi}
 
+# Publishing either surface. Both are off; each is an Ingress, or an HTTPRoute on a cluster whose
+# ingress is Gateway API.
+#
+# The console's hostname routes /portal and its bare root, which redirects into the console — and
+# never the management API on the same port. Give the console a hostname of its own: on one it
+# shares with the memory API the root stays the API's, and the console is reached at /portal.
+#
+# For an HTTPRoute the chart renders what attaches and nothing it attaches to. The Gateway and its
+# listener are the gateway owner's:
+#   parentRefs         the listener(s) the route attaches to; required, for example
+#                        [{name: eg, namespace: envoy-gateway-system, sectionName: https}]
+#   certificateSecret  a secret in THIS namespace that the listener presents. Naming it renders a
+#                        ReferenceGrant letting the gateway's namespace read that one secret and no
+#                        other. Leave it empty when the certificate lives beside the gateway.
+# className and tls are an Ingress's and are refused on an HTTPRoute rather than ignored.
 ingress:
   api:
     enabled: false
+    kind: Ingress
     className: ""
     host: ""
     tls: []
     annotations: {}
+    parentRefs: []
+    certificateSecret: ""
   portal:
     enabled: false
+    kind: Ingress
     className: ""
     host: ""
     tls: []
     annotations: {}
+    parentRefs: []
+    certificateSecret: ""
 
 # Who may open a connection to this release's pods. On by default: every pod of the release refuses
 # what is not named here, and the database admits this release, its own instances and its operator.

@@ -13,6 +13,9 @@ Mint the first ones yourself. The output is streamed to your terminal and to no 
 The second is the project owner's, so it is asked for with read_write: it is the one that can erase.
 Leave -access off for a key an agent holds, which writes memory and cannot destroy it.
 
+The operator token stops working after 90 days and says when; minting its replacement needs this
+same command and no token. Say -no-expiry for one that never ends, or -lifetime-days <n>.
+
 Each token is shown once, to you: only digests are stored, so a lost one is replaced by minting another, with
 the same two commands. Minting does not revoke what was lost: /taisce credential list names what
 exists and /taisce credential revoke <id> closes it.

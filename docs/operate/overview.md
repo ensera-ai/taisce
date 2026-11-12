@@ -94,7 +94,9 @@ ssh -L 8081:127.0.0.1:8081 your-server
 
 **With Helm**, set `manage.portal: "on"`. Reach it with
 `kubectl port-forward svc/<release>-manage 8081:8081`, or expose it with `ingress.portal.enabled`,
-`ingress.portal.host` and TLS. The chart refuses to render a portal ingress while `manage.portal` is
+`ingress.portal.host` and TLS — as an `Ingress`, or with `ingress.portal.kind: HTTPRoute` on a
+Gateway API cluster. On a hostname of its own the console answers at the bare root, which redirects
+into `/portal/`. The chart refuses to render a portal ingress while `manage.portal` is
 off, because that ingress would expose the management surface's door instead. Write `"on"` in lower
 case: the chart compares it exactly ([#55](https://github.com/ensera-ai/taisce/issues/55)).
 
@@ -239,7 +241,13 @@ Each project's page in the ops centre lists its keys, newest first, revoked ones
 | Prefix | The first 12 characters of the token (`tsk_` and 8 more). Match it against what a client holds without seeing the rest |
 | Access | `agent`, `read_write` or `read_only` |
 | Created | The day it was issued |
-| State | `live` or `revoked` |
+| Expires | The day it stops working on its own, or `no date` |
+| Last acted | When the audit ledger last recorded this key doing anything, or `not in the ledger` |
+| State | `live`, `expired` or `revoked` |
+
+Read **Last acted** before revoking: a key the ledger has never seen is one nothing is using, as far
+as the ledger still goes back. A key issued from the ops centre has no date; issue it from the CLI or
+the API to give it one.
 
 `taisce credential list --project billing` and `POST /manage/v1/credentials/list` with
 `{"project": "billing"}` return the same list.

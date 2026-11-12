@@ -1,12 +1,48 @@
 # Copyright 2026 The Taisce Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# Both ingresses are opt-in. The memory API is what applications reach; the portal is not
+# Publishing either surface is opt-in. The memory API is what applications reach; the portal is not
 # exposed by default, and enabling its ingress is the deliberate act that exposes it.
+#
+# Each is published as an Ingress, or as an HTTPRoute on a cluster whose ingress is Gateway API.
+# Whichever it is, three things are decided here rather than left to whoever writes the route:
+#
+#   - Only /portal is routed on the console's hostname, and never the management API beside it on
+#     the same port. The console is what a person needs. A script that needs the API reaches it
+#     through the cluster.
+#   - The console's hostname answers at its bare root. The exact path is routed to the management
+#     listener, which redirects it into /portal/; a hostname that exists and says 404 is one an
+#     operator has to be told how to use. Exact and not a prefix: a prefix would hand every path on
+#     that hostname to the management listener, the management API included.
+#   - The memory hostname gets no such rule. It is the name agents hold a bearer token for, and a
+#     browser-session console reachable at its root puts project administration behind the name a
+#     stolen project token already knows. So when both surfaces share one hostname the root stays
+#     the memory API's, and the console is reached at /portal.
+#
+# What this does not render: the Gateway, or its listener. A listener belongs to whoever owns the
+# gateway, and a chart that wrote one would either demand a gateway of its own or edit a shared
+# object it does not own. The chart renders what attaches; the operator owns what is attached to.
+{{- $api := .Values.ingress.api }}
+{{- $portal := .Values.ingress.portal }}
+{{- range $surface, $v := dict "api" $api "portal" $portal }}
+{{- if $v.enabled }}
+{{- if not (has $v.kind (list "Ingress" "HTTPRoute")) }}
+{{- fail (printf "ingress.%s.kind is %q: it is Ingress, or HTTPRoute on a cluster whose ingress is Gateway API" $surface $v.kind) }}
+{{- end }}
+{{- if eq $v.kind "HTTPRoute" }}
+{{- if not $v.parentRefs }}
+{{- fail (printf "ingress.%s.kind is HTTPRoute and ingress.%s.parentRefs is empty: a route attached to no gateway is accepted by the cluster and serves nothing. Name the gateway listener it attaches to, for example [{name: <gateway>, namespace: <its namespace>, sectionName: <its listener>}]." $surface $surface) }}
+{{- end }}
+{{- if $v.tls }}
+{{- fail (printf "ingress.%s.tls is set and ingress.%s.kind is HTTPRoute: a route carries no certificate, the gateway's listener does. Name the secret that listener presents in ingress.%s.certificateSecret, which grants the gateway that one secret and nothing else." $surface $surface $surface) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- /* An ingress controller is a pod in some namespace, and to the network policy an unnamed one is a
        stranger. An ingress that renders, resolves and then times out on every request has its cause
        two files from its symptom, so it is refused here instead. */}}
-{{- if .Values.ingress.api.enabled }}
+{{- if $api.enabled }}
 {{- if .Values.networkPolicy.enabled }}
 {{- $beyond := false }}
 {{- range .Values.networkPolicy.api.from }}{{- if or (hasKey . "namespaceSelector") (hasKey . "ipBlock") }}{{- $beyond = true }}{{- end }}{{- end }}
@@ -14,23 +50,45 @@
 {{- fail "ingress.api.enabled is set, and networkPolicy.api.from names no namespace and no address range, so the ingress controller's pods would be refused by the memory API and every request through the ingress would time out. Add the controller's namespace to networkPolicy.api.from — for example {namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <its namespace>}}}, which also says so when the controller runs in this release's own namespace." }}
 {{- end }}
 {{- end }}
+{{- $host := required "ingress.api.host is required when the API ingress is enabled" $api.host }}
+{{- if eq $api.kind "HTTPRoute" }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "taisce.name" . }}-api
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+  {{- with $api.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs: {{- toYaml $api.parentRefs | nindent 4 }}
+  hostnames: [{{ $host | quote }}]
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /}
+      backendRefs:
+        - {name: {{ include "taisce.name" . }}-api, port: 8080}
+{{- include "taisce.certificateGrant" (dict "root" . "surface" "api" "v" $api) }}
+{{- else }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "taisce.name" . }}-api
   labels: {{- include "taisce.labels" . | nindent 4 }}
-  {{- with .Values.ingress.api.annotations }}
+  {{- with $api.annotations }}
   annotations: {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- with .Values.ingress.api.className }}
+  {{- with $api.className }}
   ingressClassName: {{ . | quote }}
   {{- end }}
-  {{- with .Values.ingress.api.tls }}
+  {{- with $api.tls }}
   tls: {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
-    - host: {{ required "ingress.api.host is required when the API ingress is enabled" .Values.ingress.api.host | quote }}
+    - host: {{ $host | quote }}
       http:
         paths:
           - path: /
@@ -40,7 +98,8 @@ spec:
                 name: {{ include "taisce.name" . }}-api
                 port: {name: http}
 {{- end }}
-{{- if .Values.ingress.portal.enabled }}
+{{- end }}
+{{- if $portal.enabled }}
 {{- /* The binary turns the portal on for "on" in any case, with surrounding space ignored, so the guard applies the same rule. Stricter here, "ON" would switch the portal on and still be refused its ingress (#55). */}}
 {{- if ne (lower (trim (toString .Values.manage.portal))) "on" }}
 {{- fail "ingress.portal.enabled needs manage.portal set to \"on\"; an ingress to a portal that does not exist exposes the management surface's door instead" }}
@@ -48,24 +107,51 @@ spec:
 {{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.manage.from) }}
 {{- fail "ingress.portal.enabled is set, and networkPolicy.manage.from is empty, so the ingress controller's pods would be refused by the management surface and the portal would time out. Add the controller's namespace to networkPolicy.manage.from — for example {namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <its namespace>}}}." }}
 {{- end }}
+{{- $host := required "ingress.portal.host is required when the portal ingress is enabled" $portal.host }}
+{{- /* The console's own hostname answers at its root. A hostname it shares with the memory API does
+       not: there the root is the agents' endpoint. */}}
+{{- $ownHost := not (and $api.enabled (eq (lower $api.host) (lower $host))) }}
+{{- if eq $portal.kind "HTTPRoute" }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "taisce.name" . }}-portal
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+  {{- with $portal.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs: {{- toYaml $portal.parentRefs | nindent 4 }}
+  hostnames: [{{ $host | quote }}]
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /portal}
+        {{- if $ownHost }}
+        - path: {type: Exact, value: /}
+        {{- end }}
+      backendRefs:
+        - {name: {{ include "taisce.name" . }}-manage, port: 8081}
+{{- include "taisce.certificateGrant" (dict "root" . "surface" "portal" "v" $portal) }}
+{{- else }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "taisce.name" . }}-portal
   labels: {{- include "taisce.labels" . | nindent 4 }}
-  {{- with .Values.ingress.portal.annotations }}
+  {{- with $portal.annotations }}
   annotations: {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- with .Values.ingress.portal.className }}
+  {{- with $portal.className }}
   ingressClassName: {{ . | quote }}
   {{- end }}
-  {{- with .Values.ingress.portal.tls }}
+  {{- with $portal.tls }}
   tls: {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
-    - host: {{ required "ingress.portal.host is required when the portal ingress is enabled" .Values.ingress.portal.host | quote }}
+    - host: {{ $host | quote }}
       http:
         paths:
           - path: /portal
@@ -74,4 +160,13 @@ spec:
               service:
                 name: {{ include "taisce.name" . }}-manage
                 port: {name: http}
+          {{- if $ownHost }}
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "taisce.name" . }}-manage
+                port: {name: http}
+          {{- end }}
+{{- end }}
 {{- end }}

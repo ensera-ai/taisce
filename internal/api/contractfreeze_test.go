@@ -153,7 +153,17 @@ func heldFields(where string, frozen, served []Field) []string {
 // So an object is compared member by member, at any depth. Everything that is not an object is
 // compared exactly, and a removal or a retyping inside an object still fails — naming the path down
 // to the field, so a reviewer is told where rather than handed two long shapes to diff by eye.
+//
+// A list of objects is an object with a word in front of it, and the same reasoning holds: a member
+// added to what a list holds is an addition to every element, which a client that reads the members
+// it knows does not notice. So `array of` is stepped over when both sides carry it, and what follows
+// is compared as above. A list that became a single object, or the reverse, has the word on one side
+// only and is still compared exactly — and refused.
 func heldKind(where, frozen, served string) []string {
+	const list = "array of "
+	if strings.HasPrefix(frozen, list) && strings.HasPrefix(served, list) {
+		return heldKind(where, strings.TrimPrefix(frozen, list), strings.TrimPrefix(served, list))
+	}
 	frozenBody, frozenSuffix, frozenObject := objectBody(frozen)
 	servedBody, servedSuffix, servedObject := objectBody(served)
 	if !frozenObject || !servedObject || frozenSuffix != servedSuffix {
@@ -338,5 +348,32 @@ func TestAFreezeWrittenTodayIsOneTheCurrentSurfaceKeeps(t *testing.T) {
 	if len(parsed.Operations) != len(Surface().Operations) || len(parsed.Codes) != len(Surface().Codes) {
 		t.Fatalf("the freeze holds %d operations and %d codes; the surface serves %d and %d",
 			len(parsed.Operations), len(parsed.Codes), len(Surface().Operations), len(Surface().Codes))
+	}
+}
+
+// A member added to the objects a list holds is an addition, and a member taken away or retyped
+// inside one is still refused, with the path down to it.
+//
+// The credential list is what found this: its response is one field, a list of credentials, and
+// giving a credential an expiry changed that field's rendering. Compared as a string the freeze
+// called it a retyping, so the only way to add anything to a listed object was to re-freeze — which
+// is the habit a freeze exists to prevent.
+func TestTheFreezeLooksInsideAListOfObjects(t *testing.T) {
+	frozen := []Field{{Name: "credentials", Kind: "array of {id: string, revoked_at: timestamp (RFC 3339), optional}"}}
+	grown := []Field{{Name: "credentials", Kind: "array of {id: string, revoked_at: timestamp (RFC 3339), optional, expires_at: timestamp (RFC 3339), optional}"}}
+	if v := heldFields("list response", frozen, grown); len(v) != 0 {
+		t.Fatalf("a member added to a listed object is an addition, and it was refused: %v", v)
+	}
+	shrunk := []Field{{Name: "credentials", Kind: "array of {id: string}"}}
+	if v := heldFields("list response", frozen, shrunk); len(v) != 1 || !strings.Contains(v[0], `"revoked_at" was frozen and is gone`) {
+		t.Fatalf("a member removed from a listed object must be refused by name, got %v", v)
+	}
+	retyped := []Field{{Name: "credentials", Kind: "array of {id: integer, revoked_at: timestamp (RFC 3339), optional}"}}
+	if v := heldFields("list response", frozen, retyped); len(v) != 1 || !strings.Contains(v[0], "was frozen as string and is served as integer") {
+		t.Fatalf("a member retyped inside a listed object must be refused, got %v", v)
+	}
+	single := []Field{{Name: "credentials", Kind: "{id: string, revoked_at: timestamp (RFC 3339), optional}"}}
+	if v := heldFields("list response", frozen, single); len(v) != 1 {
+		t.Fatalf("a list that became one object is a retyping, got %v", v)
 	}
 }

@@ -95,6 +95,17 @@ func (p *Portal) Mount(mux *http.ServeMux) {
 	mux.Handle("GET "+PortalPrefix+"/ledger", page(p.signed(p.ledger)))
 	mux.Handle("GET "+PortalPrefix+"/projects/{project}", page(p.signed(p.project)))
 	mux.HandleFunc("GET "+PortalPrefix+"/assets/{file}", p.asset)
+	// The listener's bare root, and only that: the address an operator was given is the address
+	// that works, instead of a 404 that reads as a broken deployment.
+	//
+	// The exact path rather than everything unclaimed. A redirect from every unknown path would
+	// answer a prober's whole wordlist with the location of the console and serve no reader — an
+	// operator arrives at the bare name, and nothing else at the root of this listener is meant to
+	// exist. It is mounted with the portal, so a listener whose portal is off still answers 404
+	// here, and it says nothing a request to the prefix would not.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, PortalPrefix+"/", http.StatusFound)
+	})
 	p.mountActions(mux)
 }
 
@@ -654,7 +665,7 @@ func (p *Portal) project(w http.ResponseWriter, r *http.Request, grant credentia
 		http.Error(w, "parked turns could not be read", http.StatusInternalServerError)
 		return
 	}
-	listed, err := p.m.credentials.List(ctx, name, 100)
+	listed, err := p.m.listedCredentials(ctx, name, 100)
 	if err != nil {
 		p.m.log.Error("portal: credentials", "error", err, "project", name)
 		http.Error(w, "credentials could not be read", http.StatusInternalServerError)

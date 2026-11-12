@@ -414,6 +414,9 @@ type credentialIssueRequest struct {
 	// Access is read_only, agent or read_write; omitted means agent, which does everything but erase
 	// a person or purge an entity (D26).
 	Access string `json:"access"`
+	// LifetimeDays is how long the credential works before it stops on its own. Omitted or zero, it
+	// carries no date and ends only by revocation.
+	LifetimeDays int `json:"lifetime_days"`
 }
 
 // credentialIssued carries the token once. It is not recoverable afterwards, by anyone.
@@ -423,6 +426,8 @@ type credentialIssued struct {
 	Project string `json:"project"`
 	Access  string `json:"access"`
 	Token   string `json:"token"`
+	// ExpiresAt is absent for a credential with no date.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 type credentialListRequest struct {
@@ -457,7 +462,12 @@ func (m *ManagementServer) issueCredential(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, codeInvalidCredential, "a credential needs a name, a project, and access read_only, agent or read_write")
 		return
 	}
-	token, issued, err := m.issueProjectCredential(r.Context(), req.Name, req.Project, access)
+	lifetime, err := credential.LifetimeOfDays(req.LifetimeDays)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, codeInvalidCredential, err.Error())
+		return
+	}
+	token, issued, err := m.issueProjectCredential(r.Context(), req.Name, req.Project, access, lifetime)
 	if errors.Is(err, pg.ErrNoSuchProject) {
 		m.record(r, domain.AuditCredentialIssue, grant, req.Project, domain.OutcomeRefused, 0)
 		writeError(w, http.StatusNotFound, codeNotFound, "no such active project")
@@ -469,7 +479,7 @@ func (m *ManagementServer) issueCredential(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	m.record(r, domain.AuditCredentialIssue, grant, req.Project, domain.OutcomeAllowed, 1)
-	writeJSON(w, http.StatusCreated, credentialIssued{ID: issued.CredentialID, Name: issued.Name, Project: issued.Project, Access: string(issued.Access), Token: token})
+	writeJSON(w, http.StatusCreated, credentialIssued{ID: issued.CredentialID, Name: issued.Name, Project: issued.Project, Access: string(issued.Access), Token: token, ExpiresAt: issued.ExpiresAt})
 }
 
 // issueProjectCredential is the only way a project credential is minted, whichever surface the
@@ -486,11 +496,35 @@ func (m *ManagementServer) issueCredential(w http.ResponseWriter, r *http.Reques
 // What this does not cover: a project suspended between the check and the insert. The credential then
 // exists for a suspended project, and authentication refuses it until the project is resumed, like
 // every other credential of a suspended project.
-func (m *ManagementServer) issueProjectCredential(ctx context.Context, name, project string, access credential.Access) (string, credential.Grant, error) {
+func (m *ManagementServer) issueProjectCredential(ctx context.Context, name, project string, access credential.Access, lifetime time.Duration) (string, credential.Grant, error) {
 	if _, err := m.stores.Projects.Active(ctx, project); err != nil {
 		return "", credential.Grant{}, err
 	}
-	return m.credentials.IssueWithAccess(ctx, name, project, access)
+	return m.credentials.IssueExpiring(ctx, name, project, access, lifetime)
+}
+
+// listedCredentials is the credential list as every surface shows it: what the registry holds, and
+// when the ledger last saw each one.
+//
+// The two live behind different grants, and the management server is the one place that reads
+// both. A failure to read the ledger fails the list rather than leaving the column empty: an
+// operator reads "never acted" as "safe to revoke", and a list that says so because a query failed
+// is worse than no list.
+func (m *ManagementServer) listedCredentials(ctx context.Context, project string, limit int) ([]credential.Listed, error) {
+	listed, err := m.credentials.List(ctx, project, limit)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(listed))
+	for i, l := range listed {
+		ids[i] = l.CredentialID
+	}
+	acted, err := m.stores.Audit.LastActed(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	credential.WithLastActed(listed, acted)
+	return listed, nil
 }
 
 func (m *ManagementServer) listCredentials(w http.ResponseWriter, r *http.Request, grant credential.Grant) {
@@ -502,7 +536,7 @@ func (m *ManagementServer) listCredentials(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, codeInvalidCredential, "limit is 1..500")
 		return
 	}
-	listed, err := m.credentials.List(r.Context(), req.Project, req.Limit)
+	listed, err := m.listedCredentials(r.Context(), req.Project, req.Limit)
 	if err != nil {
 		m.log.Error("list credentials", "error", err)
 		writeError(w, http.StatusInternalServerError, codeInternal, "credentials could not be listed")

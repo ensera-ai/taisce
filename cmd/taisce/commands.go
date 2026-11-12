@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -44,7 +45,9 @@ const usage = `taisce — memory for agents
   taisce credential issue <name>   mint a credential (--project, --read-only); the token is shown once
   taisce credential list           list credentials (--project; without it, the operator credentials)
   taisce credential revoke <id>    stop a credential resolving
-  taisce operator issue <name>     mint an operator credential for the management surface; shown once
+  taisce operator issue <name> [-lifetime-days <n> | -no-expiry]
+                                   mint an operator credential for the management surface; shown once,
+                                   and it stops working after 90 days unless told otherwise
   taisce observer issue <name>     mint a credential that reads the instance's metrics and nothing else
   taisce vocabulary add <name>     admit one relation (-project and four declarations, none optional)
   taisce vocabulary list           the relations this instance admits (-project)
@@ -321,6 +324,7 @@ func bootstrap(ctx context.Context, log *slog.Logger, args []string, out io.Writ
 		}
 		fmt.Fprintf(out, "\noperator credential %s (%s) reaches the management surface and no project\n", grant.Name, grant.CredentialID)
 		fmt.Fprintf(out, "operator token: %s\n", token)
+		fmt.Fprint(out, expirySaid(grant.ExpiresAt, "taisce operator issue <name>"))
 		printed = true
 	}
 	if existing > 0 {
@@ -511,7 +515,7 @@ func project(ctx context.Context, args []string) error {
 
 // credentialCommand mints and revokes credentials.
 func credentialCommand(ctx context.Context, args []string) error {
-	const usageLine = "usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write] | list [-project <name>] | revoke <id>"
+	const usageLine = "usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write] [-lifetime-days <n>] | list [-project <name>] | revoke <id>"
 	if len(args) == 0 {
 		return errors.New(usageLine)
 	}
@@ -519,14 +523,16 @@ func credentialCommand(ctx context.Context, args []string) error {
 	// administrative connection.
 	var name, project string
 	var access credential.Access
+	var lifetime time.Duration
 	switch args[0] {
 	case "issue":
 		flags := flag.NewFlagSet("issue", flag.ContinueOnError)
 		projectFlag := flags.String("project", "default", "the project this credential reaches")
 		accessFlag := flags.String("access", "", accessFlagHelp)
 		readOnlyFlag := flags.Bool("read-only", false, "the same as --access read_only")
+		daysFlag := flags.Int("lifetime-days", 0, lifetimeFlagHelp)
 		if len(args) < 2 {
-			return fmt.Errorf("usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write]")
+			return fmt.Errorf("usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write] [-lifetime-days <n>]")
 		}
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
@@ -536,6 +542,9 @@ func credentialCommand(ctx context.Context, args []string) error {
 		}
 		var err error
 		if access, err = issuedAccess(*accessFlag, *readOnlyFlag); err != nil {
+			return err
+		}
+		if lifetime, err = credential.LifetimeOfDays(*daysFlag); err != nil {
 			return err
 		}
 		name, project = args[1], *projectFlag
@@ -576,12 +585,13 @@ func credentialCommand(ctx context.Context, args []string) error {
 		if err := requireActiveProject(ctx, admin, project); err != nil {
 			return err
 		}
-		token, grant, err := store.IssueWithAccess(ctx, name, project, access)
+		token, grant, err := store.IssueExpiring(ctx, name, project, access, lifetime)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("credential %s (%s) reaches project %s with %s access\ntoken: %s\n",
 			grant.Name, grant.CredentialID, grant.Project, grant.Access, token)
+		fmt.Print(expirySaid(grant.ExpiresAt, "taisce credential issue <name> -project "+grant.Project))
 		fmt.Print("\nThis token is shown once and cannot be recovered.\n")
 		return nil
 	case "list":
@@ -591,6 +601,21 @@ func credentialCommand(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		// The ledger is in the memory schema and the registry is not; this connection reads both,
+		// as the management surface's does, so both paths print the same list.
+		schema, err := configuredMemorySchema()
+		if err != nil {
+			return err
+		}
+		ids := make([]string, len(listed))
+		for i, l := range listed {
+			ids[i] = l.CredentialID
+		}
+		acted, err := pg.NewAuditStore(admin, schema).LastActed(ctx, ids)
+		if err != nil {
+			return err
+		}
+		credential.WithLastActed(listed, acted)
 		printCredentials(listed)
 		return nil
 	default:

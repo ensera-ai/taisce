@@ -253,6 +253,48 @@ Nothing, until asked. `ingress.api` publishes the memory routes. `ingress.portal
 portal at `/portal` and is refused unless `manage.portal=on`, so an ingress can never point at the
 management surface's door by accident. The management surface itself is a ClusterIP service.
 
+**Give the console a hostname of its own.** The memory hostname is the one agents hold a bearer
+token for; a console on the same origin puts project administration behind a name a stolen project
+token already knows. On its own hostname the console answers at the bare root — `https://ops.example/`
+redirects into `/portal/` — so the address an operator is given is the address that works. Only that
+exact path and `/portal` are routed; the management API on the same port is not published. On a
+hostname shared with the memory API the root stays the API's and the console is at `/portal`.
+
+### On a Gateway API cluster
+
+Each surface is an `Ingress` by default and an `HTTPRoute` when asked:
+
+```yaml
+manage:
+  portal: "on"
+ingress:
+  portal:
+    enabled: true
+    kind: HTTPRoute
+    host: ops.example
+    parentRefs:
+      - {name: eg, namespace: envoy-gateway-system, sectionName: console-https}
+    certificateSecret: console-tls
+networkPolicy:
+  manage:
+    from:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: envoy-gateway-system}}
+```
+
+- `parentRefs` is required. A route attached to no gateway is accepted by the cluster and serves
+  nothing, so it is refused at render.
+- `certificateSecret` names a secret **in this namespace** that the gateway's listener presents. It
+  renders a `ReferenceGrant` letting the gateway's namespace read that one secret. Without a grant
+  the listener reports itself unprogrammed, after everything else looks healthy; with a grant that
+  names the kind and no object — the one a first example produces — the gateway can read every
+  secret in the namespace, the database's passwords included. Leave it empty when the certificate
+  lives beside the gateway.
+- **The chart does not render the `Gateway` or its listener.** Those belong to whoever owns the
+  gateway. The listener's `hostname`, its `tls.certificateRefs` and its `allowedRoutes` are yours to
+  write, and the certificate itself is whatever issues certificates on your cluster.
+- The gateway's proxy pods run in a namespace the chart cannot derive from `parentRefs` — it is not
+  always the namespace the `Gateway` object is in — so `networkPolicy` has to name it, as above.
+
 ### Who may connect, inside the cluster
 
 A ClusterIP service is reachable by every pod in the cluster, so the chart also says who may open a
