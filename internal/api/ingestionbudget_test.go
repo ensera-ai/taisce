@@ -47,8 +47,11 @@ func TestBacklogRefusalIsRetryableAndPreservesTheOriginalReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") != "1" {
-		t.Fatal("backlog refusal omitted its retry contract")
+	// Nothing has formed in this harness, so nothing is known about how fast the backlog drains and
+	// the wait stated is the ceiling. TestAWriterAtCapacityIsToldHowLongATurnTakesToForm holds what
+	// the number is when something is known.
+	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") != "30" {
+		t.Fatalf("backlog refusal omitted its retry contract: %d, Retry-After %q", resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	status, body = h.raw(t, http.MethodPost, "/v1/observations", first, h.token)
 	var replay retryReceipt
