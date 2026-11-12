@@ -216,7 +216,7 @@ scrape_configs:
 | `taisce_connection_limit` | Sessions the server permits in total |
 | `taisce_connection_reserved` | Sessions the server holds back for superuser recovery |
 | `taisce_connection_headroom` | Sessions that could still be opened before the server refuses |
-| `taisce_operations_allowed` | Operations the ledger recorded as allowed in the recent window |
+| `taisce_operations_allowed` | Operations the ledger recorded as allowed in the recent window. Freshness reads are counted, not listed, and each counts here |
 | `taisce_operations_refused` | Operations the ledger recorded as refused in the recent window |
 | `taisce_operations_window_seconds` | How far back the two counts above look |
 | `taisce_operation_duration_milliseconds` | Histogram, by `operation`: how long a request to a memory operation took |

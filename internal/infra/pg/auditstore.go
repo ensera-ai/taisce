@@ -142,6 +142,25 @@ type ProjectActivity struct {
 	Operations, Refused int64
 }
 
+// ledgerOperations is how many operations one ledger row stands for, as SQL over that row.
+//
+// One, for every operation but one. A freshness read is counted rather than listed: the first of
+// a credential's reads in a window is a row, and the rest of that window is a single row whose
+// magnitude is how many there were (see the API's EntitledReads). So a row count would call a
+// thousand polls two operations. Every count of *operations* over the ledger goes through this,
+// so that what an operator reads as activity is what happened and not how it was stored.
+//
+// A freshness row written before reads were counted has a magnitude of zero and stood for one
+// read, which is what the floor of one is for.
+//
+// It is deliberately not used where the ledger is counted as a ledger — how many entries a seal
+// covers, how many are unsealed. Those are rows, and a row is a row.
+//
+// What it does not do: it does not apply to refused authentication, which is sampled into rows
+// the same way and has always been counted by row. That number is a count of samples and says so
+// where it is shown; changing what it means is not this change.
+const ledgerOperations = `(CASE WHEN operation = 'freshness' THEN GREATEST(magnitude, 1) ELSE 1 END)`
+
 // activityProjects bounds the busiest-projects list. A console shows the few worth looking at; the
 // rest are one filter away.
 const activityProjects = 6
@@ -247,7 +266,7 @@ func (s *AuditStore) activityBetween(ctx context.Context, project string, since,
 	}
 
 	rows, err := s.pool.Query(ctx, s.schema.SQL(`
-		SELECT occurred_at >= $2, operation, outcome, count(*), coalesce(sum(magnitude), 0),
+		SELECT occurred_at >= $2, operation, outcome, sum(`+ledgerOperations+`), coalesce(sum(magnitude), 0),
 		       count(*) FILTER (WHERE magnitude > 0)
 		  FROM {schema}.audit_entry
 		 WHERE occurred_at >= $1 AND occurred_at < $3 AND ($4 = '' OR project = $4)
@@ -302,7 +321,8 @@ func (s *AuditStore) activityBetween(ctx context.Context, project string, since,
 	}
 	rows, err = s.pool.Query(ctx, s.schema.SQL(`
 		SELECT date_bin(make_interval(secs => $1), occurred_at, $2),
-		       count(*) FILTER (WHERE outcome = 'allowed'), count(*) FILTER (WHERE outcome = 'refused')
+		       coalesce(sum(`+ledgerOperations+`) FILTER (WHERE outcome = 'allowed'), 0),
+		       coalesce(sum(`+ledgerOperations+`) FILTER (WHERE outcome = 'refused'), 0)
 		  FROM {schema}.audit_entry
 		 WHERE occurred_at >= $2 AND occurred_at < $3 AND ($4 = '' OR project = $4)
 		 GROUP BY 1`), out.Bucket.Seconds(), since, until, project)
@@ -334,7 +354,8 @@ func (s *AuditStore) activityBetween(ctx context.Context, project string, since,
 		return out, nil
 	}
 	rows, err = s.pool.Query(ctx, s.schema.SQL(`
-		SELECT project, count(*), count(*) FILTER (WHERE outcome = 'refused')
+		SELECT project, sum(`+ledgerOperations+`),
+		       coalesce(sum(`+ledgerOperations+`) FILTER (WHERE outcome = 'refused'), 0)
 		  FROM {schema}.audit_entry
 		 WHERE occurred_at >= $1 AND occurred_at < $2 AND project <> ''
 		 GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $3`), since, until, activityProjects)

@@ -283,7 +283,9 @@ ledger and from PostgreSQL's own statistics, never from anything anybody said.
   turns, so a turn of three messages counts three
   ([#54](https://github.com/ensera-ai/taisce/issues/54)).
 - **Operations.** Allowed and refused operations over time. **View breakdown** lists each operation
-  with how often it was allowed, how often refused, and how many rows it touched.
+  with how often it was allowed, how often refused, and how many rows it touched. A freshness poll
+  is counted here in full, though the audit ledger keeps it as two rows a minute per key rather than
+  one per poll; its count for the current minute appears when that minute closes.
 - **Busiest projects.** The six projects doing the most. Narrowed to one project, it becomes the six
   busiest operations in that project.
 
