@@ -651,7 +651,7 @@ func (p *Portal) project(w http.ResponseWriter, r *http.Request, grant credentia
 		http.Error(w, "parked turns could not be read", http.StatusInternalServerError)
 		return
 	}
-	listed, err := p.m.credentials.List(ctx, name, 100)
+	listed, err := p.m.listedCredentials(ctx, name, 100)
 	if err != nil {
 		p.m.log.Error("portal: credentials", "error", err, "project", name)
 		http.Error(w, "credentials could not be read", http.StatusInternalServerError)

@@ -985,6 +985,7 @@ POST `/manage/v1/credentials/issue` → 201
 | `name` | string |
 | `project` | string |
 | `access` | string |
+| `lifetime_days` | integer |
 
 ### Response
 
@@ -995,6 +996,7 @@ POST `/manage/v1/credentials/issue` → 201
 | `project` | string |
 | `access` | string |
 | `token` | string |
+| `expires_at` | timestamp (RFC 3339), optional |
 
 
 ## `credential.list`
@@ -1012,7 +1014,7 @@ POST `/manage/v1/credentials/list` → 200
 
 | Field | Type |
 |---|---|
-| `credentials` | array of {id: string, name: string, kind: string, project: string, access: string, token_prefix: string, created_at: timestamp (RFC 3339), revoked_at: timestamp (RFC 3339), optional} |
+| `credentials` | array of {id: string, name: string, kind: string, project: string, access: string, token_prefix: string, created_at: timestamp (RFC 3339), revoked_at: timestamp (RFC 3339), optional, expires_at: timestamp (RFC 3339), optional, expired: boolean, last_acted_at: timestamp (RFC 3339), optional} |
 
 
 ## `credential.revoke`

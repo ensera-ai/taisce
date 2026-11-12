@@ -190,7 +190,9 @@ The comment on `Digest` makes this argument in the code. The 12 stored character
 random bits; the other 208 are what a thief of the table would have to guess.
 
 Resolution trims the presented value, refuses anything without the prefix before touching the
-database, and then selects the row whose `token_digest` matches and whose `revoked_at` is null. An
+database, and then selects the row whose `token_digest` matches, whose `revoked_at` is null, and
+whose `expires_at` is null or still ahead of the database's clock (D50). An expired credential is
+therefore a row the query does not return, and no caller can tell it from a token nobody issued. An
 access mode other than `read_only`, `agent` or `read_write` is refused, so an unknown value fails
 closed. The registry's own constraint holds the same set
 ([migration 0006](../../internal/migrate/control/0006_an_agent_credential_writes_memory_and_cannot_destroy_it.sql)),
@@ -215,6 +217,12 @@ CLI's direct path over the administrative connection. The serving registry role 
   revocation applies to the very next request. The portal re-resolves its operator token on every
   page for the same reason.
 - To change a credential's access mode, revoke it and issue another.
+- A credential may be issued with a lifetime. An operator credential gets ninety days unless whoever
+  mints it says otherwise; a project or observer credential gets a date only when asked. Existing
+  credentials have none. What this does not do: it does not warn before a credential ends, and it
+  does not end one that was issued without a date.
+- The credential list reads when each credential last appears in the audit ledger, by the ledger's
+  index on principal and time. Nothing is written when a credential is used.
 
 Operator steps are in [project credentials](../10-project-credentials.md).
 
@@ -230,9 +238,9 @@ sequenceDiagram
   C->>D: request with a bearer token
   D-->>C: 401 at once for no token, or for something that cannot be one
   D-->>C: 429 when an unknown token finds the strangers' allowance spent, or no lookup slot is free
-  D->>R: select by SHA-256 digest where not revoked
+  D->>R: select by SHA-256 digest where not revoked and not expired
   R-->>D: kind, project, access
-  D-->>C: 401 for absent, malformed, unknown, revoked or wrong kind
+  D-->>C: 401 for absent, malformed, unknown, revoked, expired or wrong kind
   D->>M: is the credential's project active
   D-->>C: 401 and a refused ledger row when it is not
   D->>D: take a work slot for the process, the project and the credential

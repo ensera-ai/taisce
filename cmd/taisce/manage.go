@@ -180,8 +180,9 @@ func (c *manageClient) credential(ctx context.Context, args []string) error {
 		project := flags.String("project", "default", "the project this credential reaches")
 		accessFlag := flags.String("access", "", accessFlagHelp)
 		readOnly := flags.Bool("read-only", false, "the same as --access read_only")
+		days := flags.Int("lifetime-days", 0, lifetimeFlagHelp)
 		if len(args) < 2 {
-			return errors.New("usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write]")
+			return errors.New("usage: taisce credential issue <name> [-project <name>] [--access read_only|agent|read_write] [-lifetime-days <n>]")
 		}
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
@@ -193,13 +194,19 @@ func (c *manageClient) credential(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		// Refused here as the direct path refuses it, before anything is sent.
+		if _, err := credential.LifetimeOfDays(*days); err != nil {
+			return err
+		}
 		var issued struct {
 			ID, Name, Project, Access, Token string
+			ExpiresAt                        *time.Time `json:"expires_at"`
 		}
-		if err := c.post(ctx, "/credentials/issue", map[string]any{"name": args[1], "project": *project, "access": string(access)}, &issued); err != nil {
+		if err := c.post(ctx, "/credentials/issue", map[string]any{"name": args[1], "project": *project, "access": string(access), "lifetime_days": *days}, &issued); err != nil {
 			return err
 		}
 		fmt.Printf("credential %s (%s) reaches project %s with %s access\ntoken: %s\n", issued.Name, issued.ID, issued.Project, issued.Access, issued.Token)
+		fmt.Print(expirySaid(issued.ExpiresAt, "taisce credential issue <name> -project "+issued.Project))
 		fmt.Print("\nThis token is shown once and cannot be recovered.\n")
 		return nil
 	case "list":
@@ -345,16 +352,41 @@ func retentionArgument(args []string) (*int, error) {
 // printCredentials is the credential listing both paths print.
 func printCredentials(listed []credential.Listed) {
 	for _, l := range listed {
-		state := ""
-		if l.RevokedAt != nil {
+		// Each line says when the credential ends and when the ledger last saw it, in words that
+		// cannot be mistaken for each other: an operator reads this list to decide what to revoke.
+		state := "  no expiry"
+		switch {
+		case l.RevokedAt != nil:
 			state = "  [revoked " + l.RevokedAt.UTC().Format(time.RFC3339) + "]"
+		case l.Expired:
+			state = "  [expired " + l.ExpiresAt.UTC().Format(time.RFC3339) + "]"
+		case l.ExpiresAt != nil:
+			state = "  expires " + l.ExpiresAt.UTC().Format(time.RFC3339)
 		}
-		target := "operator"
+		acted := "  not in the ledger"
+		if l.LastActedAt != nil {
+			acted = "  last acted " + l.LastActedAt.UTC().Format(time.RFC3339)
+		}
+		target := string(l.Kind)
 		if l.Kind == credential.KindProject {
 			target = "project " + l.Project + " " + string(l.Access)
 		}
-		fmt.Printf("%s  %-24s %s… %s%s\n", l.CredentialID, l.Name, l.TokenPrefix, target, state)
+		fmt.Printf("%s  %-24s %s… %s%s%s\n", l.CredentialID, l.Name, l.TokenPrefix, target, state, acted)
 	}
+}
+
+const lifetimeFlagHelp = "days until the credential stops working on its own; omitted, it has no date and ends only by revocation"
+
+// expirySaid is the line printed under a newly minted token: when it ends, and how to get another.
+//
+// Said at the one moment the operator is certainly reading, because the day it ends they will be
+// reading a refusal that says nothing — an expired credential is answered as one nobody issued.
+func expirySaid(expiresAt *time.Time, mintAnother string) string {
+	if expiresAt == nil {
+		return "It has no expiry: it works until it is revoked.\n"
+	}
+	return fmt.Sprintf("It stops working on %s. Mint its replacement before then: %s\n",
+		expiresAt.UTC().Format("2006-01-02 15:04 MST"), mintAnother)
 }
 
 // formation speaks the surface's formation operations. The arguments go through the parser
@@ -409,21 +441,56 @@ func (c *manageClient) audit(ctx context.Context, args []string) error {
 // operatorCommand mints an operator credential over the administrative connection: the one
 // operation that has to exist before the management surface can be spoken to.
 func operatorCommand(ctx context.Context, args []string) error {
+	const usageLine = "usage: taisce operator issue <name> [-lifetime-days <n> | -no-expiry]"
 	if len(args) < 2 || args[0] != "issue" {
-		return errors.New("usage: taisce operator issue <name>")
+		return errors.New(usageLine)
+	}
+	lifetime, err := operatorLifetime(args[2:])
+	if err != nil {
+		return err
 	}
 	admin, _, err := adminPool(ctx)
 	if err != nil {
 		return err
 	}
 	defer admin.Close()
-	token, grant, err := credential.NewStore(admin, string(migrate.ControlSchema)).IssueOperator(ctx, args[1])
+	token, grant, err := credential.NewStore(admin, string(migrate.ControlSchema)).IssueOperatorFor(ctx, args[1], lifetime)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("operator credential %s (%s) reaches the management surface and no project\ntoken: %s\n", grant.Name, grant.CredentialID, token)
+	fmt.Print(expirySaid(grant.ExpiresAt, "taisce operator issue <name>"))
 	fmt.Print("\nThis token is shown once and cannot be recovered.\n")
 	return nil
+}
+
+// operatorLifetime reads how long an operator credential should live from the flags after its name.
+//
+// Said nothing, it is credential.OperatorLifetime. A permanent one has to be asked for by name:
+// `-lifetime-days 0` is refused rather than read as "never", because zero is what a flag holds
+// when a script's variable was empty, and the most powerful credential on the instance should not
+// become permanent because of an unset variable.
+func operatorLifetime(args []string) (time.Duration, error) {
+	flags := flag.NewFlagSet("issue", flag.ContinueOnError)
+	days := flags.Int("lifetime-days", int(credential.OperatorLifetime/(24*time.Hour)), "days until the credential stops working on its own")
+	never := flags.Bool("no-expiry", false, "mint a credential that works until it is revoked")
+	if err := flags.Parse(args); err != nil {
+		return 0, err
+	}
+	if flags.NArg() != 0 {
+		return 0, errors.New("unexpected arguments; flags must follow the credential name")
+	}
+	stated := false
+	flags.Visit(func(f *flag.Flag) { stated = stated || f.Name == "lifetime-days" })
+	switch {
+	case *never && stated:
+		return 0, errors.New("-no-expiry and -lifetime-days say opposite things; give one")
+	case *never:
+		return credential.NoExpiry, nil
+	case *days == 0:
+		return 0, errors.New("-lifetime-days 0 is not a lifetime; say -no-expiry to mint an operator credential that never ends")
+	}
+	return credential.LifetimeOfDays(*days)
 }
 
 // observerCommand mints an observer credential over the administrative connection.

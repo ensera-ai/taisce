@@ -87,7 +87,45 @@ type Grant struct {
 	// returning one that reaches nothing, because a token that authenticates and then does nothing
 	// is a support case, not a security posture.
 	Project string
+	// ExpiresAt is when the credential stops resolving, or nil when it carries no date. It is
+	// reported, never consulted: the resolver's query is what refuses an expired credential, by the
+	// database's clock, so nothing downstream of a grant decides whether it is still good.
+	ExpiresAt *time.Time
 }
+
+// OperatorLifetime is how long an operator credential lives when whoever mints it does not say.
+//
+// An operator credential can mint a key for any project, and the first one is minted at install and
+// pasted somewhere. Without a date it is the instance's most powerful secret for as long as the
+// instance exists, wherever that paste went. With one, a copy nobody remembers stops working on its
+// own.
+//
+// Ninety days is a choice, not a measurement: long enough that replacing it is a quarterly task
+// rather than a weekly one that gets automated by storing the credential somewhere worse, short
+// enough that a token left in a shell history is dead within a season. It costs an operator
+// nothing they cannot get back — minting needs the administrative connection, not a credential, so
+// an expired operator credential locks nobody out who could have minted it in the first place.
+//
+// A project credential gets no such default. It is held by an application, and a date nobody chose
+// is the day that application stops authenticating in production with a refusal that reads like a
+// typing mistake. Its expiry is offered and has to be asked for.
+const OperatorLifetime = 90 * 24 * time.Hour
+
+// MaxLifetimeDays is the longest lifetime that is still a date. Past a century the number is a way
+// of writing "never" that the list then shows as a date, and never has its own spelling.
+const MaxLifetimeDays = 36500
+
+// LifetimeOfDays is the lifetime an operator states in days, checked once for every surface that
+// takes one. Zero is NoExpiry: no date was stated.
+func LifetimeOfDays(days int) (time.Duration, error) {
+	if days < 0 || days > MaxLifetimeDays {
+		return 0, fmt.Errorf("a credential's lifetime is 1..%d days, or none", MaxLifetimeDays)
+	}
+	return time.Duration(days) * 24 * time.Hour, nil
+}
+
+// NoExpiry is a lifetime with no date: the credential ends only by revocation.
+const NoExpiry time.Duration = 0
 
 // Store resolves and issues credentials against the registry schema.
 type Store struct {
@@ -205,7 +243,8 @@ func (s *Store) readLive(ctx context.Context) (*liveCredentials, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	rows, err := s.registry.Query(ctx, fmt.Sprintf(
-		`SELECT token_digest, kind FROM %s.credential WHERE revoked_at IS NULL`, s.schema))
+		`SELECT token_digest, kind FROM %s.credential
+		  WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())`, s.schema))
 	if err != nil {
 		return nil, fmt.Errorf("read live credentials: %w", err)
 	}
@@ -266,11 +305,12 @@ func (s *Store) resolve(ctx context.Context, token string) (Grant, Kind, error) 
 	var g Grant
 	var kind Kind
 	err := s.registry.QueryRow(ctx, fmt.Sprintf(`
-		SELECT credential_id::text, name, project, access, kind
+		SELECT credential_id::text, name, project, access, kind, expires_at
 		  FROM %s.credential
 		 WHERE token_digest = $1
-		   AND revoked_at IS NULL`, s.schema), Digest(token)).
-		Scan(&g.CredentialID, &g.Name, &g.Project, &g.Access, &kind)
+		   AND revoked_at IS NULL
+		   AND (expires_at IS NULL OR expires_at > now())`, s.schema), Digest(token)).
+		Scan(&g.CredentialID, &g.Name, &g.Project, &g.Access, &kind, &g.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Grant{}, "", ErrUnknown
 	}
@@ -304,8 +344,12 @@ func (s *Store) ResolveScraper(ctx context.Context, token string) (Grant, error)
 
 // IssueObserver mints a credential that reads the instance's numbers and nothing else, and returns
 // the token once.
+//
+// It carries no date. What it reaches is the instance's numbers, and what ends when it expires is
+// the monitoring — a gap that looks, on a dashboard, exactly like the outage monitoring exists to
+// show. It ends by revocation.
 func (s *Store) IssueObserver(ctx context.Context, name string) (string, Grant, error) {
-	return s.issueInstanceCredential(ctx, name, KindObserver, ReadOnly)
+	return s.issueInstanceCredential(ctx, name, KindObserver, ReadOnly, NoExpiry)
 }
 
 // Issue mints a credential for one project and returns the token ONCE.
@@ -322,8 +366,35 @@ func (s *Store) Issue(ctx context.Context, name, project string) (string, Grant,
 }
 
 // IssueWithAccess creates an explicitly restricted project credential. Access is registry metadata;
-// it is never taken from an HTTP request using that credential.
+// it is never taken from an HTTP request using that credential. The credential carries no date.
 func (s *Store) IssueWithAccess(ctx context.Context, name, project string, access Access) (string, Grant, error) {
+	return s.IssueExpiring(ctx, name, project, access, NoExpiry)
+}
+
+// expiry turns a lifetime into the parameter the insert takes: seconds from the database's now, or
+// NULL for no date.
+//
+// Seconds rather than a time computed here, so the moment a credential ends is fixed by the same
+// clock that will later decide whether it has — a replica whose clock runs ahead cannot mint a
+// credential that is already dead, or one that outlives what was asked for.
+func expiry(lifetime time.Duration) (*float64, error) {
+	if lifetime < 0 {
+		return nil, fmt.Errorf("a credential's lifetime cannot be negative")
+	}
+	if lifetime == NoExpiry {
+		return nil, nil
+	}
+	seconds := lifetime.Seconds()
+	return &seconds, nil
+}
+
+// IssueExpiring is IssueWithAccess for a credential that ends on its own after lifetime. NoExpiry
+// gives it no date.
+func (s *Store) IssueExpiring(ctx context.Context, name, project string, access Access, lifetime time.Duration) (string, Grant, error) {
+	seconds, err := expiry(lifetime)
+	if err != nil {
+		return "", Grant{}, err
+	}
 	if !access.Valid() {
 		return "", Grant{}, fmt.Errorf("credential access must be read_only, agent or read_write")
 	}
@@ -345,10 +416,12 @@ func (s *Store) IssueWithAccess(ctx context.Context, name, project string, acces
 	token := Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
 
 	g := Grant{CredentialID: uuid.New().String(), Name: name, Project: project, Access: access}
-	if _, err := s.registry.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access, kind)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, s.schema),
-		g.CredentialID, Digest(token), token[:12], name, project, string(access), string(KindProject)); err != nil {
+	if err := s.registry.QueryRow(ctx, fmt.Sprintf(`
+		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access, kind, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8))
+		RETURNING expires_at`, s.schema),
+		g.CredentialID, Digest(token), token[:12], name, project, string(access), string(KindProject), seconds).
+		Scan(&g.ExpiresAt); err != nil {
 		return "", Grant{}, fmt.Errorf("issue credential: %w", err)
 	}
 	return token, g, nil
@@ -356,8 +429,16 @@ func (s *Store) IssueWithAccess(ctx context.Context, name, project string, acces
 
 // IssueOperator mints an operator credential and returns the token ONCE. It names no project: the
 // management surface acts on the instance, and a request names the project it acts on.
+//
+// It lives for OperatorLifetime. IssueOperatorFor is for an operator who states another, NoExpiry
+// included: a permanent operator credential is permitted, and is something somebody said.
 func (s *Store) IssueOperator(ctx context.Context, name string) (string, Grant, error) {
-	return s.issueInstanceCredential(ctx, name, KindOperator, ReadWrite)
+	return s.IssueOperatorFor(ctx, name, OperatorLifetime)
+}
+
+// IssueOperatorFor mints an operator credential that ends on its own after lifetime.
+func (s *Store) IssueOperatorFor(ctx context.Context, name string, lifetime time.Duration) (string, Grant, error) {
+	return s.issueInstanceCredential(ctx, name, KindOperator, ReadWrite, lifetime)
 }
 
 // issueInstanceCredential mints a credential that names no project: an operator's or an observer's.
@@ -365,7 +446,11 @@ func (s *Store) IssueOperator(ctx context.Context, name string) (string, Grant, 
 // The access column is not what bounds either — the kind is, at the door — but it is stored with
 // the least authority the kind could mean, so a row read by something that looks only at access
 // does not find `read_write` on a credential issued to scrape.
-func (s *Store) issueInstanceCredential(ctx context.Context, name string, kind Kind, access Access) (string, Grant, error) {
+func (s *Store) issueInstanceCredential(ctx context.Context, name string, kind Kind, access Access, lifetime time.Duration) (string, Grant, error) {
+	seconds, err := expiry(lifetime)
+	if err != nil {
+		return "", Grant{}, err
+	}
 	if strings.TrimSpace(name) == "" {
 		return "", Grant{}, fmt.Errorf("a credential needs a name, so a person can tell it from another")
 	}
@@ -375,10 +460,12 @@ func (s *Store) issueInstanceCredential(ctx context.Context, name string, kind K
 	}
 	token := Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
 	g := Grant{CredentialID: uuid.New().String(), Name: name, Access: access}
-	if _, err := s.registry.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access, kind)
-		VALUES ($1, $2, $3, $4, '', $5, $6)`, s.schema),
-		g.CredentialID, Digest(token), token[:12], name, string(access), string(kind)); err != nil {
+	if err := s.registry.QueryRow(ctx, fmt.Sprintf(`
+		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access, kind, expires_at)
+		VALUES ($1, $2, $3, $4, '', $5, $6, now() + make_interval(secs => $7))
+		RETURNING expires_at`, s.schema),
+		g.CredentialID, Digest(token), token[:12], name, string(access), string(kind), seconds).
+		Scan(&g.ExpiresAt); err != nil {
 		return "", Grant{}, fmt.Errorf("issue %s credential: %w", kind, err)
 	}
 	return token, g, nil
@@ -395,6 +482,16 @@ type Listed struct {
 	TokenPrefix  string     `json:"token_prefix"`
 	CreatedAt    time.Time  `json:"created_at"`
 	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+	// ExpiresAt is when it stops resolving on its own; absent, it has no date.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Expired is the database's answer to whether that moment has passed, so a reader does not
+	// compare a timestamp with a clock of its own and reach a different conclusion from the one
+	// the resolver reaches.
+	Expired bool `json:"expired,omitempty"`
+	// LastActedAt is the newest ledger entry naming this credential, when whoever built the list
+	// asked the ledger. The registry does not know it: nothing is written here when a credential
+	// is used, because that would be a write on every request.
+	LastActedAt *time.Time `json:"last_acted_at,omitempty"`
 }
 
 // List describes the credentials of one project, or every operator credential when project is
@@ -404,7 +501,8 @@ func (s *Store) List(ctx context.Context, project string, limit int) ([]Listed, 
 		limit = 100
 	}
 	rows, err := s.registry.Query(ctx, fmt.Sprintf(`
-		SELECT credential_id::text, name, kind, project, access, token_prefix, created_at, revoked_at
+		SELECT credential_id::text, name, kind, project, access, token_prefix, created_at, revoked_at,
+		       expires_at, COALESCE(expires_at <= now(), false)
 		  FROM %s.credential
 		 WHERE project = $1
 		 ORDER BY created_at DESC, credential_id
@@ -416,7 +514,7 @@ func (s *Store) List(ctx context.Context, project string, limit int) ([]Listed, 
 	out := []Listed{}
 	for rows.Next() {
 		var c Listed
-		if err := rows.Scan(&c.CredentialID, &c.Name, &c.Kind, &c.Project, &c.Access, &c.TokenPrefix, &c.CreatedAt, &c.RevokedAt); err != nil {
+		if err := rows.Scan(&c.CredentialID, &c.Name, &c.Kind, &c.Project, &c.Access, &c.TokenPrefix, &c.CreatedAt, &c.RevokedAt, &c.ExpiresAt, &c.Expired); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -467,4 +565,15 @@ func (s *Store) Revoke(ctx context.Context, credentialID string) error {
 		return ErrUnknown
 	}
 	return nil
+}
+
+// WithLastActed writes onto each listed credential when the ledger last saw it. A credential the
+// map does not name is left without a time, which every surface renders as absent from the ledger
+// rather than as a date.
+func WithLastActed(listed []Listed, acted map[string]time.Time) {
+	for i := range listed {
+		if at, ok := acted[listed[i].CredentialID]; ok {
+			listed[i].LastActedAt = &at
+		}
+	}
 }
