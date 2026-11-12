@@ -363,7 +363,7 @@ flowchart TB
 | Workers | two replicas | `worker.replicas: 2` |
 | Management surface | one replica, ClusterIP only | `manage.enabled: true` |
 | Portal | off | `manage.portal: "off"` |
-| Ingress | none | `ingress.api.enabled`, `ingress.portal.enabled` |
+| Ingress | none | `ingress.api.enabled`, `ingress.portal.enabled`; each an `Ingress` or, with `kind: HTTPRoute`, a Gateway API route (D51) |
 | API readiness requires formation | yes | `api.requireFormation: true` |
 
 **The CloudNativePG operator is a prerequisite, not part of the chart.** Failover needs something

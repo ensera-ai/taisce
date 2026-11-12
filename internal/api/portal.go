@@ -92,6 +92,17 @@ func (p *Portal) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+PortalPrefix+"/ledger", p.signed(p.ledger))
 	mux.HandleFunc("GET "+PortalPrefix+"/projects/{project}", p.signed(p.project))
 	mux.HandleFunc("GET "+PortalPrefix+"/assets/{file}", p.asset)
+	// The listener's bare root, and only that: the address an operator was given is the address
+	// that works, instead of a 404 that reads as a broken deployment.
+	//
+	// The exact path rather than everything unclaimed. A redirect from every unknown path would
+	// answer a prober's whole wordlist with the location of the console and serve no reader — an
+	// operator arrives at the bare name, and nothing else at the root of this listener is meant to
+	// exist. It is mounted with the portal, so a listener whose portal is off still answers 404
+	// here, and it says nothing a request to the prefix would not.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, PortalPrefix+"/", http.StatusFound)
+	})
 	p.mountActions(mux)
 }
 

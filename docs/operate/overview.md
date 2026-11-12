@@ -94,7 +94,9 @@ ssh -L 8081:127.0.0.1:8081 your-server
 
 **With Helm**, set `manage.portal: "on"`. Reach it with
 `kubectl port-forward svc/<release>-manage 8081:8081`, or expose it with `ingress.portal.enabled`,
-`ingress.portal.host` and TLS. The chart refuses to render a portal ingress while `manage.portal` is
+`ingress.portal.host` and TLS — as an `Ingress`, or with `ingress.portal.kind: HTTPRoute` on a
+Gateway API cluster. On a hostname of its own the console answers at the bare root, which redirects
+into `/portal/`. The chart refuses to render a portal ingress while `manage.portal` is
 off, because that ingress would expose the management surface's door instead. Write `"on"` in lower
 case: the chart compares it exactly ([#55](https://github.com/ensera-ai/taisce/issues/55)).
 

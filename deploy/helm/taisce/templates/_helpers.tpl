@@ -200,3 +200,46 @@ allowPrivilegeEscalation: false
 readOnlyRootFilesystem: true
 capabilities: {drop: [ALL]}
 {{- end -}}
+{{/* The grant that lets a gateway in another namespace present a certificate kept in this one.
+
+     A gateway's listener names its certificate, and a secret in another namespace may be named only
+     if that namespace says so. Without the grant the listener reports itself unprogrammed — after
+     the release has installed and every pod is ready, so it reads as a healthy deployment nobody
+     can reach.
+
+     It names one secret. The grant an operator writes by hand, from the first example they find,
+     names the kind and no object, and that lets the gateway read every secret this namespace will
+     ever hold: the database's role passwords among them. The name is not optional here, so that
+     grant cannot be rendered.
+
+     Nothing is rendered for a gateway in this release's own namespace, which needs no permission,
+     or when no secret is named, which is an operator whose certificate lives beside their gateway.
+
+     v1beta1 because that is the version every Gateway API release that has the kind serves.
+
+     Takes a dict: root is the chart context, surface is "api" or "portal", v is that surface's
+     values. */}}
+{{- define "taisce.certificateGrant" -}}
+{{- $root := .root -}}
+{{- $elsewhere := list -}}
+{{- range .v.parentRefs -}}
+{{- if and .namespace (ne .namespace $root.Release.Namespace) (not (has .namespace $elsewhere)) -}}
+{{- $elsewhere = append $elsewhere .namespace -}}
+{{- end -}}
+{{- end -}}
+{{- if and .v.certificateSecret $elsewhere }}
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: {{ include "taisce.name" $root }}-{{ .surface }}-certificate
+  labels: {{- include "taisce.labels" $root | nindent 4 }}
+spec:
+  from:
+    {{- range $elsewhere }}
+    - {group: gateway.networking.k8s.io, kind: Gateway, namespace: {{ . | quote }}}
+    {{- end }}
+  to:
+    - {group: "", kind: Secret, name: {{ .v.certificateSecret | quote }}}
+{{- end }}
+{{- end -}}
