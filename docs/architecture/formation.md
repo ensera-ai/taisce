@@ -78,7 +78,7 @@ Only the turn budget is an operator setting.
 | `MaxAttempts` | 6 | failed attempts before a turn is parked |
 | `RetryAfter` | 10 s | first wait after a failure; doubles per attempt |
 | `TurnBudget` | 5 min, from `TAISCE_FORMATION_TURN_BUDGET` | one attempt at one turn |
-| `Interval` | 5 s | the wait between driver passes |
+| `Interval` | 5 s | the longest wait between driver passes; a stored turn ends it early (D53) |
 | `ReportsPerPass` | 4 | community reports written per project per pass |
 | `SegmentsPerPass` | 4 | compaction segments written per project per pass |
 | `NotificationsPerPass` | 16 | notification delivery attempts per pass |
@@ -141,6 +141,25 @@ That has three effects:
 
 `taisce rebuild reports` runs the subject pass on demand. No command runs the compaction pass on
 demand.
+
+### A stored turn ends the wait
+
+An idle worker does not wait out its interval when a turn arrives. The process that stored the turn
+announces it with a PostgreSQL notification, and each worker holds one connection listening for
+them ([turnwake.go](../../internal/infra/pg/turnwake.go)). A woken worker runs the same pass a tick
+runs and reads the backlog from the tables, so a notification that is lost, late or forged costs a
+wait or a pass that finds nothing — which is why the interval stays.
+
+- **It is sent after the write commits, not in it**, and at most once every 200 ms per serving
+  process. A burst of writes is one wake-up, and the write's own transaction is as it was.
+- **It carries the schema's name and nothing else.** Any role that can log in can listen on any
+  channel, so a project's name in the payload would be a way around the grants that keep the
+  registry's role out of memory.
+- **A worker's pool serves formation with one connection fewer than it declares**, because the
+  listening connection comes out of it. What the process holds against the database is still the
+  number its connection string states.
+- **What it does not cover:** a turn stored by a process that died before announcing it, and a
+  worker whose listening connection is down, both wait for the interval — as every turn did before.
 
 ## Why several workers are safe
 

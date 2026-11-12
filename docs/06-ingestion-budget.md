@@ -21,23 +21,49 @@ SELECT scope, pending FROM memory.ingestion_project_usage ORDER BY scope;
 
 ## Change the limits
 
-The defaults are 4096 unformed turns across the instance and 512 per project. Run the update in its
-own transaction:
+The defaults are 4096 unformed turns across the instance and 512 per project. Change them through
+the management surface, as an operator:
 
-```sql
-UPDATE memory.ingestion_budget
-SET max_pending = 8192, max_pending_per_project = 1024
-WHERE singleton;
+```sh
+export TAISCE_MANAGE_API=http://localhost:8081
+export TAISCE_OPERATOR_TOKEN=tsk_…
+taisce backlog limits --instance 8192 --per-project 1024
 ```
 
+```text
+backlog limits: 8192 unformed turns across the instance, 1024 per project; 37 waiting now
+```
+
+Either flag may be left out, and the limit it names is then left as it is. The same change is
+`POST /manage/v1/backlog/limits` with `{"max_pending": 8192, "max_pending_per_project": 1024}`.
+
 Both limits must be between 1 and 1,000,000, and the per-project limit cannot be larger than the
-global one. Pick limits from the disk space and model capacity you actually have. They are a cap, not
+instance's. Pick limits from the disk space and model capacity you actually have. They are a cap, not
 a disk reservation.
+
+- **The change is on the audit ledger**, as `backlog.limits`, against the operator who made it. Its
+  magnitude is the per-project limit it left in force.
+- **It takes effect on the next write.** Nothing restarts.
+- **Lowering a limit below what is already waiting discards nothing.** Writes are refused until
+  formation has drained the backlog under the new limit.
+- **The per-project limit is one number for every project**, not a setting per project.
+
+An `UPDATE` on `memory.ingestion_budget` as the administrative role still works and is still held to
+the same bounds by the table. It leaves no entry on the ledger, which is the reason not to use it.
 
 ## What clients see at capacity
 
 When the backlog is full, `POST /v1/observations` returns `429` with the error code `rate_limited`
-and the header `Retry-After: 1`. Nothing from the refused request is kept.
+and a `Retry-After` header. Nothing from the refused request is kept.
+
+`Retry-After` is in seconds, from 1 to 30. It is how long the instance currently takes to form one
+turn — the time between two readings of how many turns it has formed, divided by how many formed —
+because a full backlog has room again when one more turn forms. It says 30 when nothing has formed
+in the last two minutes: a provider that is down gives no rate, and "not soon" is the honest answer.
+
+It is a hint, and it is low for a project that shares the workers with others: they take projects
+in turn, so the wait for room in *your* project can be longer by up to the number of projects with
+a backlog. The estimate also trails the instance by up to ten seconds.
 
 - Retry with backoff and **the same idempotency key**.
 - A turn that was already accepted under that key still returns its original receipt, even while

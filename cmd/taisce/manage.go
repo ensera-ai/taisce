@@ -252,6 +252,41 @@ func (c *manageClient) credential(ctx context.Context, args []string) error {
 // Nothing here checks a declaration. The name's shape and the closed axes are constraints on the
 // table; sending a declaration the table refuses is how an operator is told, by name, which
 // constraint refused it.
+// backlog sets how many unformed turns may wait, through the management surface.
+//
+// Zero is what a flag holds when it was not given, and it is not a limit the budget accepts, so
+// "not given" and zero are the same thing here without one being mistaken for the other: a limit
+// left out is left as it is.
+func (c *manageClient) backlog(ctx context.Context, args []string) error {
+	const usageLine = "usage: taisce backlog limits [-instance <n>] [-per-project <n>]"
+	if len(args) == 0 || args[0] != "limits" {
+		return errors.New(usageLine)
+	}
+	flags := flag.NewFlagSet("limits", flag.ContinueOnError)
+	instance := flags.Int64("instance", 0, "the most unformed turns the instance may hold, 1 to 1000000")
+	perProject := flags.Int64("per-project", 0, "the most unformed turns one project may hold, at most the instance's")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || (*instance == 0 && *perProject == 0) {
+		return errors.New(usageLine + "; give at least one limit")
+	}
+	body := map[string]any{}
+	if *instance != 0 {
+		body["max_pending"] = *instance
+	}
+	if *perProject != 0 {
+		body["max_pending_per_project"] = *perProject
+	}
+	var limits pg.BacklogLimits
+	if err := c.post(ctx, "/backlog/limits", body, &limits); err != nil {
+		return err
+	}
+	fmt.Printf("backlog limits: %d unformed turns across the instance, %d per project; %d waiting now\n",
+		limits.MaxPending, limits.MaxPendingPerProject, limits.Pending)
+	return nil
+}
+
 func (c *manageClient) vocabulary(ctx context.Context, args []string) error {
 	const usageLine = "usage: taisce vocabulary add <predicate> -project <name> -semantic-type <type> " +
 		"-cardinality <one|many> -object-kind <kind> -description <text> | list -project <name>"

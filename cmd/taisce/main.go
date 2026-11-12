@@ -269,10 +269,44 @@ func run(ctx context.Context, log *slog.Logger) error {
 	records := pg.NewRecordStore(memory, schema)
 	// The memory surface, for the roles that serve it. A worker serves only its health probes.
 	var server *api.Server
+	// Tells the workers a turn was stored. Only a process that stores turns has one, and it stops
+	// with the process: a wake-up that was never sent costs a turn its wait for the tick.
+	var waker *pg.TurnWaker
+	// What a writer refused for a full backlog is told to wait: how long the instance currently
+	// takes to form a turn, read from the count the workers write down. Sampled on the interval
+	// that count is written on, since reading it more often would see nothing new.
+	var drain *api.DrainRate
+	if serves {
+		drain = api.NewDrainRate()
+		go func() {
+			ticker := time.NewTicker(measurementInterval)
+			defer ticker.Stop()
+			for {
+				readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				if formed, err := pg.ReadFormedTurns(readCtx, memory, schema); err == nil {
+					drain.Observe(formed, time.Now())
+				}
+				cancel()
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
+	if serves {
+		waker = pg.NewTurnWaker(memory, schema)
+		go waker.Run(ctx, func(err error) {
+			log.Warn("a stored turn was not announced; it waits for a worker's next tick", "error", err)
+		})
+	}
 	if serves {
 		server = api.NewServer(
 			credential.NewStore(registry, string(migrate.ControlSchema)), api.Stores{
 				Measurements: measurements,
+				Waker:        waker,
+				Drain:        drain,
 				Audit:        pg.NewAuditStore(memory, schema),
 				Exporter:     pg.NewExporter(memory, schema),
 				Projects:     pg.NewProjectStore(memory, schema),
@@ -486,6 +520,20 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 			formation.NewCompaction(pg.NewSegmentStore(memory, schema), inference.NewSummariser(inferenceConfig))).
 		WithNotifications(formation.NewNotifications(
 			pg.NewNotificationStore(memory, schema), notify.NewSender(notify.FromEnv(), log)))
+
+	// Woken when a turn is stored, so an idle instance starts forming it without waiting out the
+	// tick. One buffered signal: a second wake-up while one is waiting says nothing the first did
+	// not. The listener ends with the context, like the driver it serves.
+	wake := make(chan struct{}, 1)
+	driver.WithWake(wake)
+	go pg.ListenForTurns(ctx, memory, schema, func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}, func(err error) {
+		log.Warn("not listening for stored turns; a turn waits for the next tick until this recovers", "error", err)
+	})
 
 	go func() {
 		defer close(stopped)

@@ -12,7 +12,7 @@ Requests must contain one complete UTF-8 JSON object followed only by whitespace
 
 Recall questions are limited to 8192 UTF-8 bytes, 512 distinct candidate names and 256 matching entity/name pairs. Exceeding a limit returns HTTP 400 and `invalid_question`, with no partial bundle. The match count includes the selected speaker. Fact-budget cuts remain successful responses with `truncated: true`.
 
-Observations admit at most 64 messages, 65536 UTF-8 content bytes per message and 262144 content bytes per turn. Exceeding these limits returns HTTP 400 and `invalid_turn` before storage. Busy authentication or project/credential capacity returns HTTP 429 and `rate_limited`, with `Retry-After: 1`. Retry with backoff and the same observation idempotency key; a refusal has no stored receipt. Request concurrency limits are per API process; durable unfinished-turn limits are shared by the instance and also return `rate_limited`. Existing keyed receipts can be replayed at backlog capacity. Health checks remain outside request admission.
+Observations admit at most 64 messages, 65536 UTF-8 content bytes per message and 262144 content bytes per turn. Exceeding these limits returns HTTP 400 and `invalid_turn` before storage. Busy authentication or project/credential capacity returns HTTP 429 and `rate_limited`, with `Retry-After: 1`. A full formation backlog returns the same status and code with `Retry-After` in seconds, from 1 to 30: how long the instance currently takes to form one turn, and 30 when none has formed lately. Retry with backoff and the same observation idempotency key; a refusal has no stored receipt. Request concurrency limits are per API process; durable unfinished-turn limits are shared by the instance and also return `rate_limited`. Existing keyed receipts can be replayed at backlog capacity. Health checks remain outside request admission.
 
 Recall `max_characters` must be positive and no larger than the server's configured budget. Omission uses that budget. The count is Unicode code points in returned fact subjects, predicates, objects, statements, source-role labels, quotes, contexts, paths and path predicates. Identifiers, anchors, dates and JSON syntax are excluded. A first fact that cannot fit returns no facts, zero characters and `truncated: true`. This is a content allowance, not a serialized-response or token limit.
 
@@ -875,6 +875,7 @@ The management surface is served by the `manage` role on its own listener and re
 | `project.suspend` | POST | `/manage/v1/projects/suspend` | 200 |
 | `project.resume` | POST | `/manage/v1/projects/resume` | 200 |
 | `project.retention` | POST | `/manage/v1/projects/retention` | 200 |
+| `backlog.limits` | POST | `/manage/v1/backlog/limits` | 200 |
 | `credential.issue` | POST | `/manage/v1/credentials/issue` | 201 |
 | `credential.list` | POST | `/manage/v1/credentials/list` | 200 |
 | `credential.revoke` | POST | `/manage/v1/credentials/revoke` | 200 |
@@ -972,6 +973,26 @@ POST `/manage/v1/projects/retention` → 200
 |---|---|
 | `project` | string |
 | `retention` | string |
+
+
+## `backlog.limits`
+
+POST `/manage/v1/backlog/limits` → 200
+
+### Request
+
+| Field | Type |
+|---|---|
+| `max_pending` | integer, optional |
+| `max_pending_per_project` | integer, optional |
+
+### Response
+
+| Field | Type |
+|---|---|
+| `max_pending` | integer |
+| `max_pending_per_project` | integer |
+| `pending` | integer |
 
 
 ## `credential.issue`
@@ -1252,6 +1273,7 @@ Any operation may answer with any of these.
 | `invalid_credential` |
 | `invalid_predicate` |
 | `predicate_conflict` |
+| `invalid_backlog_limits` |
 
 ## Liveness
 

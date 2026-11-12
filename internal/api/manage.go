@@ -107,6 +107,7 @@ var managementOperations = []managementRoute{
 	{Operation{domain.AuditProjectSuspend, http.MethodPost, "/projects/suspend", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.suspendProject }, projectRequest{}, projectResponse{}},
 	{Operation{domain.AuditProjectResume, http.MethodPost, "/projects/resume", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.resumeProject }, projectRequest{}, projectResponse{}},
 	{Operation{domain.AuditProjectRetention, http.MethodPost, "/projects/retention", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.setProjectRetention }, projectRetentionRequest{}, projectRetentionResponse{}},
+	{Operation{domain.AuditBacklogLimits, http.MethodPost, "/backlog/limits", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.setBacklogLimits }, backlogLimitsRequest{}, pg.BacklogLimits{}},
 	{Operation{domain.AuditCredentialIssue, http.MethodPost, "/credentials/issue", http.StatusCreated}, func(m *ManagementServer) grantedHandler { return m.issueCredential }, credentialIssueRequest{}, credentialIssued{}},
 	{Operation{domain.AuditCredentialList, http.MethodPost, "/credentials/list", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.listCredentials }, credentialListRequest{}, credentialListResponse{}},
 	{Operation{domain.AuditCredentialRevoke, http.MethodPost, "/credentials/revoke", http.StatusOK}, func(m *ManagementServer) grantedHandler { return m.revokeCredential }, credentialRevokeRequest{}, credentialRevoked{}},
@@ -351,6 +352,52 @@ func (m *ManagementServer) setProjectRetention(w http.ResponseWriter, r *http.Re
 	}
 	m.record(r, domain.AuditProjectRetention, grant, req.Name, domain.OutcomeAllowed, 0)
 	writeJSON(w, http.StatusOK, projectRetentionResponse{Project: req.Name, Retention: retentionText(req.RetentionDays)})
+}
+
+type backlogLimitsRequest struct {
+	// MaxPending is the most unformed turns the instance may hold, 1 to 1000000. Omitted, it is
+	// left as it is.
+	MaxPending *int64 `json:"max_pending"`
+	// MaxPendingPerProject is the most any one project may hold, at most MaxPending. Omitted, it is
+	// left as it is.
+	MaxPendingPerProject *int64 `json:"max_pending_per_project"`
+}
+
+// setBacklogLimits changes how many turns may wait unformed.
+//
+// It names no project: both limits are the instance's, and the per-project one is the same number
+// for every project. The ledger row therefore carries no project, and its magnitude is the
+// per-project limit now in force — the number that decides when one project's bulk write starts
+// being refused, and the one an operator reading the ledger afterwards is looking for. Both limits,
+// before and after, are in the process log beside the operator's name.
+//
+// A request that states neither limit is refused rather than answered with the current ones. This
+// is the route that changes them, and a change that changed nothing would still be on the ledger
+// as a change.
+func (m *ManagementServer) setBacklogLimits(w http.ResponseWriter, r *http.Request, grant credential.Grant) {
+	var req backlogLimitsRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.MaxPending == nil && req.MaxPendingPerProject == nil {
+		writeError(w, http.StatusBadRequest, codeInvalidBacklogLimits, "state max_pending, max_pending_per_project, or both")
+		return
+	}
+	limits, err := m.stores.Observations.SetBacklogLimits(r.Context(), m.schema, req.MaxPending, req.MaxPendingPerProject)
+	switch {
+	case errors.Is(err, pg.ErrInvalidBacklogLimits):
+		m.record(r, domain.AuditBacklogLimits, grant, "", domain.OutcomeRefused, 0)
+		writeError(w, http.StatusBadRequest, codeInvalidBacklogLimits, err.Error())
+		return
+	case err != nil:
+		m.log.Error("set the backlog limits", "error", err)
+		writeError(w, http.StatusInternalServerError, codeInternal, "the backlog limits could not be set")
+		return
+	}
+	m.log.Info("backlog limits set", "operator", grant.Name, "credential", grant.CredentialID,
+		"max_pending", limits.MaxPending, "max_pending_per_project", limits.MaxPendingPerProject, "pending", limits.Pending)
+	m.record(r, domain.AuditBacklogLimits, grant, "", domain.OutcomeAllowed, int(limits.MaxPendingPerProject))
+	writeJSON(w, http.StatusOK, limits)
 }
 
 // retentionText says a policy the way an operator wrote it.
