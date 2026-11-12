@@ -104,12 +104,19 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 			}
 			// Interpolated from `projection_kind`, whose constraints permit nothing that is not an
 			// identifier — the same safety erasure relies on.
+			// The project is named on the row being deleted, not only on the turns that led to it.
+			// An identifier is unique within a project: a chunk, a segment and an artifact are
+			// keyed by project and identifier, and an artifact's identifier is chosen by whoever
+			// stores it. Matched by identifier alone, this removed the row of that name from every
+			// project, and a project that was never swept lost a row that had not expired.
 			tag, err := tx.Exec(ctx, s.schema.SQL(fmt.Sprintf(`
 				DELETE FROM {schema}.%s p
-				 WHERE p.%s::text IN (
+				 WHERE p.scope = $2
+				   AND p.%s::text IN (
 				       SELECT d.projection_id FROM {schema}.projection_dependency d
-				        WHERE d.source_observation_id = ANY($1::uuid[])
-				          AND d.projection_kind = '%s'%s)`, k.table, k.idCol, k.kind, shared)), expired)
+				        WHERE d.scope = $2
+				          AND d.source_observation_id = ANY($1::uuid[])
+				          AND d.projection_kind = '%s'%s)`, k.table, k.idCol, k.kind, shared)), expired, scope)
 			if err != nil {
 				return fmt.Errorf("expire %s: %w", k.kind, err)
 			}
@@ -125,12 +132,12 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 		out.Deleted["entity_name_receipt"] = names
 
 		// A jointly supported fact can remain, but its expired source quote cannot.
-		if _, err := tx.Exec(ctx, s.schema.SQL(`DELETE FROM {schema}.fact_evidence WHERE source_observation_id=ANY($1::uuid[])`), expired); err != nil {
+		if _, err := tx.Exec(ctx, s.schema.SQL(`DELETE FROM {schema}.fact_evidence WHERE scope=$2 AND source_observation_id=ANY($1::uuid[])`), expired, scope); err != nil {
 			return fmt.Errorf("expire evidence: %w", err)
 		}
 		if _, err := tx.Exec(ctx, s.schema.SQL(
-			`DELETE FROM {schema}.projection_dependency WHERE source_observation_id = ANY($1::uuid[])`),
-			expired); err != nil {
+			`DELETE FROM {schema}.projection_dependency WHERE scope = $2 AND source_observation_id = ANY($1::uuid[])`),
+			expired, scope); err != nil {
 			return fmt.Errorf("expire projection registrations: %w", err)
 		}
 		if _, err := tx.Exec(ctx, s.schema.SQL(
@@ -138,7 +145,7 @@ func (s *RetentionStore) Sweep(ctx context.Context, scope string, limit int) (do
 			return fmt.Errorf("expire messages: %w", err)
 		}
 		tag, err := tx.Exec(ctx, s.schema.SQL(
-			`DELETE FROM {schema}.observation WHERE observation_id = ANY($1::uuid[])`), expired)
+			`DELETE FROM {schema}.observation WHERE scope = $2 AND observation_id = ANY($1::uuid[])`), expired, scope)
 		if err != nil {
 			return fmt.Errorf("expire observations: %w", err)
 		}
