@@ -51,6 +51,7 @@ const usage = `taisce — memory for agents
   taisce observer issue <name>     mint a credential that reads the instance's metrics and nothing else
   taisce vocabulary add <name>     admit one relation (-project and four declarations, none optional)
   taisce vocabulary list           the relations this instance admits (-project)
+  taisce backlog limits            set how many unformed turns may wait (-instance, -per-project)
   taisce audit verify              recompute the ledger's chain and report what it covers
   taisce audit seal                seal everything written since the last seal
   taisce formation parked          inspect a bounded page of parked turn metadata (--project required)
@@ -149,6 +150,15 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 				"so it goes through the management surface: set %s and %s", envManageAPI, envOperatorToken)
 		}
 		return c.vocabulary(ctx, args[1:])
+	case "backlog":
+		// Recorded against an operator, like a vocabulary change, so it has no path over the
+		// administrative connection: that path is the unattributed UPDATE this replaces.
+		c, ok := managementFromEnv()
+		if !ok {
+			return fmt.Errorf("changing the backlog limits is recorded against an operator, "+
+				"so it goes through the management surface: set %s and %s", envManageAPI, envOperatorToken)
+		}
+		return c.backlog(ctx, args[1:])
 	case "operator":
 		return operatorCommand(ctx, args[1:])
 	case "observer":

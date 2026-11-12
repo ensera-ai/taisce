@@ -1140,6 +1140,10 @@ const (
 	// AuditProjectRetention is an operator setting how long a project keeps what it is told, which
 	// is a governance decision and belongs on the ledger beside suspension.
 	AuditProjectRetention = "project.retention"
+	// AuditBacklogLimits is an operator changing how many turns may wait unformed. It decides when
+	// a write is refused for the whole instance, so it is an act with a name on it rather than an
+	// UPDATE in a database session.
+	AuditBacklogLimits = "backlog.limits"
 	// AuditVocabularyAdd is an operator extending the closed relation vocabulary, and
 	// AuditVocabularyList is reading what the instance admits. Two names rather than one, because
 	// an addition changes what every later extraction may emit and an inspection changes nothing,
@@ -1174,7 +1178,7 @@ func RecordableOperation(name string) bool {
 		return true
 	case AuditVocabularyAdd, AuditVocabularyList:
 		return true
-	case AuditRetentionSweep, AuditProjectRetention:
+	case AuditRetentionSweep, AuditProjectRetention, AuditBacklogLimits:
 		return true
 	case AuditObserve, AuditRecall, AuditErase, AuditFreshness, AuditExport,
 		AuditProjectCreate, AuditProjectSuspend, AuditProjectResume,

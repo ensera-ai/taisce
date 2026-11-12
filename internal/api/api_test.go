@@ -462,6 +462,8 @@ type harness struct {
 	// What the server and the scripted worker count. A test flushes it itself, so that what a
 	// scrape reads does not depend on a timer.
 	measurements *pg.Measurements
+	// What the server reads to say how long a writer refused for capacity should wait.
+	drain *api.DrainRate
 	// Set only by newHarnessWithNotifications: the endpoint a delivery goes to, and the pass that
 	// sends it. Absent everywhere else, which is what an unconfigured deployment looks like.
 	receiver      *receiver
@@ -515,9 +517,21 @@ func newHarness(t *testing.T, tenant string) *harness {
 	}
 
 	measurements := pg.NewMeasurements(pool, schema)
+	// Every harness announces the turns it stores, as a serving process does. Stopped before the
+	// pool closes: cleanups run last-registered first, and this is registered after the pool's.
+	// Fed by the test that wants a rate, rather than by a timer: a process samples the formed-turn
+	// count every few seconds, and a test says what was read and when.
+	drain := api.NewDrainRate()
+	waker := pg.NewTurnWaker(pool, schema)
+	announcing, stopAnnouncing := context.WithCancel(context.Background())
+	announced := make(chan struct{})
+	go func() { defer close(announced); waker.Run(announcing, nil) }()
+	t.Cleanup(func() { stopAnnouncing(); <-announced })
 	server := httptest.NewServer(api.NewServer(
 		credentials, api.Stores{
 			Measurements: measurements,
+			Waker:        waker,
+			Drain:        drain,
 			Audit:        pg.NewAuditStore(pool, schema),
 			Exporter:     pg.NewExporter(pool, schema),
 			Projects:     pg.NewProjectStore(pool, schema),
@@ -533,7 +547,7 @@ func newHarness(t *testing.T, tenant string) *harness {
 	).Handler())
 	t.Cleanup(server.Close)
 
-	return &harness{server: server, pool: pool, schema: schema, token: token, measurements: measurements}
+	return &harness{server: server, pool: pool, schema: schema, token: token, measurements: measurements, drain: drain}
 }
 
 // form runs the backlog the way the driver will, with a scripted model.

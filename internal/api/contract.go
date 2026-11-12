@@ -68,7 +68,9 @@ func Contract() string {
 	fmt.Fprintf(&b, "\nObservations admit at most %d messages, %d UTF-8 content bytes per message and %d "+
 		"content bytes per turn. Exceeding these limits returns HTTP 400 and `invalid_turn` before storage. "+
 		"Busy authentication or project/credential capacity returns HTTP 429 and `rate_limited`, with "+
-		"`Retry-After: 1`. Retry with backoff and the same observation idempotency key; a refusal has no "+
+		"`Retry-After: 1`. A full formation backlog returns the same status and code with `Retry-After` in "+
+		"seconds, from 1 to 30: how long the instance currently takes to form one turn, and 30 when none "+
+		"has formed lately. Retry with backoff and the same observation idempotency key; a refusal has no "+
 		"stored receipt. Request concurrency limits are per API process; durable unfinished-turn limits "+
 		"are shared by the instance and also return `rate_limited`. Existing keyed receipts can be replayed "+
 		"at backlog capacity. Health checks remain outside request admission.\n",

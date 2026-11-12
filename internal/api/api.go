@@ -49,6 +49,8 @@ const Version = "v1"
 // Server is the HTTP surface over one instance.
 type Server struct {
 	measurements     *pg.Measurements
+	waker            *pg.TurnWaker
+	drain            *DrainRate
 	credentials      *credential.Store
 	audit            *pg.AuditStore
 	exporter         *pg.Exporter
@@ -78,6 +80,12 @@ type Stores struct {
 	// Measurements is where this process counts how long its requests take and how many it turned
 	// away. Optional: a server wired without one serves exactly as before and counts nothing.
 	Measurements *pg.Measurements
+	// Waker is told when a turn has been stored, so an idle worker starts on it without waiting
+	// for its tick. Optional: without one a turn waits for the tick, as it always could.
+	Waker *pg.TurnWaker
+	// Drain is what a writer refused for capacity is told to wait. Optional: without one the
+	// refusal states the ceiling, since nothing is known about how fast the backlog is moving.
+	Drain        *DrainRate
 	Audit        *pg.AuditStore
 	Exporter     *pg.Exporter
 	Projects     *pg.ProjectStore
@@ -124,7 +132,7 @@ func NewServer(credentials *credential.Store, stores Stores, schema pg.Schema, l
 		citations: stores.Citations, records: stores.Records, feedback: stores.Feedback, artifacts: stores.Artifacts, subjects: stores.Subjects, contexts: stores.Contexts,
 		passages: stores.Passages, entityCandidates: stores.EntityCandidates, reportCandidates: stores.ReportCandidates,
 		notifications: stores.Notifications, notifier: stores.Notifier,
-		schema: schema, log: log, admission: gate, measurements: stores.Measurements,
+		schema: schema, log: log, admission: gate, measurements: stores.Measurements, waker: stores.Waker, drain: stores.Drain,
 	}
 }
 
@@ -551,7 +559,9 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 
 	stored, replayed, err := s.observations.AppendIdempotent(r.Context(), s.schema, turn, req.IdempotencyKey)
 	if errors.Is(err, pg.ErrIngestionCapacity) {
-		w.Header().Set("Retry-After", "1")
+		// How long the instance currently takes to form one turn, which is how long until there
+		// is room for one. See DrainRate for what that number does and does not know.
+		w.Header().Set("Retry-After", s.drain.RetryAfter(time.Now()))
 		writeError(w, http.StatusTooManyRequests, codeRateLimited, "unfinished observation capacity is full; retry after formation or erasure with the same idempotency key")
 		return
 	}
@@ -570,6 +580,10 @@ func (s *Server) observe(w http.ResponseWriter, r *http.Request, grant credentia
 	magnitude := len(turn.Messages)
 	if replayed {
 		magnitude = 0
+	} else {
+		// After the write has committed, and only for a turn that is new: a replay stored nothing.
+		// It marks and returns; whether a worker is woken changes nothing the caller is told.
+		s.waker.Stored()
 	}
 	s.record(r, domain.AuditObserve, grant, domain.OutcomeAllowed, magnitude)
 	writeJSON(w, http.StatusCreated, observeResponse{
@@ -1289,6 +1303,9 @@ const (
 	// invalid_predicate on purpose: nothing about the declaration is wrong, and the caller's
 	// correct response is to use the relation rather than to correct and retry.
 	codePredicateConflict errorCode = "predicate_conflict"
+	// codeInvalidBacklogLimits is a backlog limit the budget's constraints refused, or a request
+	// that stated none.
+	codeInvalidBacklogLimits errorCode = "invalid_backlog_limits"
 )
 
 // errorCodes is the declared set, in the order the contract publishes them.
@@ -1307,6 +1324,7 @@ var errorCodes = []errorCode{
 	codeInvalidQuestion, codeNoSubject, codeInvalidErasure, codeInternal, codeIdempotencyConflict, codeRateLimited, codeNoCapacity,
 	codeInvalidCitation, codeCitationLimit, codeInvalidExport, codeExportTooLarge, codeNotFound, codeInvalidDestination, codeNotificationsOff, codeForbidden, codeInvalidRecordPage, codeInvalidRecallControls, codeInvalidContext, codeInvalidRecordMutation, codeRecordConflict, codeRecordMutationLimit, codeInvalidFeedback, codeFeedbackPromoted, codeInvalidArtifact, codeArtifactConflict, codeStorageCapacity, codeInvalidSubject, codeSubjectConflict,
 	codeInvalidProject, codeInvalidCredential, codeInvalidPredicate, codePredicateConflict,
+	codeInvalidBacklogLimits,
 }
 
 // writeError says what the caller can act on and nothing about how the system is built.

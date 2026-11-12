@@ -44,6 +44,9 @@ type Driver struct {
 	schema        pg.Schema
 	policy        Policy
 	log           *slog.Logger
+	// wake ends the wait between passes early. Nil in a driver nobody wakes, where it is never
+	// ready and the tick is the only thing that ends the wait.
+	wake <-chan struct{}
 }
 
 // NewDriver builds the driver over a worker that already knows how to drain one scope.
@@ -115,6 +118,17 @@ func (d *Driver) WithPasses(subjects *Subjects, compaction *Compaction) *Driver 
 // OwedScopes names the projects that owe derived work with no backlog to announce them.
 type OwedScopes interface {
 	ScopesOwingReports(ctx context.Context, writer string, limit int) ([]string, error)
+}
+
+// WithWake lets something end the wait between passes: a signal that a turn was stored.
+//
+// It changes when a pass runs and nothing about what a pass does, so a wake-up that was spurious
+// costs one pass that finds nothing. The tick is kept. A signal can be lost — the process that
+// stored the turn died before sending it, the listening connection was down — and a driver that
+// waited only for signals would then leave a turn unformed until the next one happened to arrive.
+func (d *Driver) WithWake(wake <-chan struct{}) *Driver {
+	d.wake = wake
+	return d
 }
 
 // WithOwedScopes lets the driver reach a project whose backlog is empty and whose reports are not.
@@ -422,6 +436,7 @@ func (d *Driver) Run(ctx context.Context) error {
 			d.log.Info("formation driver stopped")
 			return nil
 		case <-ticker.C:
+		case <-d.wake:
 		}
 	}
 }

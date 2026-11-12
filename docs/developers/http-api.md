@@ -917,7 +917,7 @@ Branch on `code`. The `message` is for people reading logs, and its wording may 
 | `feedback_already_promoted` | 409 | Someone already acted on this feedback | Stop |
 | `record_mutation_limit` | 413 | The batch touches too much evidence | Split the batch |
 | `citation_limit` | 422 | The source is too large to cite | Use an export |
-| `rate_limited` | 429 | Too busy right now, or too many turns waiting to form. Comes with `Retry-After: 1` | Wait, then resend the same request with the same key |
+| `rate_limited` | 429 | Too busy right now, or too many turns waiting to form. Comes with `Retry-After` in seconds: `1` when busy, and from `1` to `30` when turns are waiting — how long the instance currently takes to form one | Wait, then resend the same request with the same key |
 | `storage_capacity` | 429 | The project's artifact allowance is full. No `Retry-After` | Delete artifacts, or ask the operator. Waiting won't help |
 | `internal` | 500 | Something failed on the server | Retry a few times if it's safe, then report it |
 | `notifications_unavailable` | 501 | Notifications aren't turned on | Poll freshness instead |

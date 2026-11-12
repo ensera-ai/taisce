@@ -369,3 +369,19 @@ func ReadMeasurements(ctx context.Context, pool *pgxpool.Pool, schema Schema) (M
 	}
 	return out, rows.Err()
 }
+
+// ReadFormedTurns is how many turns the instance has formed, as far as its workers have written
+// down: the count behind the turn-duration histogram. Zero before any has.
+//
+// One row by primary key. It is read by the serving process to estimate how fast the backlog is
+// draining, which is why it is not the whole of ReadMeasurements.
+func ReadFormedTurns(ctx context.Context, pool *pgxpool.Pool, schema Schema) (int64, error) {
+	var count int64
+	err := pool.QueryRow(ctx, schema.SQL(
+		`SELECT COALESCE((SELECT count FROM {schema}.measurement WHERE kind = $1 AND name = ''), 0)`),
+		string(FormationTurnDuration)).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("read how many turns have formed: %w", err)
+	}
+	return count, nil
+}
