@@ -121,6 +121,8 @@ func (e *Embedder) Embed(ctx context.Context, inputs []string) ([][]float32, err
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 
+	answered := false
+	defer e.config.clock(PurposeEmbedding)(&answered)
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("call embedder: %w", err)
@@ -144,6 +146,7 @@ func (e *Embedder) Embed(ctx context.Context, inputs []string) ([][]float32, err
 	if err := json.Unmarshal(raw, &reply); err != nil {
 		return nil, fmt.Errorf("decode reply: %w", err)
 	}
+	answered = true
 	if len(reply.Data) != len(inputs) {
 		// Fewer vectors than inputs would leave a caller matching by position onto the wrong entities.
 		return nil, fmt.Errorf("asked for %d embeddings and received %d", len(inputs), len(reply.Data))

@@ -43,6 +43,12 @@ const (
 	// experiences as memory not yet knowing what it was just told. It includes the time in the
 	// backlog, which the turn duration does not.
 	FormationLag MeasurementKind = "formation_lag"
+	// ModelCallDuration is how long one call to a model took, by purpose and by whether the
+	// provider answered (see ModelCallName).
+	ModelCallDuration MeasurementKind = "model_call_duration"
+	// ManagementDuration is how long one request to the management surface took, by operation, or
+	// one request to the portal.
+	ManagementDuration MeasurementKind = "management_duration"
 	// Counter is a plain rising count, with no distribution.
 	Counter MeasurementKind = "counter"
 )
@@ -93,7 +99,32 @@ var Bounds = map[MeasurementKind][]int64{
 	OperationDuration:     {5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000},
 	FormationTurnDuration: {100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000},
 	FormationLag:          {1000, 2500, 5000, 10000, 30000, 60000, 300000, 900000, 3600000, 21600000, 86400000},
+	// From an embedding's forward pass to a generation that runs to the turn budget.
+	ModelCallDuration:  {25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000},
+	ManagementDuration: {5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000},
 }
+
+// The two outcomes a model call is timed under.
+const (
+	ModelAnswered = "answered"
+	ModelFailed   = "failed"
+)
+
+// ModelCallName names the series one model call's duration belongs to. The purpose is whatever the
+// inference package's closed set says it is; this only joins it to the outcome.
+func ModelCallName(purpose string, answered bool) string {
+	if answered {
+		return purpose + "." + ModelAnswered
+	}
+	return purpose + "." + ModelFailed
+}
+
+// The two things the portal is timed as. A page is a read an operator waits for; an action is a
+// form they submitted. Not by route: a route's path carries a project's name.
+const (
+	PortalPage   = "portal.page"
+	PortalAction = "portal.action"
+)
 
 var measurementName = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
 

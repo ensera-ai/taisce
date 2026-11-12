@@ -76,6 +76,8 @@ func (s *Summariser) Write(ctx context.Context, m compaction.Material) (compacti
 	if s.config.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
 	}
+	answered := false
+	defer s.config.clock(PurposeCompaction)(&answered)
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return compaction.Summary{}, fmt.Errorf("call model: %w", err)
@@ -92,6 +94,7 @@ func (s *Summariser) Write(ctx context.Context, m compaction.Material) (compacti
 	if err := json.Unmarshal(raw, &completion); err != nil {
 		return compaction.Summary{}, fmt.Errorf("decode reply: %w", err)
 	}
+	answered = true
 	content, err := s.config.accept(PurposeCompaction, completion, ceiling)
 	if err != nil {
 		return compaction.Summary{}, err

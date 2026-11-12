@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ensera-ai/taisce/internal/entitycandidate"
 	"github.com/ensera-ai/taisce/internal/infra/inference"
@@ -20,7 +21,7 @@ import (
 
 // Revision is explicit opt-in to read-path inference. Once set, an invalid endpoint/model fails
 // startup rather than quietly disabling a capability the operator requested.
-func configuredPassages(pool *pgxpool.Pool, schema pg.Schema) (*passage.Retriever, error) {
+func configuredPassages(pool *pgxpool.Pool, schema pg.Schema, timed func(inference.Purpose, bool, time.Duration)) (*passage.Retriever, error) {
 	revision := strings.TrimSpace(os.Getenv(inference.EnvEmbeddingRevision))
 	if revision == "" {
 		return nil, nil
@@ -29,6 +30,8 @@ func configuredPassages(pool *pgxpool.Pool, schema pg.Schema) (*passage.Retrieve
 	if err != nil {
 		return nil, fmt.Errorf("configure passage search: %w", err)
 	}
+	// The question is embedded while a caller waits, so this is the model call on the read path.
+	config.Timed = timed
 	endpoint, _ := config.EmbeddingsAt()
 	digest := sha256.Sum256([]byte(endpoint))
 	retriever, err := passage.New(pg.NewMessageEmbeddingStore(pool, schema), inference.NewEmbedder(config), passage.Binding{Name: config.EmbeddingModel, Revision: revision, EndpointHash: hex.EncodeToString(digest[:])})
@@ -38,7 +41,7 @@ func configuredPassages(pool *pgxpool.Pool, schema pg.Schema) (*passage.Retrieve
 	return retriever, nil
 }
 
-func configuredEntityCandidates(pool *pgxpool.Pool, schema pg.Schema) (*entitycandidate.Retriever, error) {
+func configuredEntityCandidates(pool *pgxpool.Pool, schema pg.Schema, timed func(inference.Purpose, bool, time.Duration)) (*entitycandidate.Retriever, error) {
 	revision := strings.TrimSpace(os.Getenv(inference.EnvEmbeddingRevision))
 	if revision == "" {
 		return nil, nil
@@ -47,6 +50,8 @@ func configuredEntityCandidates(pool *pgxpool.Pool, schema pg.Schema) (*entityca
 	if err != nil {
 		return nil, fmt.Errorf("configure entity candidate search: %w", err)
 	}
+	// The question is embedded while a caller waits, so this is the model call on the read path.
+	config.Timed = timed
 	endpoint, _ := config.EmbeddingsAt()
 	digest := sha256.Sum256([]byte(endpoint))
 	retriever, err := entitycandidate.New(pg.NewEntityEmbeddingStore(pool, schema), inference.NewEmbedder(config),
@@ -57,7 +62,7 @@ func configuredEntityCandidates(pool *pgxpool.Pool, schema pg.Schema) (*entityca
 	return retriever, nil
 }
 
-func configuredReportCandidates(pool *pgxpool.Pool, schema pg.Schema) (*reportcandidate.Retriever, error) {
+func configuredReportCandidates(pool *pgxpool.Pool, schema pg.Schema, timed func(inference.Purpose, bool, time.Duration)) (*reportcandidate.Retriever, error) {
 	revision := strings.TrimSpace(os.Getenv(inference.EnvEmbeddingRevision))
 	if revision == "" {
 		return nil, nil
@@ -66,6 +71,8 @@ func configuredReportCandidates(pool *pgxpool.Pool, schema pg.Schema) (*reportca
 	if err != nil {
 		return nil, fmt.Errorf("configure report candidate search: %w", err)
 	}
+	// The question is embedded while a caller waits, so this is the model call on the read path.
+	config.Timed = timed
 	endpoint, _ := config.EmbeddingsAt()
 	digest := sha256.Sum256([]byte(endpoint))
 	retriever, err := reportcandidate.New(pg.NewReportEmbeddingStore(pool, schema), inference.NewEmbedder(config),
