@@ -93,6 +93,10 @@ type Config struct {
 	// Metered is told what each generation call cost, as far as the provider said. Optional. Called
 	// for a reply that is then refused as well as for one that is used, because both were paid for.
 	Metered func(Call)
+	// Timed is told how long each model call took, generation and embedding alike, and whether the
+	// provider answered. Optional. Called once per request that left this process — never for one
+	// refused before it was sent, and never for an embedding served from the request's own memo.
+	Timed func(purpose Purpose, answered bool, took time.Duration)
 }
 
 // ConfigFromEnv reads the configuration and refuses anything that would send message content

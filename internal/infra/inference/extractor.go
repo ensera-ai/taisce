@@ -100,6 +100,8 @@ func (m *Model) Propose(ctx context.Context, message domain.Message, vocabulary 
 		req.Header.Set("Authorization", "Bearer "+m.config.APIKey)
 	}
 
+	answered := false
+	defer m.config.clock(PurposeExtraction)(&answered)
 	resp, err := m.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("call model: %w", err)
@@ -121,6 +123,7 @@ func (m *Model) Propose(ctx context.Context, message domain.Message, vocabulary 
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return nil, fmt.Errorf("decode model response: %w", err)
 	}
+	answered = true
 	content, err := m.config.accept(PurposeExtraction, decoded, ceiling)
 	if err != nil {
 		return nil, err

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strconv"
 	"strings"
@@ -58,12 +59,17 @@ var expectedMetrics = []string{
 // The same exact-set argument as above, with one more thing pinned: which family may carry an
 // operation. A family that is not about requests has no business naming one.
 var expectedDistributions = map[string]struct {
-	kind        pg.MeasurementKind
-	byOperation bool
+	kind pg.MeasurementKind
+	// by is what a series of the family is labelled with, apart from a bucket's edge: nothing, a
+	// memory operation, a management operation, or a model call's purpose and outcome. Each is a
+	// closed set declared in code, and checkDistributionSample holds a line to its family's.
+	by string
 }{
-	"taisce_operation_duration_milliseconds":      {pg.OperationDuration, true},
-	"taisce_formation_turn_duration_milliseconds": {pg.FormationTurnDuration, false},
-	"taisce_formation_lag_milliseconds":           {pg.FormationLag, false},
+	"taisce_operation_duration_milliseconds":      {pg.OperationDuration, "operation"},
+	"taisce_formation_turn_duration_milliseconds": {pg.FormationTurnDuration, ""},
+	"taisce_formation_lag_milliseconds":           {pg.FormationLag, ""},
+	"taisce_model_call_duration_milliseconds":     {pg.ModelCallDuration, "model call"},
+	"taisce_management_duration_milliseconds":     {pg.ManagementDuration, "management operation"},
 }
 
 // expectedPurposeCounters are the counters published once per purpose a generation model is called
@@ -106,10 +112,12 @@ func checkPurposeSample(t *testing.T, line string) (string, int64) {
 }
 
 // distributionSample is one line of a histogram. The whole of what a label set may be is written
-// into the pattern: an operation, a bucket edge that is digits or +Inf, both or neither, in that
-// order, and nothing else. There is no place in it for a project, a subject or a word.
+// into the pattern: an operation, or a model call's purpose and outcome; a bucket edge that is
+// digits or +Inf; either, both or neither, in that order, and nothing else. There is no place in it
+// for a project, a subject or a word, and which of the two a family may carry is checked against
+// that family's closed set after the match.
 var distributionSample = regexp.MustCompile(
-	`^(taisce_[a-z_]+_milliseconds)_(bucket|sum|count)(?:\{(?:operation="([a-z][a-z0-9_.]*)")?(,)?(?:le="([0-9]+|\+Inf)")?\})? ([0-9]+)$`)
+	`^(taisce_[a-z_]+_milliseconds)_(bucket|sum|count)(?:\{(?:operation="([a-z][a-z0-9_.]*)"|purpose="([a-z]+)",outcome="([a-z]+)")?(,)?(?:le="([0-9]+|\+Inf)")?\})? ([0-9]+)$`)
 
 // samplePattern is one sample with no label set at all: a prefixed lower-case name, a space, an
 // integer or NaN, and nothing else on the line. A metric that grew a label would not match it.
@@ -134,25 +142,36 @@ func checkDistributionSample(t *testing.T, line string) (string, int64) {
 	if m == nil {
 		t.Fatalf("a sample this endpoint must not serve: %q", line)
 	}
-	family, part, operation, comma, le := m[1], m[2], m[3], m[4], m[5]
+	family, part, operation, purpose, outcome, comma, le := m[1], m[2], m[3], m[4], m[5], m[6], m[7]
 	want, declared := expectedDistributions[family]
 	if !declared {
 		t.Fatalf("%q belongs to a family this endpoint does not declare", line)
 	}
-	if (comma != "") != (operation != "" && le != "") {
+	if (comma != "") != ((operation != "" || purpose != "") && le != "") {
 		t.Fatalf("a label set is malformed: %q", line)
 	}
-	if (operation != "") != want.byOperation {
-		t.Fatalf("%s carries an operation where it must not, or lacks one where it must: %q", family, line)
-	}
-	if operation != "" {
-		known := false
+	// Each family carries its own labels and no other family's, and every value is one a table
+	// or a set in the code declares.
+	known := false
+	switch want.by {
+	case "":
+		known = operation == "" && purpose == ""
+	case "operation":
 		for _, o := range api.Operations() {
-			known = known || o.Name == operation
+			known = known || (o.Name == operation && purpose == "")
 		}
-		if !known {
-			t.Fatalf("a series is labelled with %q, which is not an operation the surface declares: %q", operation, line)
+	case "management operation":
+		known = purpose == "" && (operation == pg.PortalPage || operation == pg.PortalAction)
+		for _, o := range api.ManagementOperations() {
+			known = known || (o.Name == operation && purpose == "")
 		}
+	case "model call":
+		for _, p := range inference.TimedPurposes() {
+			known = known || (string(p) == purpose && operation == "" && (outcome == pg.ModelAnswered || outcome == pg.ModelFailed))
+		}
+	}
+	if !known {
+		t.Fatalf("%s is labelled by %s, and this line carries something that set does not declare, or nothing: %q", family, want.by, line)
 	}
 	if (part == "bucket") != (le != "") {
 		t.Fatalf("a bucket has no edge, or a total has one: %q", line)
@@ -167,7 +186,7 @@ func checkDistributionSample(t *testing.T, line string) (string, int64) {
 			t.Fatalf("a bucket edge of %s is not one of the edges declared for %s: %q", le, family, line)
 		}
 	}
-	value, err := strconv.ParseInt(m[6], 10, 64)
+	value, err := strconv.ParseInt(m[8], 10, 64)
 	if err != nil {
 		t.Fatalf("%q is not an integer: %v", line, err)
 	}
@@ -923,5 +942,102 @@ func TestAnObserverScrapesAndIsAStrangerEverywhereElse(t *testing.T) {
 	}
 	if resp, _ := scrapeMetrics(t, m.manage.URL, observer); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("a revoked observer still scrapes: %d", resp.StatusCode)
+	}
+}
+
+// The scrape says how long model calls took, apart from each other, and how long the management
+// surface's own requests took.
+//
+// Model calls are told apart by purpose and by whether the provider answered, both from sets
+// declared in code. The management surface is timed by the operation from its own table, and the
+// portal as a page or an action — never by route, because a portal route's path carries a project's
+// name and this is a label on a scrape.
+func TestTheScrapeSaysHowLongModelCallsAndTheManagementSurfaceTook(t *testing.T) {
+	m := newManaged(t, "api_metrics_model_calls")
+	ctx := context.Background()
+
+	call := func(purpose inference.Purpose, answered bool, took time.Duration) {
+		m.measurements.Observe(pg.ModelCallDuration, pg.ModelCallName(string(purpose), answered), took)
+	}
+	call(inference.PurposeExtraction, true, 1800*time.Millisecond)
+	call(inference.PurposeExtraction, true, 2200*time.Millisecond)
+	call(inference.PurposeExtraction, false, 120*time.Second)
+	call(inference.PurposeReport, true, 9*time.Second)
+	call(inference.PurposeEmbedding, true, 40*time.Millisecond)
+
+	// Two management operations, by an operator and by a stranger: a refusal is a request
+	// somebody waited for. And one portal page, whose path names a project.
+	m.manageDo(t, "/projects/list", nil, m.operator, http.StatusOK, nil)
+	m.manageDo(t, "/projects/list", nil, credential.Prefix+strings.Repeat("A", 43), http.StatusUnauthorized, nil)
+	m.manageDo(t, "/credentials/list", map[string]any{}, m.operator, http.StatusOK, nil)
+	mux := http.NewServeMux()
+	mux.Handle("/", m.manageServer.Handler())
+	api.NewPortal(m.manageServer).Mount(mux)
+	portal := httptest.NewServer(mux)
+	defer portal.Close()
+	browser := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := browser.Get(portal.URL + api.PortalPrefix + "/projects/a-project-with-a-name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if err := m.measurements.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, body := scrapeMetrics(t, m.manage.URL, m.operator)
+	values := parseExposition(t, body)
+	for name, want := range map[string]int64{
+		`taisce_model_call_duration_milliseconds_count{purpose="extraction",outcome="answered"}`:            2,
+		`taisce_model_call_duration_milliseconds_sum{purpose="extraction",outcome="answered"}`:              4000,
+		`taisce_model_call_duration_milliseconds_count{purpose="extraction",outcome="failed"}`:              1,
+		`taisce_model_call_duration_milliseconds_count{purpose="report",outcome="answered"}`:                1,
+		`taisce_model_call_duration_milliseconds_count{purpose="embedding",outcome="answered"}`:             1,
+		`taisce_model_call_duration_milliseconds_bucket{purpose="embedding",outcome="answered",le="50"}`:    1,
+		`taisce_model_call_duration_milliseconds_bucket{purpose="embedding",outcome="answered",le="25"}`:    0,
+		`taisce_model_call_duration_milliseconds_bucket{purpose="extraction",outcome="failed",le="60000"}`:  0,
+		`taisce_model_call_duration_milliseconds_bucket{purpose="extraction",outcome="failed",le="120000"}`: 1,
+		`taisce_management_duration_milliseconds_count{operation="project.list"}`:                           2,
+		`taisce_management_duration_milliseconds_count{operation="credential.list"}`:                        1,
+		`taisce_management_duration_milliseconds_count{operation="portal.page"}`:                            1,
+	} {
+		if got, ok := values.series[name]; !ok || got != want {
+			t.Errorf("%s is %d (served: %v), want %d", name, got, ok, want)
+		}
+	}
+	// A pass that made no call has no series, and one purpose's calls are not in another's.
+	if _, ok := values.series[`taisce_model_call_duration_milliseconds_count{purpose="compaction",outcome="answered"}`]; ok {
+		t.Error("a purpose nobody called a model for is reported as timed")
+	}
+	// Nothing of the route reached the scrape: the page was timed as a page.
+	if strings.Contains(body, "a-project-with-a-name") {
+		t.Errorf("a project's name from a portal route is on the scrape:\n%s", body)
+	}
+
+	// A name nobody declared fails the scrape rather than becoming a series, for each family.
+	for _, undeclared := range []struct {
+		kind pg.MeasurementKind
+		name string
+	}{
+		{pg.ModelCallDuration, "translation.answered"},
+		{pg.ModelCallDuration, "extraction.slow"},
+		{pg.ModelCallDuration, "extraction"},
+		{pg.ManagementDuration, "portal.projects.billing"},
+		{pg.ManagementDuration, "recall"},
+	} {
+		buckets := make([]int64, len(pg.Bounds[undeclared.kind])+1)
+		if _, err := m.pool.Exec(ctx, m.schema.SQL(
+			`INSERT INTO {schema}.measurement(kind,name,buckets,sum_ms,count) VALUES($1,$2,$3,0,0)`), string(undeclared.kind), undeclared.name, buckets); err != nil {
+			t.Fatal(err)
+		}
+		if resp, body := scrapeMetrics(t, m.manage.URL, m.operator); resp.StatusCode != http.StatusServiceUnavailable || strings.Contains(body, undeclared.name+`"`) {
+			t.Errorf("a %s named %q, which nothing declares, was served: %d", undeclared.kind, undeclared.name, resp.StatusCode)
+		}
+		if _, err := m.pool.Exec(ctx, m.schema.SQL(`DELETE FROM {schema}.measurement WHERE kind=$1 AND name=$2`), string(undeclared.kind), undeclared.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resp, _ := scrapeMetrics(t, m.manage.URL, m.operator); resp.StatusCode != http.StatusOK {
+		t.Fatalf("with the undeclared rows gone the scrape still fails: %d", resp.StatusCode)
 	}
 }

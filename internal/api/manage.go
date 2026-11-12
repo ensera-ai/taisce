@@ -71,6 +71,9 @@ type ManagementStores struct {
 	// Health is one. Optional in the same way; a scrape at a deployment wired without it is refused
 	// rather than served short.
 	Measured func(ctx context.Context) (pg.Measured, error)
+	// Timings is where this surface writes how long its own requests took. Optional: without it
+	// the surface serves and times nothing, which is what a nil *pg.Measurements does.
+	Timings *pg.Measurements
 }
 
 // ManagementServer serves the operator surface.
@@ -144,13 +147,30 @@ func (m *ManagementServer) Handler(readiness ...http.Handler) http.Handler {
 	}
 	registerHealth(mux, ready)
 	for _, o := range managementOperations {
-		mux.Handle(o.Method+" "+ManagementPrefix+o.Path, m.operated(o.handler(m)))
+		mux.Handle(o.Method+" "+ManagementPrefix+o.Path, m.timed(o.Name, m.operated(o.handler(m))))
 	}
 	// The scrape, behind the same operator door and outside the operation table: it answers the
 	// exposition format rather than a JSON object, so it has no request or response shape for the
 	// contract to describe, and it writes no ledger row of its own. See metrics.go.
 	mux.Handle(http.MethodGet+" "+ManagementPrefix+MetricsPath, m.scraped(m.metrics))
 	return mux
+}
+
+// timed records how long a request to this surface took, under a name from a closed set.
+//
+// Outermost, like the memory surface's: it starts before the door, so the number is what an
+// operator waited, the credential lookup and any refusal included. The name is an operation from
+// this surface's own table or one of the two the portal is timed as — never anything from the
+// request, and never a route, because a portal route's path carries a project's name and this
+// becomes a label on a scrape.
+//
+// The scrape itself is not timed here. Whatever scrapes already records how long each scrape took.
+func (m *ManagementServer) timed(name string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		next.ServeHTTP(w, r)
+		m.stores.Timings.Observe(pg.ManagementDuration, name, time.Since(started))
+	})
 }
 
 // operated is the operator door: an operator credential and nothing else, then the work slot.

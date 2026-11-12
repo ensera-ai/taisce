@@ -6,6 +6,7 @@ package inference
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // What bounds a generation call, and what is known about one afterwards.
@@ -26,9 +27,40 @@ const (
 	PurposeCompaction Purpose = "compaction"
 )
 
-// Purposes is the set, for whatever has to enumerate it.
+// Purposes is the set of generation purposes, for whatever has to enumerate it.
 func Purposes() []Purpose {
 	return []Purpose{PurposeExtraction, PurposeReport, PurposeCompaction}
+}
+
+// PurposeEmbedding is the one model call that is not a generation: a vector for a batch of texts.
+// It has no prompt, no reply to cut and no usage this counts, so it is not among Purposes. It does
+// take time, on the read path among other places, so it is among TimedPurposes.
+const PurposeEmbedding Purpose = "embedding"
+
+// TimedPurposes is every purpose a model call is timed under: the generation purposes and embedding.
+func TimedPurposes() []Purpose {
+	return append(Purposes(), PurposeEmbedding)
+}
+
+// clock starts timing one model call and returns what stops it.
+//
+// Started where the request leaves and stopped when the function that made it returns, so the time
+// is the provider's plus the network's, which is the thing an operator cannot see from a turn's
+// total: a turn makes several calls, and a recall that waited on an embedding shows only as a slow
+// recall.
+//
+// The stop is told whether the provider answered — a reply arrived with a success status and could
+// be decoded. The two are kept apart because they are different populations: a refused connection
+// fails in a millisecond and a timeout fails at the client's deadline, and either, averaged in with
+// the answers, would describe a model that does not exist. A reply that answered and was then
+// refused for what it said — cut at the ceiling, or unparseable as proposals — still answered; how
+// often that happens is counted where the refusal is.
+func (c Config) clock(purpose Purpose) func(answered *bool) {
+	if c.Timed == nil {
+		return func(*bool) {}
+	}
+	started := time.Now()
+	return func(answered *bool) { c.Timed(purpose, *answered, time.Since(started)) }
 }
 
 // Call is what one generation call cost, as far as the provider said.
