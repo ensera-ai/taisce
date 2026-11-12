@@ -27,10 +27,12 @@ repository, and nothing else is a release:
 - `ghcr.io/ensera-ai/taisce:vX.Y.Z`, the service image, for `linux/amd64` and `linux/arm64`;
 - `ghcr.io/ensera-ai/taisce-postgres:vX.Y.Z`, the PostgreSQL substrate the compose file runs;
 - the Helm chart, `oci://ghcr.io/ensera-ai/charts/taisce` at version `X.Y.Z`;
-- the `taisce` binary for Linux and macOS, with checksums, on the release page, built with
-  `-trimpath` and no VCS stamp so the same tag builds the same bytes.
+- the `taisce` binary for Linux and macOS on the release page, built with `-trimpath` and no VCS
+  stamp so the same tag builds the same bytes;
+- the chart package and a checksums file on the release page. The checksums file has a line for
+  every other file there, and the package is the same bytes as the chart in the registry.
 
-Both images and every binary carry a build provenance attestation. The images and the chart carry a
+Both images and every file on the release page carry a build provenance attestation. The images and the chart carry a
 Sigstore keyless signature made with the workflow's own identity — there is no signing key to steal —
 and the images carry an SBOM.
 
@@ -76,8 +78,13 @@ gh attestation verify oci://ghcr.io/ensera-ai/taisce:vX.Y.Z \
   --source-ref refs/tags/vX.Y.Z
 ```
 
-The same command verifies `oci://ghcr.io/ensera-ai/taisce-postgres:vX.Y.Z`, and a downloaded binary
-when you pass its path instead of an `oci://` reference.
+The same command verifies `oci://ghcr.io/ensera-ai/taisce-postgres:vX.Y.Z`, and any file downloaded
+from the release page — a binary, the chart package, the checksums file — when you pass its path
+instead of an `oci://` reference.
+
+Release pages up to v0.7.0 are narrower than that: their chart package carries no provenance and has
+no line in the checksums file. The chart in the registry at the same version is signed, and is the
+same bytes.
 
 Signature — made by that workflow's identity at that tag, for an image or the chart:
 

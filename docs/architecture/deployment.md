@@ -610,11 +610,11 @@ from this repository is distinguishable from one that did.
 | Service image | `ghcr.io/ensera-ai/taisce:<tag>`, also `:latest` and `:<commit sha>` |
 | Substrate image | `ghcr.io/ensera-ai/taisce-postgres:<tag>`, also `:latest` |
 | Helm chart | `oci://ghcr.io/ensera-ai/charts/taisce`, version `<tag without the v>` |
+| CLI binaries, the chart package, and checksums for both | the release page |
 
 The chart's `appVersion` is the release tag, `v` included, so it asks for the image by the same name
 the image was pushed under; the release refuses to push a chart that names a tag it did not push
 ([D5](../decisions/D5.md)). Charts 0.3.0 and 0.3.1 predate this and need `--set image.tag=v0.3.1`.
-| CLI binaries and checksums | the release page |
 
 Both images carry `linux/amd64` and `linux/arm64`, so the architecture is the one you are on rather
 than an emulation of the one the runner had.
