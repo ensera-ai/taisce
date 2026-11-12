@@ -69,6 +69,10 @@ type Kind string
 const (
 	KindProject  Kind = "project"
 	KindOperator Kind = "operator"
+	// KindObserver reads the instance's numbers and opens nothing else: not a management operation,
+	// not the portal, not a memory route. It is what a monitoring system is given, so that the
+	// system which scrapes does not have to hold the credential that can mint a key for any project.
+	KindObserver Kind = "observer"
 )
 
 type Grant struct {
@@ -280,6 +284,30 @@ func (s *Store) resolve(ctx context.Context, token string) (Grant, Kind, error) 
 	return g, kind, nil
 }
 
+// ResolveScraper is the metrics door: it opens for an observer credential and for an operator
+// credential, and for nothing else.
+//
+// An operator is admitted because an operator may read everything on the surface this route is
+// part of, and because deployments that scraped before the observer kind existed scrape with one.
+// An observer is admitted here and nowhere else — every other door asks for its own kind and gives
+// an observer the answer a stranger gets.
+func (s *Store) ResolveScraper(ctx context.Context, token string) (Grant, error) {
+	g, kind, err := s.resolve(ctx, token)
+	if err != nil {
+		return Grant{}, err
+	}
+	if (kind != KindOperator && kind != KindObserver) || g.Project != "" {
+		return Grant{}, ErrUnknown
+	}
+	return g, nil
+}
+
+// IssueObserver mints a credential that reads the instance's numbers and nothing else, and returns
+// the token once.
+func (s *Store) IssueObserver(ctx context.Context, name string) (string, Grant, error) {
+	return s.issueInstanceCredential(ctx, name, KindObserver, ReadOnly)
+}
+
 // Issue mints a credential for one project and returns the token ONCE.
 //
 // The token is not recoverable afterwards, by us or by anyone with the database: only its digest is
@@ -329,6 +357,15 @@ func (s *Store) IssueWithAccess(ctx context.Context, name, project string, acces
 // IssueOperator mints an operator credential and returns the token ONCE. It names no project: the
 // management surface acts on the instance, and a request names the project it acts on.
 func (s *Store) IssueOperator(ctx context.Context, name string) (string, Grant, error) {
+	return s.issueInstanceCredential(ctx, name, KindOperator, ReadWrite)
+}
+
+// issueInstanceCredential mints a credential that names no project: an operator's or an observer's.
+//
+// The access column is not what bounds either — the kind is, at the door — but it is stored with
+// the least authority the kind could mean, so a row read by something that looks only at access
+// does not find `read_write` on a credential issued to scrape.
+func (s *Store) issueInstanceCredential(ctx context.Context, name string, kind Kind, access Access) (string, Grant, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", Grant{}, fmt.Errorf("a credential needs a name, so a person can tell it from another")
 	}
@@ -337,12 +374,12 @@ func (s *Store) IssueOperator(ctx context.Context, name string) (string, Grant, 
 		return "", Grant{}, fmt.Errorf("no randomness available to mint a credential: %w", err)
 	}
 	token := Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
-	g := Grant{CredentialID: uuid.New().String(), Name: name, Access: ReadWrite}
+	g := Grant{CredentialID: uuid.New().String(), Name: name, Access: access}
 	if _, err := s.registry.Exec(ctx, fmt.Sprintf(`
 		INSERT INTO %s.credential (credential_id, token_digest, token_prefix, name, project, access, kind)
 		VALUES ($1, $2, $3, $4, '', $5, $6)`, s.schema),
-		g.CredentialID, Digest(token), token[:12], name, string(ReadWrite), string(KindOperator)); err != nil {
-		return "", Grant{}, fmt.Errorf("issue operator credential: %w", err)
+		g.CredentialID, Digest(token), token[:12], name, string(access), string(kind)); err != nil {
+		return "", Grant{}, fmt.Errorf("issue %s credential: %w", kind, err)
 	}
 	return token, g, nil
 }

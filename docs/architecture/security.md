@@ -158,6 +158,7 @@ What remains after all three is listed in [what this does not cover](#what-this-
 | `project` | `agent` | Every memory operation on its one project except erasure, entity purge and notification endpoints (D26) | Names exactly one project |
 | `project` | `read_only` | Reads, inspection and export on its one project | Names exactly one project |
 | `operator` | stored as `read_write`, not consulted | The management surface and the portal | Names no project |
+| `observer` | stored as `read_only`, not consulted | The metrics route on the management surface, and nothing else | Names no project |
 
 The kind is a registry column, never something the token claims. A table constraint makes "names no
 project" and "is an operator credential" the same statement, so a row cannot be both kinds or neither

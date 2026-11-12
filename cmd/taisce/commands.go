@@ -45,6 +45,7 @@ const usage = `taisce — memory for agents
   taisce credential list           list credentials (--project; without it, the operator credentials)
   taisce credential revoke <id>    stop a credential resolving
   taisce operator issue <name>     mint an operator credential for the management surface; shown once
+  taisce observer issue <name>     mint a credential that reads the instance's metrics and nothing else
   taisce vocabulary add <name>     admit one relation (-project and four declarations, none optional)
   taisce vocabulary list           the relations this instance admits (-project)
   taisce audit verify              recompute the ledger's chain and report what it covers
@@ -147,6 +148,8 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 		return c.vocabulary(ctx, args[1:])
 	case "operator":
 		return operatorCommand(ctx, args[1:])
+	case "observer":
+		return observerCommand(ctx, args[1:])
 	case "audit":
 		if c, ok := managementFromEnv(); ok {
 			return c.audit(ctx, args[1:])

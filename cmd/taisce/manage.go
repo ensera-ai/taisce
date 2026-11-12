@@ -426,6 +426,29 @@ func operatorCommand(ctx context.Context, args []string) error {
 	return nil
 }
 
+// observerCommand mints an observer credential over the administrative connection.
+//
+// What a monitoring system is given. It scrapes the instance's numbers and is refused everywhere
+// else, so the configuration that holds it does not hold the means to mint a key for any project.
+func observerCommand(ctx context.Context, args []string) error {
+	if len(args) < 2 || args[0] != "issue" {
+		return errors.New("usage: taisce observer issue <name>")
+	}
+	admin, _, err := adminPool(ctx)
+	if err != nil {
+		return err
+	}
+	defer admin.Close()
+	token, grant, err := credential.NewStore(admin, string(migrate.ControlSchema)).IssueObserver(ctx, args[1])
+	if err != nil {
+		return err
+	}
+	fmt.Printf("observer credential %s (%s) reads the instance's metrics and nothing else\ntoken: %s\n", grant.Name, grant.CredentialID, token)
+	fmt.Print("\nThis token is shown once and cannot be recovered. Give it to whatever scrapes; revoke it with\n" +
+		"taisce credential revoke <id>.\n")
+	return nil
+}
+
 // operatorCredentials counts the live operator credentials, for bootstrap to know whether the
 // management surface can be reached by anyone.
 func operatorCredentials(ctx context.Context, pool *pgxpool.Pool) (int, error) {

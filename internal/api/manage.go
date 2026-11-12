@@ -148,12 +148,28 @@ func (m *ManagementServer) Handler(readiness ...http.Handler) http.Handler {
 	// The scrape, behind the same operator door and outside the operation table: it answers the
 	// exposition format rather than a JSON object, so it has no request or response shape for the
 	// contract to describe, and it writes no ledger row of its own. See metrics.go.
-	mux.Handle(http.MethodGet+" "+ManagementPrefix+MetricsPath, m.operated(m.metrics))
+	mux.Handle(http.MethodGet+" "+ManagementPrefix+MetricsPath, m.scraped(m.metrics))
 	return mux
 }
 
 // operated is the operator door: an operator credential and nothing else, then the work slot.
 func (m *ManagementServer) operated(next grantedHandler) http.Handler {
+	return m.door(m.credentials.ResolveOperator, next, credential.KindOperator)
+}
+
+// scraped is the metrics door: an observer credential or an operator's, then the work slot.
+//
+// The only route behind it is the scrape. An observer exists so that a monitoring system can be
+// given something that reads the instance's numbers and cannot create a project, issue a credential
+// or seal the ledger; every other route stays behind operated, where an observer is a stranger.
+func (m *ManagementServer) scraped(next grantedHandler) http.Handler {
+	return m.door(m.credentials.ResolveScraper, next, credential.KindOperator, credential.KindObserver)
+}
+
+// door is what both have in common: read the header, decide which allowance pays for the lookup,
+// resolve, and take a work slot. What differs is which kinds resolve, and that is the argument.
+func (m *ManagementServer) door(resolve func(context.Context, string) (credential.Grant, error),
+	next grantedHandler, kinds ...credential.Kind) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
@@ -167,14 +183,20 @@ func (m *ManagementServer) operated(next grantedHandler) http.Handler {
 			return
 		}
 		authCtx, cancelAuth := context.WithTimeout(r.Context(), 2*time.Second)
-		known, _ := m.credentials.Known(authCtx, token, credential.KindOperator)
+		known := ""
+		for _, kind := range kinds {
+			if key, ok := m.credentials.Known(authCtx, token, kind); ok {
+				known = key
+				break
+			}
+		}
 		releaseAuth, ok := m.admission.authenticate(time.Now(), known)
 		if !ok {
 			cancelAuth()
 			writeAdmissionRefusal(w)
 			return
 		}
-		grant, err := m.credentials.ResolveOperator(authCtx, token)
+		grant, err := resolve(authCtx, token)
 		cancelAuth()
 		releaseAuth()
 		if err != nil {
