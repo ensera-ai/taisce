@@ -74,6 +74,13 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+      # The release's tag, and only that: a finding is followed by reading the release's own source
+      # to say whether it calls the vulnerable code, and a checkout one commit deep has no tags.
+      - name: The release's source
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: git fetch --depth 1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
       - name: Advisories in what was published
         id: scan
         env:
@@ -94,6 +101,8 @@ jobs:
         if: steps.scan.outputs.status == '3'
         env:
           TAG: ${{ steps.release.outputs.tag }}
+          # The patch policy's number, as SECURITY.md states it. A test holds the two together.
+          PATCH_WITHIN_DAYS: 7
         run: |
           set -euo pipefail
           title="release $TAG carries a published advisory"
@@ -114,7 +123,15 @@ jobs:
             grep -E '^==|^Vulnerability|Found in:|Fixed in:|^release ' "$RUNNER_TEMP/scan.txt" || true
             echo '```'
             echo
-            echo "From a binary the scanner reports vulnerable symbols that were linked in, which is wider than those this code calls: this is a reason to look and to cut a patch release, not proof of exposure."
+            # What follows, by the patch policy, so the date is on the public record from the
+            # moment the finding is: the issue's own opening date is the day the clock starts.
+            if grep -q 'links the vulnerable code and does not call it' "$RUNNER_TEMP/scan.txt"; then
+              echo "**The release's own code does not call the vulnerable code; it is linked in.** By the patch policy in \`SECURITY.md\` the next release clears it, and no date is promised for that."
+            else
+              echo "**The release's own code calls the vulnerable code**, or that could not be decided and is taken as yes. By the patch policy in \`SECURITY.md\` a release that clears it is due by **$(date -u -d "+${PATCH_WITHIN_DAYS} days" +%Y-%m-%d)** — or ${PATCH_WITHIN_DAYS} days after a fixed version of what is affected is published, if none has been yet."
+            fi
+            echo
+            echo "From a binary the scanner reports vulnerable symbols that were linked in. Whether this service calls them is decided from the release's source, with the toolchain the binary was built by; calling them is still not proof that a deployment can be reached through them."
             echo
             echo "Re-run it: \`make vuln-released RELEASE=$TAG\`."
           } > "$RUNNER_TEMP/issue.md"
