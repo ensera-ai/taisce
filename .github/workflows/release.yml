@@ -120,6 +120,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The helm that packages, pushes and pulls the chart is the one the gate above rendered and
+      # tested it with: same version, same digest. This job is the one that holds the release's
+      # signing identity and writes under a tag that cannot be moved, so it is the last place to take
+      # whatever helm the runner image ships that month — and it did, while the gate beside it was
+      # pinned (#255).
+      #
+      # The step is repeated here rather than shared through a local action. A job is a fresh
+      # machine, so it has to run in both either way; an action would move the two lines that
+      # matter, the version and the digest, out of the file a reviewer of a release reads, into one
+      # they would have to know to open. A test holds every copy to the build's instead.
+      - name: Helm
+        env:
+          HELM_VERSION: v4.3.0
+          HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  /tmp/helm.tgz" | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp linux-amd64/helm
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version --short
+
       # The version the binary reports is the tag, and nothing else about the build varies with the
       # machine: -trimpath drops paths, -buildvcs=false drops the checkout's own stamp, so the same
       # tag builds the same bytes anywhere the same toolchain runs.
