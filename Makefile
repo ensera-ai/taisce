@@ -18,7 +18,7 @@ PERF_COMPOSE = TAISCE_PORT=$(PERF_PORT) TAISCE_PERF_POSTGRES_PORT=$(PERF_POSTGRE
 	TAISCE_INFERENCE_API_KEY=perf-forms-nothing TAISCE_INFERENCE_ALLOWLIST=forms-nothing.invalid \
 	docker compose --project-name $(PERF_PROJECT) -f compose.yaml -f compose.perf.yaml
 
-.PHONY: substrate db-up db-down test vuln gate gate-image licence signoff version test-inference golden build contract freeze-contract decisions \
+.PHONY: substrate db-up db-down test vuln vuln-released gate gate-image licence signoff version test-inference golden build contract freeze-contract decisions \
 	perf-config perf-up perf-down perf-reset-stats perf-workload perf-stats site site-serve
 
 substrate:
@@ -118,6 +118,14 @@ gate: substrate gate-image
 # developer runs it when they change a dependency.
 vuln:
 	go tool govulncheck ./...
+
+# The same question asked of a release that is already published: the binary in its image, and the
+# binaries on its release page. `make vuln` judges the tree, and a tree that is clean today says
+# nothing about what was built before today's advisory. RELEASE names the tag; scheduled, it is the
+# latest release. See scripts/released-advisories.sh for what a finding does and does not mean.
+vuln-released:
+	@test -n "$(RELEASE)" || { echo "usage: make vuln-released RELEASE=vX.Y.Z"; exit 2; }
+	./scripts/released-advisories.sh $(RELEASE)
 
 # Every published file carries a copyright header. Checked rather than documented, because a licence
 # stated once at the root is one file move from a package published without one — and publishing is

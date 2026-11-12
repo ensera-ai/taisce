@@ -1,0 +1,125 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# What is already published is judged against the advisories known today.
+#
+# `advisories` judges the source tree: when an advisory lands, the next build goes red and somebody
+# moves a pin. That is a signal to a contributor. The reader who needs one is whoever is running the
+# release that was built before the advisory existed — the image the chart installs and the compose
+# file pulls — and nothing tells them: not the registry, not the release page, not the service.
+#
+# So the latest release's own binaries are read back, out of its image and off its release page,
+# and scanned. A finding opens an issue naming the release, which is public and reaches whoever
+# watches the repository, and the run goes red.
+#
+# The scanner is the one pinned in go.mod on the default branch, deliberately not the one the
+# release was built with: the question is what is known now.
+#
+# What this does not do: it does not cut the patch release, and it does not say an operator is
+# exposed. From a binary the scanner sees which vulnerable symbols were linked in, which is wider
+# than which are called. See scripts/released-advisories.sh.
+name: released
+
+on:
+  schedule:
+    # Daily, an hour after `advisories`, so a day with a new advisory shows the tree's verdict first.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "The release tag to judge, vX.Y.Z. Empty judges the latest release."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Every action is referenced by commit SHA, with the tag it was taken from beside it, as in the
+# release workflow and for the same reason.
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      # To open the issue that names the release. Nothing else in this job writes anywhere.
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # Carried through the environment, never interpolated into a script: an input is text
+      # somebody typed.
+      RELEASE_INPUT: ${{ inputs.release }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Which release
+        id: release
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_INPUT"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          fi
+          # A tag is used as an image reference and a file pattern below. Held to the one shape a
+          # release tag has before it is used as either.
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "not a release tag: $tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Advisories in what was published
+        id: scan
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -uo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/taisce" REPOSITORY="$GITHUB_REPOSITORY" \
+            ./scripts/released-advisories.sh "$TAG" "$RUNNER_TEMP/released" | tee "$RUNNER_TEMP/scan.txt"
+          status="${PIPESTATUS[0]}"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          # Affected is a finding, reported below. Anything else that is not zero means the release
+          # could not be read, which is not the same as clean and fails here.
+          if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then
+            exit "$status"
+          fi
+
+      - name: Say so where an operator will see it
+        if: steps.scan.outputs.status == '3'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          title="release $TAG carries a published advisory"
+          # One issue per release, not one per day: it stays open until a release that is clean
+          # replaces this one as the latest.
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")"
+          if [ -n "$existing" ]; then
+            echo "already reported in issue $existing"
+            exit 0
+          fi
+          {
+            echo "The binaries published as release \`$TAG\` were scanned on $(date -u +%Y-%m-%d) and carry at least one published advisory."
+            echo
+            echo "This is the released image and the binaries on the release page, not the source tree. An operator running \`$TAG\` is running this."
+            echo
+            echo '```'
+            grep -E '^==|^Vulnerability|Found in:|Fixed in:|^release ' "$RUNNER_TEMP/scan.txt" || true
+            echo '```'
+            echo
+            echo "From a binary the scanner reports vulnerable symbols that were linked in, which is wider than those this code calls: this is a reason to look and to cut a patch release, not proof of exposure."
+            echo
+            echo "Re-run it: \`make vuln-released RELEASE=$TAG\`."
+          } > "$RUNNER_TEMP/issue.md"
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label bug --body-file "$RUNNER_TEMP/issue.md"
+
+      - name: A release with a published advisory fails this run
+        if: steps.scan.outputs.status == '3'
+        run: exit 1
