@@ -104,7 +104,34 @@ Each adapter repository publishes through its own release workflow:
 
 Every account that can publish has two-factor authentication on.
 
+## When an advisory is published after a release
+
+A release is built once, and an advisory can be published against its toolchain or a dependency the
+day after. The source tree is checked on every change and daily; that tells a contributor, and it
+says nothing about the image you already pulled.
+
+So the latest release is checked too. Every day the binary inside its published image and the
+binaries on its release page are read back and scanned against the advisories known that day. A
+finding opens a public issue titled `release vX.Y.Z carries a published advisory`, naming the
+advisory and the version that fixes it. Watching the repository's issues is how you hear.
+
+You can ask the same question of any release yourself, with Docker and Go:
+
+```sh
+make vuln-released RELEASE=v0.6.1
+```
+
+Two limits, both deliberate. The scan reads a binary, so it reports vulnerable code that was
+*linked in*, which is wider than code this service calls: a finding is a reason to look, not proof
+that you are exposed. And it covers the service's own binaries, not the PostgreSQL image a release
+also publishes, which is another project's software with its own advisories.
+
 ## What is deliberately not promised
+
+**No time is promised between an advisory against a release and a patch release that clears it.**
+The scan above says when a release is affected. What follows — how soon a patch release is cut, and
+from which line — has not been decided, and a number written here before it is would be one nobody
+agreed to keep.
 
 No release process defends against a maintainer who controls the repository, the workflow and the
 registry account together. The controls above make a release traceable to a public commit and a

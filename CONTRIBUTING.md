@@ -56,6 +56,9 @@ Other targets you may need:
 - `make gate` runs the same checks a change must pass before it merges (licence headers, the full
   suite with coverage, `go vet`, the API reference check, and the reachable-advisory check) in a clean
   Linux container.
+- `make vuln-released RELEASE=vX.Y.Z` asks the same question of a release that is already published:
+  the binary in its image and the binaries on its release page. It needs Docker, and `gh` for the
+  release page's binaries. The `released` workflow runs it daily against the latest release.
 - `make vuln` checks dependencies against published advisories on their own. It judges reachability
   rather than presence, so an advisory in code nothing here calls is reported and does not fail, and
   the standard library is judged with everything else. It is not part of `make test`: it reads the
