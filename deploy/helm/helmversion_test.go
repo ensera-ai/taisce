@@ -13,6 +13,7 @@ package helm_test
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -128,10 +129,11 @@ func TestTheBuildVerifiesTheHelmItDownloads(t *testing.T) {
 // nobody can account for. This repository already carries one unpublished tag on the wrong commit
 // from a related mess.
 //
-// So three places pin helm now: the build workflow, the release workflow, and the gate image's
-// Dockerfile. TestTheBuildAndTheGateInstallTheSameHelm holds the first and third together; this
-// holds the second to the first, digest included, because a matching version fetched from a different
-// tarball is not the same engine.
+// So the release's gate pins helm as the build workflow and the gate image's Dockerfile do.
+// TestTheBuildAndTheGateInstallTheSameHelm holds the build and the image together; this holds the
+// release's gate to the build, digest included, because a matching version fetched from a different
+// tarball is not the same engine. TestEveryJobThatRunsHelmInstallsTheBuildsHelmFirst holds every
+// other job, including ones not written yet.
 func TestTheReleaseGateInstallsTheSameHelmAsTheBuild(t *testing.T) {
 	version, digest, _ := helmStep(t)
 	releaseVersion, releaseDigest, script := helmStepIn(t, "../../.github/workflows/release.yml", "gate")
@@ -150,5 +152,92 @@ func TestTheReleaseGateInstallsTheSameHelmAsTheBuild(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Errorf("the release gate's helm install does not contain %q", want)
 		}
+	}
+}
+
+// runsHelm reports whether a step's script calls helm, or something here that does: the script
+// that renders the packaged chart, and `make test`, which runs this package on the runner's own
+// helm. `make gate` is not among them — it runs in an image that carries its own.
+//
+// Comment lines are dropped first: a remark about helm installs nothing and runs nothing.
+var helmCall = regexp.MustCompile(`(^|[\s;&|(])helm\s+[a-z]|scripts/chart-image-check\.sh|(^|[\s;&|(])make\s+test(\s|$)`)
+
+func runsHelm(script string) bool {
+	for _, line := range strings.Split(script, "\n") {
+		if code := strings.TrimSpace(line); !strings.HasPrefix(code, "#") && helmCall.MatchString(code) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestEveryJobThatRunsHelmInstallsTheBuildsHelmFirst holds every job to the engine the chart was
+// tested with, and not only the jobs somebody remembered.
+//
+// The pins above were added one job at a time, each after that job had failed for want of one. The
+// job nobody had looked at was the one that publishes: it packaged and pushed the chart with
+// whatever helm the runner image shipped, under the release's signing identity, while the gate
+// beside it in the same file was pinned (#255). A chart packaged by an engine nobody tested it with
+// is published under a tag that cannot be moved.
+//
+// So this does not name jobs. It reads every workflow, finds each job with a step that calls helm,
+// and requires a step before it that installs the build's version from the build's digest, checked.
+// A job added next year is held the day it is written.
+func TestEveryJobThatRunsHelmInstallsTheBuildsHelmFirst(t *testing.T) {
+	version, digest, _ := helmStep(t)
+	paths, err := filepath.Glob("../../.github/workflows/*.yml")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+	held := 0
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var workflow struct {
+			Jobs map[string]struct {
+				Steps []struct {
+					Name string            `yaml:"name"`
+					Env  map[string]string `yaml:"env"`
+					Run  string            `yaml:"run"`
+				} `yaml:"steps"`
+			} `yaml:"jobs"`
+		}
+		if err := yaml.Unmarshal(raw, &workflow); err != nil {
+			t.Fatalf("%s does not parse: %v", path, err)
+		}
+		for name, job := range workflow.Jobs {
+			installed := false
+			for _, step := range job.Steps {
+				if step.Name == "Helm" {
+					if step.Env["HELM_VERSION"] != version || step.Env["HELM_SHA256"] != digest {
+						t.Errorf("%s, job %s: installs helm %q (%q); the build installs %q (%q)",
+							filepath.Base(path), name, step.Env["HELM_VERSION"], step.Env["HELM_SHA256"], version, digest)
+					}
+					for _, want := range []string{"set -euo pipefail", "sha256sum -c", "${HELM_SHA256}", "helm-${HELM_VERSION}-linux-amd64.tar.gz"} {
+						if !strings.Contains(step.Run, want) {
+							t.Errorf("%s, job %s: the helm install does not contain %q, so its pin refuses nothing",
+								filepath.Base(path), name, want)
+						}
+					}
+					installed = true
+					continue
+				}
+				if runsHelm(step.Run) {
+					if !installed {
+						t.Errorf("%s, job %s: step %q calls helm before the job has installed the pinned one, "+
+							"so it runs whatever the runner image ships", filepath.Base(path), name, step.Name)
+					}
+					held++
+				}
+			}
+		}
+	}
+	// The release's publish job calls helm in three steps, and its gate and the build each run the
+	// suite. Fewer than that means the pattern has stopped matching, not that the workflows have
+	// stopped calling helm.
+	if held < 5 {
+		t.Fatalf("found %d steps that call helm across %d workflows; there were five when this was written, so this test is no longer reading them", held, len(paths))
 	}
 }
