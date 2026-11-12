@@ -1,0 +1,132 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Who may open a connection to this release's pods.
+#
+# What is protected, and from whom. The database holds every project's memory and the credential
+# registry; the management surface holds the administrative connection, the one that can mint a
+# credential for any project. Without a policy both listen to every pod in the cluster, so a
+# workload in an unrelated namespace — one that was compromised, or one that was simply never meant
+# to be a neighbour — can attempt the database's logins and the management surface's door without
+# ever passing anything this release controls. The worst path is that one: a foothold anywhere in
+# the cluster becomes a place to guess from. A password and a token are still in the way; this
+# removes the route to them.
+#
+# Why here. An address check in the binary would be a rule every listener has to remember, and the
+# database is not this binary's to patch. The network plugin refuses the connection before either
+# process sees it, for every port, including one added later.
+#
+# The shape is one policy that closes every pod of the release, and one more per door that names who
+# may come through it. Policies add up and never subtract, so the closing policy is what makes a pod
+# nobody wrote a rule for closed rather than open.
+#
+# What this does not cover:
+#   - A cluster whose network plugin enforces no NetworkPolicy accepts these objects and admits
+#     everybody. Nothing in a rendering or an install can tell the two apart; only a refused
+#     connection can.
+#   - Egress. The API and the workers call a model endpoint the operator chose, by name, possibly
+#     outside the cluster, and a NetworkPolicy matches addresses, not names: an egress rule written
+#     here would either be wide enough to mean nothing or break the first deployment whose endpoint
+#     moved. What a model call may reach is bounded by the inference allowlist in the binary.
+#   - Anything arriving through the cluster's own API — `kubectl exec`, `kubectl port-forward` —
+#     which is authorised by the cluster's access rules, not by these.
+#   - A caller that is admitted. A policy names who may knock; the token and the password decide
+#     who gets in.
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "taisce.name" . }}-closed
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+spec:
+  # Every pod of the release, by release and not by component: a workload added to this chart later
+  # is closed before anybody remembers to write a policy for it.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: taisce
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+{{- /* A rule whose `from` is empty matches every source. An emptied list therefore renders no rule
+       and no policy, which leaves the pod to the closing policy above: nobody. */}}
+{{- if $np.api.from }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "taisce.name" . }}-api
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: taisce
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from: {{- toYaml $np.api.from | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8080}
+{{- end }}
+{{- if and .Values.manage.enabled $np.manage.from }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "taisce.name" . }}-manage
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: taisce
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: manage
+  policyTypes: [Ingress]
+  ingress:
+    - from: {{- toYaml $np.manage.from | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8081}
+{{- end }}
+{{- if ne .Values.postgresql.mode "external" }}
+---
+# The database's instances. They are the operator's pods rather than this chart's, so the closing
+# policy above does not select them and this one both closes and opens.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "taisce.db" . }}
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ include "taisce.db" . }}
+  policyTypes: [Ingress]
+  ingress:
+    # This release's pods, which speak PostgreSQL and have no business on any other port.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: taisce
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - {protocol: TCP, port: 5432}
+    # The cluster's own pods: a replica streams from the primary, and a joining instance clones it.
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ include "taisce.db" . }}
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+    # The operator, which reads each instance's state from its status port and cannot manage a
+    # cluster it cannot see. Named by namespace and not by pod label: the label is the operator's
+    # packaging to change, and a guess that stopped matching would leave a database nobody is
+    # failing over.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.database.operatorNamespace | quote }}
+      ports:
+        - {protocol: TCP, port: 8000}
+{{- end }}
+{{- end }}

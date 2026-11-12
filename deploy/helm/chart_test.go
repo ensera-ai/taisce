@@ -15,6 +15,11 @@ import (
 	"testing"
 )
 
+// theController names an ingress controller's namespace as a caller. An ingress whose controller is
+// admitted nowhere is refused (TestAnIngressNobodyCouldArriveThroughIsRefused), so the tests that
+// read an ingress have to say where its traffic comes from, as an operator would.
+const theController = `[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"ingress"}}}]`
+
 func render(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("helm", append([]string{"template", "t", "taisce"}, withoutABackup(args)...)...)
@@ -88,11 +93,12 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 		t.Errorf("the portal ingress must be refused while the portal is off, got %v\n%s", err, out)
 	}
 	exposed := render(t, "--set", "manage.portal=on", "--set", "ingress.portal.enabled=true", "--set", "ingress.portal.host=ops.example",
-		"--set", "ingress.api.enabled=true", "--set", "ingress.api.host=memory.example")
+		"--set", "ingress.api.enabled=true", "--set", "ingress.api.host=memory.example",
+		"--set-json", "networkPolicy.api.from="+theController, "--set-json", "networkPolicy.manage.from="+theController)
 	if strings.Count(exposed, "kind: Ingress") != 2 || !strings.Contains(exposed, "path: /portal") || !strings.Contains(exposed, `value: "on"`) {
 		t.Error("enabling both ingresses renders both, the portal at its prefix")
 	}
-	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set", "ingress.api.enabled=true").CombinedOutput(); err == nil || !strings.Contains(string(out), "host is required") {
+	if out, err := exec.Command("helm", "template", "t", "taisce", "--set", "postgresql.cnpg.backup.acknowledgedNone=true", "--set", "ingress.api.enabled=true", "--set-json", "networkPolicy.api.from="+theController).CombinedOutput(); err == nil || !strings.Contains(string(out), "host is required") {
 		t.Errorf("an ingress without a host is refused, got %v\n%s", err, out)
 	}
 }
@@ -116,7 +122,7 @@ func TestTheChartShrinksAndPointsElsewhereOnlyWhenAsked(t *testing.T) {
 func TestThePortalIngressAcceptsOnTheWayTheBinaryDoes(t *testing.T) {
 	for _, value := range []string{"on", "ON", "On", " on "} {
 		out := render(t, "--set-string", "manage.portal="+value, "--set", "ingress.portal.enabled=true",
-			"--set", "ingress.portal.host=ops.example")
+			"--set", "ingress.portal.host=ops.example", "--set-json", "networkPolicy.manage.from="+theController)
 		if !strings.Contains(out, "path: /portal") {
 			t.Errorf("manage.portal=%q switches the portal on, and its ingress was not rendered", value)
 		}
