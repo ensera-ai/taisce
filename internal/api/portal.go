@@ -85,12 +85,15 @@ func NewPortal(m *ManagementServer) *Portal {
 
 // Mount registers the portal's routes on a mux the manage role serves.
 func (p *Portal) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("GET "+PortalPrefix+"/{$}", p.signed(p.home))
+	// The three pages an operator waits for are timed, as one series: each reads the instance's
+	// state for a person looking at it. The sign-in form and the assets are not — they read nothing.
+	page := func(next http.HandlerFunc) http.Handler { return p.m.timed(pg.PortalPage, next) }
+	mux.Handle("GET "+PortalPrefix+"/{$}", page(p.signed(p.home)))
 	mux.HandleFunc("GET "+PortalPrefix+"/login", p.loginForm)
 	mux.HandleFunc("POST "+PortalPrefix+"/login", p.login)
 	mux.HandleFunc("POST "+PortalPrefix+"/logout", p.logout)
-	mux.HandleFunc("GET "+PortalPrefix+"/ledger", p.signed(p.ledger))
-	mux.HandleFunc("GET "+PortalPrefix+"/projects/{project}", p.signed(p.project))
+	mux.Handle("GET "+PortalPrefix+"/ledger", page(p.signed(p.ledger)))
+	mux.Handle("GET "+PortalPrefix+"/projects/{project}", page(p.signed(p.project)))
 	mux.HandleFunc("GET "+PortalPrefix+"/assets/{file}", p.asset)
 	// The listener's bare root, and only that: the address an operator was given is the address
 	// that works, instead of a 404 that reads as a broken deployment.

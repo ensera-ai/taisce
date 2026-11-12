@@ -50,6 +50,18 @@ func runManage(ctx context.Context, log *slog.Logger) error {
 	if err := admin.Ping(ctx); err != nil {
 		return fmt.Errorf("database unreachable: %w", err)
 	}
+	// How long this surface's own requests take, written down every few seconds like the serving
+	// processes' timings and into the same table. Stopped before the pool it writes through closes.
+	timings := pg.NewMeasurements(admin, schema)
+	measuring, stopMeasuring := context.WithCancel(context.Background())
+	measured := make(chan struct{})
+	go func() {
+		defer close(measured)
+		timings.Run(measuring, measurementInterval, func(err error) {
+			log.Warn("the management surface's timings could not be written down; they are kept and tried again", "error", err)
+		})
+	}()
+	defer func() { stopMeasuring(); <-measured }()
 	server := api.NewManagementServer(credential.NewStore(admin, string(migrate.ControlSchema)), api.ManagementStores{
 		Projects: pg.NewProjectStore(admin, schema),
 		Provision: func(ctx context.Context, scope string) error {
@@ -66,6 +78,7 @@ func runManage(ctx context.Context, log *slog.Logger) error {
 		Measured: func(ctx context.Context) (pg.Measured, error) {
 			return pg.ReadMeasurements(ctx, admin, schema)
 		},
+		Timings: timings,
 	}, schema, log)
 	addr := strings.TrimSpace(os.Getenv(envManageAddr))
 	if addr == "" {

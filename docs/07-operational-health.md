@@ -222,6 +222,8 @@ scrape_configs:
 | `taisce_operation_duration_milliseconds` | Histogram, by `operation`: how long a request to a memory operation took |
 | `taisce_formation_turn_duration_milliseconds` | Histogram: how long a turn took to form, for turns that formed |
 | `taisce_formation_lag_milliseconds` | Histogram: how long a turn waited between being stored and being formed |
+| `taisce_model_call_duration_milliseconds` | Histogram, by `purpose` and `outcome`: how long one call to a model took |
+| `taisce_management_duration_milliseconds` | Histogram, by `operation`: how long a request to the management surface or the portal took |
 | `taisce_admission_refused_total` | Counter: requests refused because the process had no capacity for them |
 | `taisce_model_calls_total` | Counter, by `purpose`: generation calls made |
 | `taisce_model_calls_unmetered_total` | Counter, by `purpose`: calls the provider reported no usage for |
@@ -236,7 +238,7 @@ are described next.
 
 ### How long things take
 
-Three histograms and one counter say whether the instance is slow, which nothing above can. A backlog
+Five histograms and one counter say whether the instance is slow, which nothing above can. A backlog
 says formation is behind and not why; an operation count says requests were served and not how long
 anybody waited.
 
@@ -247,6 +249,12 @@ histogram_quantile(0.95, sum by (le) (rate(taisce_operation_duration_millisecond
 # Is formation behind because the model is slow, or because the queue is deep?
 histogram_quantile(0.95, rate(taisce_formation_turn_duration_milliseconds_bucket[15m]))   # the model, and the writes after it
 histogram_quantile(0.95, rate(taisce_formation_lag_milliseconds_bucket[15m]))             # what an agent waits: the queue as well
+
+# Which pass is the slow one? One call to a model, by what it was for.
+histogram_quantile(0.95, sum by (le, purpose) (rate(taisce_model_call_duration_milliseconds_bucket{outcome="answered"}[15m])))
+
+# Is the provider failing, and how long does a failure take? At the client's deadline, it is timing out.
+sum by (purpose) (rate(taisce_model_call_duration_milliseconds_count{outcome="failed"}[15m]))
 
 # Is the instance turning requests away?
 rate(taisce_admission_refused_total[5m])
@@ -259,6 +267,18 @@ rate(taisce_admission_refused_total[5m])
   told. The turn duration is the part of it spent forming; the difference is time in the backlog.
   Only turns that formed are counted, so a provider outage shows as a rising backlog and no new
   observations, not as fast formation.
+- **A model call is timed by what it was for**: `extraction`, `report`, `compaction`, or `embedding`
+  — the last being the call a recall waits on. A slow turn can be narrowed to its slow pass, and a
+  slow recall to a slow embedding provider.
+- **Answers and failures are kept apart**, as `outcome="answered"` and `outcome="failed"`. A refused
+  connection fails in a millisecond and a timeout fails at the deadline; averaged in with the
+  answers either would describe a model that does not exist. `answered` means a reply arrived and
+  could be read — a reply then refused for what it said, cut at the ceiling for instance, still
+  answered, and is counted where it is refused. An embedding answered from the request's own memo is
+  not a call and is not timed.
+- **The management surface is timed by operation, and the ops centre as `portal.page` or
+  `portal.action`.** Never by route: an ops-centre route's path carries a project's name. The scrape
+  itself is not timed; whatever scrapes already records that.
 - **A capacity refusal is counted here and nowhere else.** A `429` for capacity writes no ledger row,
   so it is in neither `operations_allowed` nor `operations_refused`. Without this counter an instance
   refusing a third of its requests looked, on a scrape, exactly like an idle one.

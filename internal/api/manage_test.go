@@ -55,6 +55,9 @@ func newManaged(t *testing.T, tenant string) *managed {
 		Measured: func(ctx context.Context) (pg.Measured, error) {
 			return pg.ReadMeasurements(ctx, h.pool, h.schema)
 		},
+		// The harness's own writer, so a test flushes what the surface timed when it wants to
+		// read it rather than waiting on a timer.
+		Timings: h.measurements,
 	}, h.schema, nil)
 	m := &managed{harness: h, manage: httptest.NewServer(server.Handler()), manageServer: server, operator: operator}
 	t.Cleanup(m.manage.Close)

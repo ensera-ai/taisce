@@ -251,15 +251,15 @@ func run(ctx context.Context, log *slog.Logger) error {
 	var entityCandidates *entitycandidate.Retriever
 	var reportCandidates *reportcandidate.Retriever
 	if role != roleWorker {
-		passages, err = configuredPassages(memory, schema)
+		passages, err = configuredPassages(memory, schema, timeCalls(measurements))
 		if err != nil {
 			return err
 		}
-		entityCandidates, err = configuredEntityCandidates(memory, schema)
+		entityCandidates, err = configuredEntityCandidates(memory, schema, timeCalls(measurements))
 		if err != nil {
 			return err
 		}
-		reportCandidates, err = configuredReportCandidates(memory, schema)
+		reportCandidates, err = configuredReportCandidates(memory, schema, timeCalls(measurements))
 		if err != nil {
 			return err
 		}
@@ -468,6 +468,7 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 	}
 	inferenceConfig.Timeout = policy.TurnBudget
 	inferenceConfig.Metered = meterCalls(measurements)
+	inferenceConfig.Timed = timeCalls(measurements)
 	observations := pg.NewObservationStore(memory)
 	// Read again at the top of every turn, because this process outlives the vocabulary: an
 	// operator extends it while the worker is running, and a worker holding the set it read at
@@ -544,6 +545,13 @@ func meterCalls(measurements *pg.Measurements) func(inference.Call) {
 		if call.Cut {
 			measurements.Add(pg.PurposeCounter(pg.CounterModelRepliesCut, purpose), 1)
 		}
+	}
+}
+
+// timeCalls records how long each model call took, by purpose and by whether the provider answered.
+func timeCalls(measurements *pg.Measurements) func(inference.Purpose, bool, time.Duration) {
+	return func(purpose inference.Purpose, answered bool, took time.Duration) {
+		measurements.Observe(pg.ModelCallDuration, pg.ModelCallName(string(purpose), answered), took)
 	}
 }
 

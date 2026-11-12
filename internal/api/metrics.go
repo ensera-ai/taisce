@@ -178,24 +178,24 @@ func declaredCounter(name string) bool {
 // distributions writes one family of histograms: how long a kind of thing took.
 //
 // Every distribution in the slice is of one kind, and the family is declared once. A name on a
-// distribution becomes the `operation` label, and only if the surface declares an operation by
-// that name: a row in the table with any other name is an error rather than a series, because the
-// table is written by the serving processes and this is the last place a value nobody declared
-// could be stopped before it reaches a monitoring system.
+// distribution becomes labels through the family's own labeller, and only if that labeller
+// recognises it as one of a set declared in code: a row in the table with any other name is an
+// error rather than a series, because the table is written by the serving processes and this is the
+// last place a value nobody declared could be stopped before it reaches a monitoring system.
 //
 // Buckets are cumulative and end with +Inf, which is the count. Totals come from rows that only
 // rise, so this is a histogram in the format's own sense and `rate()` over it means what it says.
-func (e *exposition) distributions(name, help string, all []pg.Distribution) error {
+func (e *exposition) distributions(name, help string, labelled func(string) (string, bool), all []pg.Distribution) error {
 	family := metricPrefix + name + "_milliseconds"
 	e.b.WriteString("# HELP " + family + " " + help + "\n")
 	e.b.WriteString("# TYPE " + family + " histogram\n")
 	for _, d := range all {
 		label, prefix := "", ""
 		if d.Name != "" {
-			if !declaredOperation(d.Name) {
-				return fmt.Errorf("a stored measurement is named %q, which is not an operation this surface declares", d.Name)
+			declared := false
+			if label, declared = labelled(d.Name); !declared {
+				return fmt.Errorf("a stored measurement of %s is named %q, which is not a name this endpoint declares for it", name, d.Name)
 			}
-			label = `operation="` + d.Name + `"`
 			prefix = label + ","
 		}
 		for i, bound := range d.Bounds {
@@ -213,16 +213,51 @@ func (e *exposition) distributions(name, help string, all []pg.Distribution) err
 	return nil
 }
 
-// declaredOperation reports whether the memory surface declares an operation by this name. The
-// table is the closed set a label may be drawn from.
-func declaredOperation(name string) bool {
+// byOperation labels a distribution with a memory operation, if the memory surface declares one by
+// that name. The table is the closed set a label may be drawn from.
+func byOperation(name string) (string, bool) {
 	for _, o := range Operations() {
 		if o.Name == name {
-			return true
+			return `operation="` + name + `"`, true
 		}
 	}
-	return false
+	return "", false
 }
+
+// byManagementOperation labels a distribution with a management operation from that surface's
+// table, or with one of the two names the portal is timed as.
+func byManagementOperation(name string) (string, bool) {
+	if name == pg.PortalPage || name == pg.PortalAction {
+		return `operation="` + name + `"`, true
+	}
+	for _, o := range ManagementOperations() {
+		if o.Name == name {
+			return `operation="` + name + `"`, true
+		}
+	}
+	return "", false
+}
+
+// byModelCall labels a distribution with the purpose a model was called for and whether it
+// answered. Both are closed: the purposes are the inference package's, the outcomes are two.
+func byModelCall(name string) (string, bool) {
+	for _, purpose := range inference.TimedPurposes() {
+		for _, answered := range []bool{true, false} {
+			if name == pg.ModelCallName(string(purpose), answered) {
+				outcome := pg.ModelFailed
+				if answered {
+					outcome = pg.ModelAnswered
+				}
+				return `purpose="` + string(purpose) + `",outcome="` + outcome + `"`, true
+			}
+		}
+	}
+	return "", false
+}
+
+// unlabelled is the labeller of a family that has one series. A name on one of its rows is a name
+// nobody declared.
+func unlabelled(string) (string, bool) { return "", false }
 
 func (e *exposition) String() string { return e.b.String() }
 
@@ -342,12 +377,15 @@ func (m *ManagementServer) metrics(w http.ResponseWriter, r *http.Request, _ cre
 	for _, family := range []struct {
 		kind       pg.MeasurementKind
 		name, help string
+		labelled   func(string) (string, bool)
 	}{
-		{pg.OperationDuration, "operation_duration", "How long a request to a memory operation took, from the door to the response."},
-		{pg.FormationTurnDuration, "formation_turn_duration", "How long a turn took to form, for turns that formed."},
-		{pg.FormationLag, "formation_lag", "How long a turn waited between being stored and being formed."},
+		{pg.OperationDuration, "operation_duration", "How long a request to a memory operation took, from the door to the response.", byOperation},
+		{pg.FormationTurnDuration, "formation_turn_duration", "How long a turn took to form, for turns that formed.", unlabelled},
+		{pg.FormationLag, "formation_lag", "How long a turn waited between being stored and being formed.", unlabelled},
+		{pg.ModelCallDuration, "model_call_duration", "How long one call to a model took, by purpose and by whether the provider answered.", byModelCall},
+		{pg.ManagementDuration, "management_duration", "How long a request to the management surface or the portal took, from the door to the response.", byManagementOperation},
 	} {
-		if err := e.distributions(family.name, family.help, byKind[family.kind]); err != nil {
+		if err := e.distributions(family.name, family.help, family.labelled, byKind[family.kind]); err != nil {
 			m.log.Error("metrics: write the measurements", "error", err)
 			writeError(w, http.StatusServiceUnavailable, codeInternal, "the instance's numbers could not be read")
 			return

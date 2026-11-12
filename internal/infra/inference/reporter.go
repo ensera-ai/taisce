@@ -88,6 +88,8 @@ func (r *Reporter) Write(ctx context.Context, c report.Context) (report.Report, 
 		req.Header.Set("Authorization", "Bearer "+r.config.APIKey)
 	}
 
+	answered := false
+	defer r.config.clock(PurposeReport)(&answered)
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return report.Report{}, fmt.Errorf("call model: %w", err)
@@ -107,6 +109,7 @@ func (r *Reporter) Write(ctx context.Context, c report.Context) (report.Report, 
 	if err := json.Unmarshal(raw, &completion); err != nil {
 		return report.Report{}, fmt.Errorf("decode reply: %w", err)
 	}
+	answered = true
 	content, err := r.config.accept(PurposeReport, completion, ceiling)
 	if err != nil {
 		return report.Report{}, err
