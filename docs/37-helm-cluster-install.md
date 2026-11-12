@@ -345,3 +345,50 @@ healthy, and nobody then took the primary away. The backup plugin, which this ru
 A cluster with a different network plugin. The published image: the listeners were stand-ins, so
 this says nothing about the service's own behaviour behind the policy, only about who reaches it.
 
+## The database's certificate is verified — 2026-11-12
+
+The chart's connection strings now say `sslmode=verify-full` against the authority the operator
+publishes (D55). Two things were read on the cluster before that could be the default, and one was
+checked after.
+
+**How long the authority lives.** The secret `<cluster>-ca` of the running release:
+
+```
+subject=OU=taisce, CN=taisce-taisce-db
+notBefore=Nov 10 10:40:38 2026 GMT
+notAfter=Feb  8 10:40:38 2027 GMT
+```
+
+Ninety days. A process that read it once at start would refuse every new connection from the day
+it expired, which is why the service reads it again for each connection.
+
+**That verification is available and means something** (2026-11-11, with `psql` in a pod):
+
+```
+verify-full, the cluster's authority      FATAL: password authentication failed   (verified, then asked for a password)
+verify-full, another authority            SSL error: certificate verify failed
+verify-full, right authority, wrong name  server certificate for "taisce-taisce-db-rw" (and 11 other names) does not match host name
+```
+
+**The mount and the connection string, exactly as the chart renders them** (2026-11-12). A pod
+running as the service's own user, given the volume the chart gives a workload and the chart's
+connection string with a password that was wrong on purpose:
+
+```
+== what the pod is given, as uid 65532
+ca.crt
+== the chart's connection string, with a password that is wrong on purpose
+psql: error: connection to server at "taisce-taisce-db-rw" (10.43.120.79), port 5432 failed:
+FATAL:  password authentication failed for user "taisce_data"
+```
+
+One file, readable by that user, and a connection that got as far as being asked who it was — which
+is past the certificate. The signing key, which is in the same secret, is not in the pod. The four
+workloads rendered for the running release's shape were accepted by a server-side dry run; nothing
+on the cluster was changed.
+
+**What was not tested here.** The service itself connecting this way on a cluster: the image that
+re-reads the authority is not published yet, so the client above was `psql`. The service's own
+behaviour — including that it follows a replaced authority and refuses the old one — is held by
+`TestANewConnectionIsVerifiedAgainstTheAuthorityAsItIsNow`, against a real database, with the real
+driver. Nobody waited ninety days.

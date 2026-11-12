@@ -52,10 +52,10 @@ func TestEveryConnectionTheChartBuildsStatesWhatItMayOpen(t *testing.T) {
 	}
 	// The ceilings this deployment states, and which role carries which.
 	for _, want := range []string{
-		"taisce_data:$(TAISCE_DATA_PASSWORD)@t-taisce-db-rw:5432/taisce?sslmode=require&pool_max_conns=12",
-		"taisce_control:$(TAISCE_CONTROL_PASSWORD)@t-taisce-db-rw:5432/taisce?sslmode=require&pool_max_conns=2",
-		"taisce_data:$(TAISCE_DATA_PASSWORD)@t-taisce-db-rw:5432/taisce?sslmode=require&pool_max_conns=4",
-		"taisce_admin:$(PGPASSWORD_ADMIN)@t-taisce-db-rw:5432/taisce?sslmode=require&pool_max_conns=3",
+		"taisce_data:$(TAISCE_DATA_PASSWORD)@t-taisce-db-rw:5432/taisce?sslmode=verify-full&sslrootcert=/etc/taisce/database-ca/ca.crt&pool_max_conns=12",
+		"taisce_control:$(TAISCE_CONTROL_PASSWORD)@t-taisce-db-rw:5432/taisce?sslmode=verify-full&sslrootcert=/etc/taisce/database-ca/ca.crt&pool_max_conns=2",
+		"taisce_data:$(TAISCE_DATA_PASSWORD)@t-taisce-db-rw:5432/taisce?sslmode=verify-full&sslrootcert=/etc/taisce/database-ca/ca.crt&pool_max_conns=4",
+		"taisce_admin:$(PGPASSWORD_ADMIN)@t-taisce-db-rw:5432/taisce?sslmode=verify-full&sslrootcert=/etc/taisce/database-ca/ca.crt&pool_max_conns=3",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the rendering lacks %q", want)

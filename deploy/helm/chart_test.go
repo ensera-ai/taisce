@@ -57,7 +57,7 @@ func TestTheChartLintsAndItsDefaultsAreHighlyAvailableAndClosed(t *testing.T) {
 		"name: t-taisce-worker", "TAISCE_ROLE\n              value: worker",
 		"name: t-taisce-manage", "TAISCE_ROLE\n              value: manage", "value: \"off\"",
 		"name: t-taisce-bootstrap-1", "runAsNonRoot: true", "readOnlyRootFilesystem: true",
-		"sslmode=require", `["/taisce", "probe"]`, `["/taisce", "probe", "--worker"]`, `["/taisce", "probe", "--manage"]`,
+		"sslmode=verify-full", `["/taisce", "probe"]`, `["/taisce", "probe", "--worker"]`, `["/taisce", "probe", "--manage"]`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the default rendering lacks %q", want)

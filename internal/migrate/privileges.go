@@ -75,6 +75,9 @@ func NewRuntimePool(ctx context.Context, dsn string, schema Schema, plane Runtim
 	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		return ValidateRuntimeConnection(ctx, conn, schema, plane)
 	}
+	// Each new connection is verified against the certificate authority as it is when the
+	// connection is opened, not as it was when this process started.
+	FollowTrust(config, dsn)
 	for name, value := range runtimeConnectionDefaults {
 		if _, set := config.ConnConfig.RuntimeParams[name]; !set {
 			config.ConnConfig.RuntimeParams[name] = value

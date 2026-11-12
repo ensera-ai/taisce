@@ -402,7 +402,8 @@ about an RPO. Load: one probe every third of a second is not traffic. A real nod
 was force-deleted, which is faster than a machine that stops answering and slower than nothing.
 
 Proved by `deploy/helm/chart_test.go`: the defaults render three instances, two replicas, no ingress,
-generated and kept passwords, non-root containers, TLS to the database; the shrunk and external
+generated and kept passwords, non-root containers, connections that verify the database's
+certificate (`deploy/helm/databasetls_test.go`); the shrunk and external
 shapes render only when asked; the portal ingress is refused while the portal is off. `deploy/helm/networkpolicy_test.go`
 holds who is admitted where, that an emptied list admits nobody, and that an ingress nobody could
 arrive through is refused.
