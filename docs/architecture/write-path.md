@@ -294,9 +294,19 @@ queued somewhere could write the erased words back.
 6. **Commit.** A deferred trigger now reserves a backlog slot. If it refuses, everything above rolls
    back, including the offset.
 
+Steps 2 to 4 are sent as **one batch**. The offset claim is a statement of its own, because the
+observation row carries the offset it returns; everything after it — the observation, three rows for
+each message, the retention stamp — leaves in a single request and is answered in a single reply
+(D54). The statements and their order are as listed, and each still sees the rows of those before
+it. What a batch cannot do is carry a value from one reply into the next request, so a message's
+chunk identity is generated in the process, as the observation's identity is, rather than by the
+column's default.
+
 The cost is stated rather than hidden. Appends to one project wait on one row lock, held from the
-offset claim to commit, and all projects meet briefly on the backlog counter at commit. The
-throughput this allows has not been measured, so this page does not guess.
+offset claim to commit, and all projects meet briefly on the backlog counter at commit. With the
+batch, what is sent under that lock is one statement and one batch whatever the turn's length; it
+was three requests plus three for every message. The throughput this allows has not been measured,
+so this page does not guess.
 
 ## The backlog reservation
 

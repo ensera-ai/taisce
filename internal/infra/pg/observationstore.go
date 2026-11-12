@@ -56,9 +56,9 @@ func (s *ObservationStore) Append(ctx context.Context, schema Schema, turn domai
 
 // appendTurnTx writes one new observation inside the transaction that also owns its retry receipt.
 func appendTurnTx(ctx context.Context, tx pgx.Tx, schema Schema, turn domain.Turn) (domain.Observation, error) {
-	// The lock is on the scope's watermark row, which every append to this scope contends for
-	// and no append to another scope touches. Taken by upserting it, so the first append to a
-	// new scope does not need the row to exist already.
+	// The first statement takes the project's watermark row, and holds it to commit: appends to one
+	// project are serialised by it, so a project's write rate is the reciprocal of how long this
+	// function and the commit take. Everything after it is therefore sent as one batch.
 	var offset int64
 	if err := tx.QueryRow(ctx, schema.SQL(claimOffsetSQL), turn.Scope, turn.OccurredAt).Scan(&offset); err != nil {
 		return domain.Observation{}, fmt.Errorf("claim log offset: %w", err)
@@ -66,54 +66,56 @@ func appendTurnTx(ctx context.Context, tx pgx.Tx, schema Schema, turn domain.Tur
 
 	id := uuid.New()
 	ingested := time.Now().UTC()
-	// The turn's own role, for the observation row: the speaker of its first message. A turn
-	// has several, and the per-message roles are what the policy reads; this exists so an
-	// operator scanning the log sees who started it without joining.
 	lead := turn.Messages[0].Role
-	if _, err := tx.Exec(ctx, schema.SQL(insertObservationSQL),
-		id, turn.Scope, offset, KindTurn, turn.OccurredAt, ingested,
-		string(lead), nullIfEmpty(turn.DataSubjectID), turnCharacters(turn)); err != nil {
-		return domain.Observation{}, fmt.Errorf("insert observation: %w", err)
-	}
 
+	// One batch: the observation, three rows for each message, and the retention stamp, in the
+	// order they were always written. Sent one at a time this was 3 + 3n waits on the network with
+	// the lock held — 195 for a turn of 64 messages — and the waits, not the work, were most of
+	// the hold. The statements, their order and the single commit are what they were; a statement
+	// still sees the rows of those before it.
+	//
+	// The one thing that had to change for it: a message's chunk identity is generated here and
+	// not by the column's default, because the two statements after the message's own need it and
+	// a batch cannot carry a value from one reply into the next request. It is a random UUID
+	// either way, as the observation's identity above already is.
+	batch := &pgx.Batch{}
+	steps := make([]string, 0, 2+3*len(turn.Messages))
+	queue := func(step, sql string, args ...any) {
+		batch.Queue(schema.SQL(sql), args...)
+		steps = append(steps, step)
+	}
+	queue("insert observation", insertObservationSQL,
+		id, turn.Scope, offset, KindTurn, turn.OccurredAt, ingested,
+		string(lead), nullIfEmpty(turn.DataSubjectID), turnCharacters(turn))
 	for _, m := range turn.Messages {
 		occurred := m.OccurredAt
 		if occurred.IsZero() {
 			occurred = turn.OccurredAt
 		}
-		var chunkID string
-		if err := tx.QueryRow(ctx, schema.SQL(insertMessageSQL+` RETURNING chunk_id::text`),
-			id, m.Ordinal, string(m.Role), m.Content, m.GroupOrdinal, occurred).Scan(&chunkID); err != nil {
-			return domain.Observation{}, fmt.Errorf("insert message %d: %w", m.Ordinal, err)
-		}
-
-		if _, err := tx.Exec(ctx, schema.SQL(insertChunkSQL),
+		chunkID := uuid.NewString()
+		queue(fmt.Sprintf("insert message %d", m.Ordinal), insertMessageSQL,
+			id, m.Ordinal, string(m.Role), m.Content, m.GroupOrdinal, occurred, chunkID)
+		queue(fmt.Sprintf("insert chunk for message %d", m.Ordinal), insertChunkSQL,
 			chunkID, turn.Scope, id, m.Ordinal, m.Content, occurred,
-			string(m.Role), nullIfEmpty(turn.DataSubjectID)); err != nil {
-			return domain.Observation{}, fmt.Errorf("insert chunk for message %d: %w", m.Ordinal, err)
-		}
-		// Registered in the SAME transaction as the row it describes. A projection written now
-		// and registered afterwards is a projection erasure cannot see for as long as the gap
-		// lasts, and the gap is exactly the window in which a process dies.
-		if _, err := tx.Exec(ctx, schema.SQL(registerProjectionSQL),
+			string(m.Role), nullIfEmpty(turn.DataSubjectID))
+		queue("register chunk projection", registerProjectionSQL,
 			id, turn.Scope, ProjectionChunk, chunkID,
-			nullIfEmpty(turn.DataSubjectID)); err != nil {
-			return domain.Observation{}, fmt.Errorf("register chunk projection: %w", err)
+			nullIfEmpty(turn.DataSubjectID))
+	}
+	queue("stamp retention", stampRetentionSQL, id, turn.Scope)
+
+	// Every reply is read, in order, so a refusal is reported against the statement that drew it
+	// and with the database's own error inside: callers tell a full backlog, a conflict and a
+	// serialisation failure apart by that error, exactly as they did when each was sent alone.
+	results := tx.SendBatch(ctx, batch)
+	for _, step := range steps {
+		if _, err := results.Exec(); err != nil {
+			_ = results.Close()
+			return domain.Observation{}, fmt.Errorf("%s: %w", step, err)
 		}
 	}
-
-	// The expiry, from the project's own policy, stamped in the same transaction as the write.
-	//
-	// Stamped rather than computed at sweep time so that the policy which applied when a turn
-	// arrived is the policy that governs it, and so an operator can see when a row will go
-	// rather than deriving it. Shortening a policy therefore applies to what arrives next;
-	// removing what is already held is an erasure with a receipt, not a configuration change
-	// that destroys things quietly.
-	//
-	// A project with no policy leaves this NULL, which means keep — a decision rather than an
-	// absence of one, and the sweep reads it as such.
-	if _, err := tx.Exec(ctx, schema.SQL(stampRetentionSQL), id, turn.Scope); err != nil {
-		return domain.Observation{}, fmt.Errorf("stamp retention: %w", err)
+	if err := results.Close(); err != nil {
+		return domain.Observation{}, fmt.Errorf("append turn: %w", err)
 	}
 
 	out := domain.Observation{
@@ -127,9 +129,6 @@ func appendTurnTx(ctx context.Context, tx pgx.Tx, schema Schema, turn domain.Tur
 	return out, nil
 }
 
-// The project may not exist — a write to an unprovisioned scope still lands, deliberately, because
-// losing memory to a missed provisioning step is the worse failure. No project row means no policy
-// means keep, which is the same answer as a project with no policy.
 const stampRetentionSQL = `
 UPDATE {schema}.observation o
    SET retention_until = now() + p.retention
@@ -191,8 +190,8 @@ func turnCharacters(turn domain.Turn) int {
 
 const insertMessageSQL = `
 INSERT INTO {schema}.turn_message
-    (observation_id, ordinal, role, content, group_ordinal, occurred_at)
-VALUES ($1, $2, $3, $4, $5, $6)`
+    (observation_id, ordinal, role, content, group_ordinal, occurred_at, chunk_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
 const insertChunkSQL = `
 INSERT INTO {schema}.chunk
