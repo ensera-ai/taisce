@@ -331,6 +331,37 @@ refused connection — from a pod in another namespace, `nc -z -w 4 <release>-ta
 should time out. If the operator runs somewhere other than `cnpg-system`, say so in
 `networkPolicy.database.operatorNamespace`, or the database will run with nobody managing it.
 
+## Upgrading from 0.6
+
+Four things in 0.7 change what an upgrade does. Each is a default that was chosen for a new
+install; an existing release has to say what it wants before `helm upgrade`, or the upgrade either
+refuses or changes who can reach it.
+
+| Before upgrading | Why | What happens if you do not |
+|---|---|---|
+| Set `postgresql.cnpg.backup.objectStore`, or `postgresql.cnpg.backup.acknowledgedNone=true` | A release now states where its backups go, or that it has none | The render refuses, and nothing is changed |
+| Name your gateway's or ingress controller's namespace in `networkPolicy.api.from` — and in `networkPolicy.manage.from` if it routes to the ops centre | Network policy is on by default, and a controller in a namespace of its own is a stranger until named | The upgrade succeeds and requests through the gateway time out |
+| Upgrade the chart and the image together; do not pin `image.tag` to a 0.6 image under a 0.7 chart | The chart's connection strings now verify the database's certificate, and only a 0.7 image re-reads the authority when it is replaced | It works, and stops connecting about ninety days after the pods started |
+| Say so in `networkPolicy.database.operatorNamespace` if the CloudNativePG operator is not in `cnpg-system` | The database admits its operator by namespace | The database runs with nobody managing it |
+
+And four things that behave differently afterwards, with nothing to do beforehand:
+
+- **Bootstrap mints no credential on a cluster.** Existing credentials are untouched. A new release
+  mints its first ones with the two `kubectl exec` commands the install notes print.
+- **An operator credential minted from now on stops working after ninety days**, and says when.
+  `-no-expiry` mints a permanent one. Credentials that already exist have no date and keep working.
+- **A new project keeps each person's statements separate**; projects that already exist keep
+  sharing one world, as they did. `taisce project statements <name> shared|separate` sets it, until
+  the project holds a fact.
+- **A writer refused for a full backlog is told how long a turn takes to form**, from 1 to 30
+  seconds, where it was always told 1.
+
+The schema moves forward by six migrations when the bootstrap Job of the new revision runs. A pod of
+the new release is not ready until it has, and says which version it is waiting for.
+
+A `docker compose` deployment has none of the four steps: it has no network policy and no operator
+database. Pull the new `compose.yaml`, and the two credential changes above apply.
+
 ## Removing it
 
 ```sh
