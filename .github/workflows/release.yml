@@ -133,10 +133,6 @@ jobs:
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -buildvcs=false \
               -ldflags="-s -w -X main.version=${tag}" -o "dist/taisce-${tag}-${os}-${arch}" ./cmd/taisce
           done
-          (cd dist && sha256sum * > "taisce-${tag}-checksums.txt")
-      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
-        with:
-          subject-path: dist/*
 
       # The chart's own version, which Helm requires to be plain SemVer, so the tag's leading v is
       # dropped here and nowhere else. It names the chart package and nothing the chart installs:
@@ -144,6 +140,27 @@ jobs:
       - name: Version
         id: version
         run: echo "semver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # The chart is packaged here, beside the binaries, and pushed much later. Where it is packaged
+      # decides whether a reader can check it: the checksums file and the provenance step below
+      # cover what is in dist/ when they run, and the release page uploads what is in dist/ at the
+      # end. A file that arrives between the two is on the page with nothing behind it, which is
+      # what the chart package was (#253, D57). Packaging needs nothing a later step produces —
+      # appVersion is the tag — so it loses nothing by coming first.
+      - name: Chart package
+        env:
+          SEMVER: ${{ steps.version.outputs.semver }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        # appVersion is the image tag the chart defaults to, so it is the release tag, v and all.
+        run: helm package deploy/helm/taisce --version "$SEMVER" --app-version "$RELEASE_TAG" -d dist
+
+      # Last of the steps that write a file the release page carries. Anything added to dist/ under
+      # a taisce- name after this fails the release at "Verify the published artifacts".
+      - name: Checksums
+        run: cd dist && sha256sum taisce-* > "taisce-${GITHUB_REF_NAME}-checksums.txt"
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/taisce-*
 
       # ── The two images a quickstart pulls ────────────────────────────────────────────────────
       #
@@ -201,19 +218,18 @@ jobs:
         id: chart
         env:
           SEMVER: ${{ steps.version.outputs.semver }}
-          RELEASE_TAG: ${{ github.ref_name }}
           # Every ref the Image step pushed, as build-push-action reports them.
           PUSHED: ${{ fromJSON(steps.image.outputs.metadata)['image.name'] }}
         run: |
           set -euo pipefail
-          # appVersion is the image tag the chart defaults to, so it is the release tag, v and all.
-          helm package deploy/helm/taisce --version "$SEMVER" --app-version "$RELEASE_TAG" -d dist
           # Before anything is pushed: the chart must ask for an image this run pushed. A chart that
-          # names a missing tag lints clean and fails on every install.
+          # names a missing tag lints clean and fails on every install. The package is the one built
+          # above, already in the checksums file; this step only reads it.
           scripts/chart-image-check.sh "dist/taisce-${SEMVER}.tgz" "$IMAGE" "$PUSHED"
           helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
-          helm push "dist/taisce-${SEMVER}.tgz" "$CHART" 2>&1 | tee dist/chart-push.log
-          digest="$(grep -o 'sha256:[0-9a-f]*' dist/chart-push.log | head -1)"
+          # The log is kept out of dist/: that directory holds what the release page carries.
+          helm push "dist/taisce-${SEMVER}.tgz" "$CHART" 2>&1 | tee "$RUNNER_TEMP/chart-push.log"
+          digest="$(grep -o 'sha256:[0-9a-f]*' "$RUNNER_TEMP/chart-push.log" | head -1)"
           cosign sign --yes "ghcr.io/${{ github.repository_owner }}/charts/taisce@${digest}"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
@@ -235,14 +251,24 @@ jobs:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           SUBSTRATE_DIGEST: ${{ steps.substrate.outputs.digest }}
           CHART_DIGEST: ${{ steps.chart.outputs.digest }}
+          SEMVER: ${{ steps.version.outputs.semver }}
         run: |
           set -euo pipefail
           workflow="${GITHUB_REPOSITORY}/.github/workflows/release.yml"
           identity="https://github.com/${workflow}@${GITHUB_REF}"
           issuer=https://token.actions.githubusercontent.com
-          for bin in dist/taisce-"${TAG}"-*-*; do
-            gh attestation verify "$bin" --repo "$GITHUB_REPOSITORY" --signer-workflow "$workflow" --source-ref "$GITHUB_REF"
+          # Everything the release page is about to carry, taken by the glob that step uploads and
+          # not by a list of what is expected to be there: each file is in the checksums file with
+          # the sum it has now, and each carries provenance from this run (#253).
+          scripts/release-page-check.sh dist "$TAG"
+          for file in dist/taisce-*; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" --signer-workflow "$workflow" --source-ref "$GITHUB_REF"
           done
+          # The chart is published twice, to the registry and to the page, and a reader who checked
+          # one assumes they checked the other. They are the same bytes or the release stops here.
+          mkdir -p "$RUNNER_TEMP/registry-chart"
+          helm pull "${CHART}/taisce" --version "$SEMVER" -d "$RUNNER_TEMP/registry-chart"
+          cmp "$RUNNER_TEMP/registry-chart/taisce-${SEMVER}.tgz" "dist/taisce-${SEMVER}.tgz"
           for ref in "${IMAGE}@${IMAGE_DIGEST}" "${SUBSTRATE}@${SUBSTRATE_DIGEST}"; do
             gh attestation verify "oci://${ref}" --repo "$GITHUB_REPOSITORY" --signer-workflow "$workflow" --source-ref "$GITHUB_REF"
             cosign verify "$ref" --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > /dev/null
