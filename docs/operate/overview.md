@@ -239,7 +239,13 @@ Each project's page in the ops centre lists its keys, newest first, revoked ones
 | Prefix | The first 12 characters of the token (`tsk_` and 8 more). Match it against what a client holds without seeing the rest |
 | Access | `agent`, `read_write` or `read_only` |
 | Created | The day it was issued |
-| State | `live` or `revoked` |
+| Expires | The day it stops working on its own, or `no date` |
+| Last acted | When the audit ledger last recorded this key doing anything, or `not in the ledger` |
+| State | `live`, `expired` or `revoked` |
+
+Read **Last acted** before revoking: a key the ledger has never seen is one nothing is using, as far
+as the ledger still goes back. A key issued from the ops centre has no date; issue it from the CLI or
+the API to give it one.
 
 `taisce credential list --project billing` and `POST /manage/v1/credentials/list` with
 `{"project": "billing"}` return the same list.

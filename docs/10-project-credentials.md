@@ -78,8 +78,23 @@ taisce credential issue app --project research --read-only
 taisce credential list --project research
 ```
 
-`credential list` shows each credential's ID, name, token prefix, project and mode, plus a revoked
-date if it has one. Leave out `--project` to list operator credentials. `list` is only available
+`credential list` shows each credential's ID, name, token prefix, project and mode; whether it has
+been revoked or has expired, or when it will expire; and when the ledger last recorded it doing
+anything, or `not in the ledger` if it never has. Read the last two before revoking anything.
+
+## A credential can end on its own
+
+`taisce credential issue app --project research --lifetime-days 90` mints a key that stops working
+after ninety days. Past that moment it is answered exactly as a token nobody issued, the same as a
+revoked one, and the list shows it as `[expired <time>]`. A project key gets a date only when you
+ask for one: an application holds it, and a date nobody chose is the day that application stops
+authenticating.
+
+An operator key is the other way round. `taisce operator issue <name>` mints one that ends after
+ninety days, and says when; `--lifetime-days <n>` states another lifetime and `--no-expiry` mints a
+permanent one. Replacing it needs the administrative connection, not the key, so an expired operator
+key locks nobody out who could have minted it. A key issued before lifetimes existed has no date and
+keeps working until it is revoked. Leave out `--project` to list operator credentials. `list` is only available
 through the management surface.
 
 ## Watch out for

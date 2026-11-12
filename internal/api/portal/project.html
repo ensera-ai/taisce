@@ -11,11 +11,12 @@
 
 <section class="card" id="credentials">
 <div class="card-head"><div><div class="title-row">{{template "i-key"}}<h2>Credentials</h2></div><p class="sub">Keys that reach this project's memory. A token is never shown here.</p></div></div>
-<div class="scroll"><table><thead><tr><th>Name</th><th>Prefix</th><th>Access</th><th>Created</th><th>State</th><th class="act">Revoke</th></tr></thead><tbody>
+<div class="scroll"><table><thead><tr><th>Name</th><th>Prefix</th><th>Access</th><th>Created</th><th>Expires</th><th>Last acted</th><th>State</th><th class="act">Revoke</th></tr></thead><tbody>
 {{range .Credentials}}<tr><td><strong>{{.Name}}</strong></td><td><code>{{.TokenPrefix}}…</code></td><td><span class="pill sky">{{.Access}}</span></td><td class="mono">{{.CreatedAt.UTC.Format "2006-01-02"}}</td>
-<td>{{if .RevokedAt}}<span class="pill bad dot">revoked</span>{{else}}<span class="pill ok dot">live</span>{{end}}</td>
+<td class="mono">{{if .ExpiresAt}}{{.ExpiresAt.UTC.Format "2006-01-02"}}{{else}}no date{{end}}</td><td class="mono">{{if .LastActedAt}}{{.LastActedAt.UTC.Format "2006-01-02 15:04"}}{{else}}not in the ledger{{end}}</td>
+<td>{{if .RevokedAt}}<span class="pill bad dot">revoked</span>{{else if .Expired}}<span class="pill bad dot">expired</span>{{else}}<span class="pill ok dot">live</span>{{end}}</td>
 <td class="act">{{if not .RevokedAt}}<details class="reveal"><summary class="btn btn-sm btn-danger">Revoke</summary><form class="confirm" method="post" action="/portal/actions/revoke">{{template "guard" $.Guard}}<input type="hidden" name="project" value="{{$.Project.Name}}"><input type="hidden" name="id" value="{{.CredentialID}}"><small>type <code>{{.CredentialID}}</code> to confirm</small><span class="confirm-line"><input name="confirm" size="14" autocomplete="off" required aria-label="The credential's identifier, typed back"><button class="btn btn-sm btn-danger">Revoke for good</button></span></form></details>{{end}}</td></tr>
-{{else}}<tr><td colspan="6" class="empty">none</td></tr>{{end}}
+{{else}}<tr><td colspan="8" class="empty">none</td></tr>{{end}}
 </tbody></table></div>
 <div class="card-foot"><h3>Issue a credential</h3>
 <form class="row" method="post" action="/portal/actions/issue">{{template "guard" $.Guard}}<input type="hidden" name="project" value="{{.Name}}">

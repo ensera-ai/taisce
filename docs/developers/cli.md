@@ -144,8 +144,11 @@ You'll see something like this:
 credential … revoked
 ```
 
-The list shows each key's id, name, the start of its token and what it reaches. Revoked keys stay in
-the list, marked `[revoked <time>]`. To make another operator token, run `taisce operator issue <name>`.
+The list shows each key's id, name, the start of its token and what it reaches, then when it ends
+(`no expiry`, `expires <time>`, `[expired <time>]` or `[revoked <time>]`) and when the audit ledger
+last recorded it (`last acted <time>` or `not in the ledger`). Revoked and expired keys stay in the
+list. To make another operator token, run `taisce operator issue <name>`; it stops working after 90
+days unless you pass `--lifetime-days <n>` or `--no-expiry`.
 It always goes straight to the database, because you need an operator token before you can use the
 management API.
 
@@ -301,7 +304,7 @@ These use the management API when `TAISCE_MANAGE_API` is set, and the database o
 | `project list` | List projects | Shows surfaces, retention and `[suspended]` |
 | `project suspend NAME`, `project resume NAME` | Take a project offline, or bring it back | Refused if it's already in that state |
 | `project retention NAME DAYS` | Set how long new turns are kept | `indefinite` clears it. Whole days, 1–36500. Deadlines already stamped on stored turns are not rewritten |
-| `credential issue NAME` | Mint a project token | Then `--project` (default `default`), `--read-only`. Refused for a suspended project |
+| `credential issue NAME` | Mint a project token | Then `--project` (default `default`), `--read-only`, `--lifetime-days N` (omitted: no expiry). Refused for a suspended project |
 | `credential list` | List tokens | `--project`; without it, the operator tokens |
 | `credential revoke ID` | Stop a token working | Refused if already revoked |
 | `audit seal` | Seal new audit entries | Prints `nothing to seal` when there's nothing new |

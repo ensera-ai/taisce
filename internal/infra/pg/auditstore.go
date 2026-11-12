@@ -467,3 +467,47 @@ func (s *AuditStore) Verify(ctx context.Context) (domain.AuditVerification, erro
 	out.Valid = true
 	return out, nil
 }
+
+// LastActed says when each principal last appears in the ledger, for the ones that do.
+//
+// It is how an operator learns which credentials are in use before revoking one. The alternative —
+// a last-used column on the credential, written when it resolves — is a write on every request, on
+// the read path, to the registry, for a number somebody looks at a few times a year. The ledger
+// already holds the answer, indexed by principal and time, so each principal costs one descent of
+// that index to its newest entry rather than a scan of what it ever did.
+//
+// What it does not say:
+//   - It is the newest entry the ledger still holds. A principal absent from the result has no
+//     entry in the ledger as it stands, which is "never" only for as long as nothing removes old
+//     entries.
+//   - It counts a refusal recorded against the credential as an appearance. A credential refused
+//     for lack of access was still presented by somebody, and that is the thing an operator
+//     deciding whether it is in use wants to know.
+//   - It cannot see a credential that resolved and then did nothing the ledger records.
+func (s *AuditStore) LastActed(ctx context.Context, principals []string) (map[string]time.Time, error) {
+	out := map[string]time.Time{}
+	if len(principals) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, s.schema.SQL(`
+		SELECT p.principal, newest.occurred_at
+		  FROM unnest($1::text[]) AS p(principal)
+		 CROSS JOIN LATERAL (
+		       SELECT occurred_at FROM {schema}.audit_entry e
+		        WHERE e.principal = p.principal
+		        ORDER BY e.occurred_at DESC
+		        LIMIT 1) newest`), principals)
+	if err != nil {
+		return nil, fmt.Errorf("read when each principal last acted: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var principal string
+		var at time.Time
+		if err := rows.Scan(&principal, &at); err != nil {
+			return nil, fmt.Errorf("read when each principal last acted: %w", err)
+		}
+		out[principal] = at
+	}
+	return out, rows.Err()
+}
