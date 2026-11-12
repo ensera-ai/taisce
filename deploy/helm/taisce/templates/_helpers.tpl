@@ -12,6 +12,50 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "taisce.credentialsSecret" -}}{{ .Values.credentials.existingSecret | default (printf "%s-credentials" (include "taisce.name" .)) }}{{- end -}}
 {{/* Where the runtime roles connect: the operator's read-write service, or the external secret. */}}
 {{- define "taisce.dbHost" -}}{{ include "taisce.db" . }}-rw{{- end -}}
+{{/* How a connection to the operator's database decides who answered it.
+
+     What is protected, and from whom: the connection between this release's pods and their
+     database, from something on the path that answers in the database's place. `sslmode=require`
+     encrypts to whoever answers. A login can be relayed through such a thing, and everything said
+     afterwards read. The network policy narrows who can reach the port; it says nothing about who
+     is behind the address.
+
+     verify-full and not verify-ca. The operator's authority signs a certificate for every database
+     it runs, so checking the authority alone would accept any of them here. The name is what says
+     it is this one, and the address the chart connects to is one the certificate carries.
+
+     The authority is read from the secret the operator publishes for this cluster, mounted by the
+     helpers below. It is replaced on the operator's schedule, and the service reads the file again
+     for each connection it opens, so a pod that outlives a replacement goes on connecting.
+
+     What this does not cover: the external mode, where the connection strings are the operator's
+     own and so is the decision about what they verify; and an operator's database configured to
+     take its authority from somewhere other than that secret. */}}
+{{- define "taisce.dbCAPath" -}}/etc/taisce/database-ca{{- end -}}
+{{- define "taisce.dbTLS" -}}sslmode=verify-full&sslrootcert={{ include "taisce.dbCAPath" . }}/ca.crt{{- end -}}
+{{/* The authority's certificate, for a pod that connects. One key of the secret, by name: the
+     same secret holds the key the authority signs with, and a pod given the whole of it could mint
+     a certificate for the database — the thing the check above exists to stop.
+
+     Until the operator has created the cluster the secret does not exist, and a pod that mounts it
+     waits rather than starts. On a first install that is the same wait the pods already had for
+     the database itself. */}}
+{{- define "taisce.dbCAVolumes" -}}
+{{- if ne .Values.postgresql.mode "external" }}
+volumes:
+  - name: database-ca
+    secret:
+      secretName: {{ include "taisce.db" . }}-ca
+      items:
+        - {key: ca.crt, path: ca.crt}
+{{- end }}
+{{- end -}}
+{{- define "taisce.dbCAMounts" -}}
+{{- if ne .Values.postgresql.mode "external" }}
+volumeMounts:
+  - {name: database-ca, mountPath: {{ include "taisce.dbCAPath" . }}, readOnly: true}
+{{- end }}
+{{- end -}}
 {{/* How many connections a pool may open, appended to a DSN.
 
      pgx sizes a pool it is not told about at the number of CPUs the process can see. In a cluster
@@ -38,7 +82,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 - name: TAISCE_CONTROL_PASSWORD
   valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" $root | quote }}, key: controlPassword}}
 - name: TAISCE_REGISTRY_DSN
-  value: "postgres://taisce_control:$(TAISCE_CONTROL_PASSWORD)@{{ include "taisce.dbHost" $root }}:5432/taisce?sslmode=require{{ include "taisce.pool" .pool }}"
+  value: "postgres://taisce_control:$(TAISCE_CONTROL_PASSWORD)@{{ include "taisce.dbHost" $root }}:5432/taisce?{{ include "taisce.dbTLS" $root }}{{ include "taisce.pool" .pool }}"
 {{- end }}
 {{- end -}}
 {{/* The environment every serving role shares, as one definition rather than a copy per role: a
@@ -57,7 +101,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 - name: TAISCE_DATA_PASSWORD
   valueFrom: {secretKeyRef: {name: {{ include "taisce.credentialsSecret" $root | quote }}, key: dataPassword}}
 - name: TAISCE_MEMORY_DSN
-  value: "postgres://taisce_data:$(TAISCE_DATA_PASSWORD)@{{ include "taisce.dbHost" $root }}:5432/taisce?sslmode=require{{ include "taisce.pool" .pool }}"
+  value: "postgres://taisce_data:$(TAISCE_DATA_PASSWORD)@{{ include "taisce.dbHost" $root }}:5432/taisce?{{ include "taisce.dbTLS" $root }}{{ include "taisce.pool" .pool }}"
 {{- end }}
 - name: TAISCE_INFERENCE_ENDPOINT
   value: {{ $root.Values.inference.endpoint | quote }}
@@ -102,7 +146,7 @@ rather than a knob nobody would turn. */}}
 - name: PGPASSWORD_ADMIN
   valueFrom: {secretKeyRef: {name: {{ include "taisce.db" $root }}-app, key: password}}
 - name: TAISCE_ADMIN_DSN
-  value: "postgres://taisce_admin:$(PGPASSWORD_ADMIN)@{{ include "taisce.dbHost" $root }}:5432/taisce?sslmode=require{{ include "taisce.pool" .pool }}"
+  value: "postgres://taisce_admin:$(PGPASSWORD_ADMIN)@{{ include "taisce.dbHost" $root }}:5432/taisce?{{ include "taisce.dbTLS" $root }}{{ include "taisce.pool" .pool }}"
 {{- end }}
 {{- end -}}
 {{/* The database's memory limit, in MiB.

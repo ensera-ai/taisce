@@ -710,7 +710,7 @@ func adminPool(ctx context.Context) (*pgxpool.Pool, pg.Schema, error) {
 		return nil, "", fmt.Errorf("schema: %w", err)
 	}
 
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := migrate.NewAdminPool(ctx, dsn)
 	if err != nil {
 		return nil, "", fmt.Errorf("connect: %w", err)
 	}

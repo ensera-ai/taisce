@@ -39,6 +39,7 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ include "taisce.serviceAccount" . }}
+      {{- include "taisce.dbCAVolumes" . | nindent 6 }}
       securityContext: {{- include "taisce.securityContext" . | nindent 8 }}
       containers:
         - name: bootstrap
@@ -46,6 +47,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["bootstrap", "-project", {{ .Values.project | quote }}, "-mint-credentials=false"]
           securityContext: {{- include "taisce.containerSecurityContext" . | nindent 12 }}
+          {{- include "taisce.dbCAMounts" . | nindent 10 }}
           env:
             - name: TAISCE_SCHEMA
               value: {{ .Values.schema | quote }}

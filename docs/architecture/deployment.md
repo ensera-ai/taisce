@@ -375,9 +375,14 @@ belongs to whoever owns the cluster, so the chart declares a `Cluster` and leave
 need. Superuser access stays disabled (`enableSuperuserAccess: false`). A repeat bootstrap refuses a
 serving role that has gained a privilege rather than quietly repairing it.
 
-**Transport and containers.** In `cnpg` mode, every DSN the chart writes requires TLS
-(`sslmode=require`). In `external` mode the DSNs come from your secret, and TLS is whatever those
-strings say. Every container runs as non-root, with a read-only root filesystem and all capabilities
+**Transport and containers.** In `cnpg` mode, every DSN the chart writes verifies who answers it:
+`sslmode=verify-full`, against the certificate authority the operator publishes for the cluster,
+mounted into each pod that connects as one file and nothing else from that secret (D55). The
+authority is replaced on the operator's schedule — the one read on a cluster was valid for ninety
+days — and the service reads the file again for every connection it opens, so a pod that outlives a
+replacement goes on connecting. In `external` mode the DSNs come from your secret, and what they
+verify is whatever those strings say; a string of yours that names `sslrootcert` gets the same
+re-reading. Every container runs as non-root, with a read-only root filesystem and all capabilities
 dropped. The service account does not mount a token.
 
 **Secrets.**
