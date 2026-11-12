@@ -302,3 +302,46 @@ The cluster was verified unchanged after the removal: every other namespace pres
 releases that were there before still deployed, the five CloudNativePG clusters belonging to other
 workloads all healthy, both cluster image policies untouched at the age they had before this run, and
 all three nodes `Ready`.
+
+## The network policy meets a cluster — 2026-11-12
+
+The chart's policies (D49) are a request to the cluster's network plugin, and a rendering cannot
+show that anything honours it. This run applied them to the same three-node cluster, which runs
+k3s with its built-in policy controller, in a namespace created for the purpose and removed
+afterwards. The deployed instance was not touched.
+
+**What was applied.** The chart's own rendering of the database and the policies for a release
+named `np`, two instances, into namespace `taisce-np-check`. Beside it, four pods: one labelled as
+the release's API listening on 8080, one labelled as its management surface listening on 8081, one
+unlabelled neighbour in the same namespace, and one stranger in a second namespace. The listeners
+were stand-ins, because the question is who the network lets through, not what answers.
+
+**The database came up through the policy.** Both instances became ready and the cluster reported
+healthy, with the second instance on a different node from the first and `pg_stat_replication`
+showing it streaming. So the three callers the database policy names are sufficient: the operator
+reached the status port, the joining instance cloned the primary, and replication crossed nodes.
+
+**Who was let through.**
+
+| From | To | With the policies | With them removed |
+|---|---|---|---|
+| neighbour, same namespace | API, 8080 | connects | — |
+| stranger, other namespace | API, 8080 | refused | connects |
+| neighbour, same namespace | management, 8081 | refused | connects |
+| stranger, other namespace | management, 8081 | refused | connects |
+| the release's own API pod | management, 8081 | refused | — |
+| the release's API and management pods | database, 5432 | connects | — |
+| neighbour, same namespace | database, 5432 | refused | connects |
+| stranger, other namespace | database, 5432 | refused | connects |
+| any of the three | database status port, 8000 | refused | — |
+| `kubectl port-forward` | management, 8081 | answers | — |
+
+"Refused" is a connection attempt that did not complete within four seconds. The last column is the
+control: the same probes, a few seconds after deleting the three policies, to show that it was the
+policies refusing and not something else about the cluster.
+
+**What was not tested.** A failover or a switchover with the policies in place — the cluster became
+healthy, and nobody then took the primary away. The backup plugin, which this run did not configure.
+A cluster with a different network plugin. The published image: the listeners were stand-ins, so
+this says nothing about the service's own behaviour behind the policy, only about who reaches it.
+

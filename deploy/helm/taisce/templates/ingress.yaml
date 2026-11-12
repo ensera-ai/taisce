@@ -3,7 +3,17 @@
 #
 # Both ingresses are opt-in. The memory API is what applications reach; the portal is not
 # exposed by default, and enabling its ingress is the deliberate act that exposes it.
+{{- /* An ingress controller is a pod in some namespace, and to the network policy an unnamed one is a
+       stranger. An ingress that renders, resolves and then times out on every request has its cause
+       two files from its symptom, so it is refused here instead. */}}
 {{- if .Values.ingress.api.enabled }}
+{{- if .Values.networkPolicy.enabled }}
+{{- $beyond := false }}
+{{- range .Values.networkPolicy.api.from }}{{- if or (hasKey . "namespaceSelector") (hasKey . "ipBlock") }}{{- $beyond = true }}{{- end }}{{- end }}
+{{- if not $beyond }}
+{{- fail "ingress.api.enabled is set, and networkPolicy.api.from names no namespace and no address range, so the ingress controller's pods would be refused by the memory API and every request through the ingress would time out. Add the controller's namespace to networkPolicy.api.from — for example {namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <its namespace>}}}, which also says so when the controller runs in this release's own namespace." }}
+{{- end }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -34,6 +44,9 @@ spec:
 {{- /* The binary turns the portal on for "on" in any case, with surrounding space ignored, so the guard applies the same rule. Stricter here, "ON" would switch the portal on and still be refused its ingress (#55). */}}
 {{- if ne (lower (trim (toString .Values.manage.portal))) "on" }}
 {{- fail "ingress.portal.enabled needs manage.portal set to \"on\"; an ingress to a portal that does not exist exposes the management surface's door instead" }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.manage.from) }}
+{{- fail "ingress.portal.enabled is set, and networkPolicy.manage.from is empty, so the ingress controller's pods would be refused by the management surface and the portal would time out. Add the controller's namespace to networkPolicy.manage.from — for example {namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <its namespace>}}}." }}
 {{- end }}
 ---
 apiVersion: networking.k8s.io/v1

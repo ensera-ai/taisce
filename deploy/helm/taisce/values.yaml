@@ -177,6 +177,31 @@ ingress:
     tls: []
     annotations: {}
 
+# Who may open a connection to this release's pods. On by default: every pod of the release refuses
+# what is not named here, and the database admits this release, its own instances and its operator.
+#
+# A cluster whose network plugin enforces no NetworkPolicy accepts these objects and admits everybody;
+# the chart cannot tell. Egress is not restricted — templates/networkpolicy.yaml says why.
+networkPolicy:
+  enabled: true
+  api:
+    # Who may reach the memory API on 8080, as NetworkPolicy peers. The default is the pods of this
+    # release's namespace. An ingress controller or a gateway in a namespace of its own is a
+    # stranger until it is named:
+    #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+    # An empty list admits nobody.
+    from:
+      - podSelector: {}
+  manage:
+    # Who may reach the management surface on 8081. Nobody, until somebody is named: it holds the
+    # administrative connection, and an operator reaches it with `kubectl exec` or
+    # `kubectl port-forward`, which go through the cluster's API and are not subject to this.
+    from: []
+  database:
+    # The namespace the CloudNativePG operator runs in. It reads each instance's status port, and a
+    # database it cannot reach is one nobody is failing over.
+    operatorNamespace: cnpg-system
+
 serviceAccount:
   create: true
   name: ""

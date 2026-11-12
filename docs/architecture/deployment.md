@@ -426,8 +426,10 @@ measures the API's outage when the primary is deleted, on whatever cluster runs 
 records one such run, with the machine named. That run shows the failover path works. It wrote
 nothing during the window, so it says nothing about data loss.
 
-**Nothing restricts traffic inside the cluster.** The chart renders no NetworkPolicy, so any pod can
-reach the management Service. What stops misuse is the operator credential that surface requires.
+**That the cluster enforces its network policy.** The chart renders policies that close every pod of
+the release to connections nobody named (D49). A cluster whose network plugin enforces none accepts
+them and admits everybody, and nothing in an install can tell the two apart. What the pods may call
+is not restricted either.
 
 ## The surfaces a deployment exposes
 

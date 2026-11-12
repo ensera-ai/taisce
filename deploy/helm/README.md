@@ -253,6 +253,42 @@ Nothing, until asked. `ingress.api` publishes the memory routes. `ingress.portal
 portal at `/portal` and is refused unless `manage.portal=on`, so an ingress can never point at the
 management surface's door by accident. The management surface itself is a ClusterIP service.
 
+### Who may connect, inside the cluster
+
+A ClusterIP service is reachable by every pod in the cluster, so the chart also says who may open a
+connection, with NetworkPolicy, on by default:
+
+| To | Admitted | Port |
+|---|---|---|
+| The memory API | pods of this namespace, and whoever `networkPolicy.api.from` names | 8080 |
+| The management surface | nobody, until `networkPolicy.manage.from` names somebody | 8081 |
+| The workers, the bootstrap Job | nobody; they serve nothing | — |
+| The database | this release's pods; its own instances; the operator's namespace (status port only) | 5432, 8000 |
+
+`kubectl exec` and `kubectl port-forward` go through the cluster's API and are not subject to any of
+this, which is how an operator reaches a management surface that admits nobody.
+
+**A gateway or ingress controller in a namespace of its own is a stranger until it is named:**
+
+```yaml
+networkPolicy:
+  api:
+    from:
+      - podSelector: {}
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+```
+
+Enabling `ingress.api` or `ingress.portal` without naming where its traffic comes from is refused at
+render, because it would otherwise install and time out. A route created outside the chart — a
+Gateway API `HTTPRoute`, say — is not something the chart can see: **name its gateway's namespace
+before upgrading a deployment that is reached through one**, or the upgrade closes it.
+
+What this does not do: it restricts nothing the pods call, and on a cluster whose network plugin
+enforces no NetworkPolicy it restricts nothing at all. The only proof that it is enforced is a
+refused connection — from a pod in another namespace, `nc -z -w 4 <release>-taisce-manage.<namespace> 8081`
+should time out. If the operator runs somewhere other than `cnpg-system`, say so in
+`networkPolicy.database.operatorNamespace`, or the database will run with nobody managing it.
+
 ## Removing it
 
 ```sh
@@ -325,4 +361,6 @@ was force-deleted, which is faster than a machine that stops answering and slowe
 
 Proved by `deploy/helm/chart_test.go`: the defaults render three instances, two replicas, no ingress,
 generated and kept passwords, non-root containers, TLS to the database; the shrunk and external
-shapes render only when asked; the portal ingress is refused while the portal is off.
+shapes render only when asked; the portal ingress is refused while the portal is off. `deploy/helm/networkpolicy_test.go`
+holds who is admitted where, that an emptied list admits nobody, and that an ingress nobody could
+arrive through is refused.
