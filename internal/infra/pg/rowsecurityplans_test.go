@@ -48,6 +48,10 @@ func TestARowSecurityPolicyTakesTheIndexFromAReadOfThePast(t *testing.T) {
 	const versions, pastFacts = 2000, 5000
 	ctx := context.Background()
 	pool := testPool(t)
+	// The roles first, so the namespace is granted to the role the statements are planned as.
+	if err := migrate.EstablishPlanes(ctx, pool, "taisce-test-control", "taisce-test-data"); err != nil {
+		t.Fatal(err)
+	}
 	schema := tenant(t, pool, "row_security_plans")
 	defer pool.Exec(ctx, "DROP SCHEMA "+schema.String()+" CASCADE")
 
