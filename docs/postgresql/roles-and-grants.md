@@ -334,8 +334,18 @@ What the ledger's defences do not cover:
 ## Row-level security
 
 No table enables row-level security, and no policy exists. Neither the migrations nor the code
-contain one. One memory login serves every project, so a role-based policy would have nothing to
-distinguish between.
+contain one.
+
+One memory login serves every project, so a policy keyed on the role would have nothing to
+distinguish between. A policy keyed on a setting the transaction states would, and it was built and
+measured before being turned down ([D60](../decisions/D60.md)). On a table with a policy,
+PostgreSQL lets a condition drive an index only if its operator is marked leakproof. Equality is,
+so a current read was unchanged. A range containing a moment is not, so a read of what was valid or
+believed at a moment stopped finding its version by index and read every candidate instead: 5,001
+facts where it had read 1, and 2,000 versions of a fact where it had read 1.
+`TestARowSecurityPolicyTakesTheIndexFromAReadOfThePast`
+([rowsecurityplans_test.go](../../internal/infra/pg/rowsecurityplans_test.go)) holds that
+measurement, and fails on a database where it is no longer true.
 
 Project isolation inside the memory namespace comes from two things:
 
