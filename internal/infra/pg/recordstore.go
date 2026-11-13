@@ -93,6 +93,13 @@ func (s *RecordStore) List(ctx context.Context, scope, subject string, after *Re
 	if err != nil {
 		return out, fmt.Errorf("list records: %w", err)
 	}
+	return readRecordPage(rows, limit)
+}
+
+// readRecordPage takes one row more than the page was asked for as the sign that another page
+// exists, and never returns it: the cursor is the last record the caller was given.
+func readRecordPage(rows pgx.Rows, limit int) (RecordPage, error) {
+	out := RecordPage{Records: make([]RecordSummary, 0)}
 	defer rows.Close()
 	for rows.Next() {
 		if len(out.Records) == limit {
@@ -118,22 +125,136 @@ const recordListSQL = `WITH page AS MATERIALIZED (
  SELECT fact_id FROM {schema}.fact WHERE scope=$1 AND fact_id {comparison} $2::uuid
    AND (retention_until IS NULL OR retention_until > now())
  ORDER BY fact_id LIMIT $3
-)
+)` + recordSummarySQL
+
+const subjectRecordListSQL = `WITH page AS MATERIALIZED (
+ SELECT DISTINCT fact_ref AS fact_id FROM {schema}.projection_dependency
+ WHERE scope=$1 AND data_subject_id=$5 AND projection_kind='fact' AND fact_ref {comparison} $2::uuid
+ ORDER BY fact_ref LIMIT $3
+)` + recordSummarySQL
+
+// What a record summary is, read once for every way a page is selected. The project is named again
+// on the join, so a page selected by any path cannot return a row of another project.
+const recordSummarySQL = `
 SELECT f.version::text,f.fact_id::text,f.subject_entity_id::text,f.object_entity_id::text,f.predicate,
  left(f.statement,$4),octet_length(f.statement),f.source_role,f.recorded_at,
  CASE WHEN NOT upper_inf(f.known) THEN CASE WHEN EXISTS(SELECT 1 FROM {schema}.record_retraction rr WHERE rr.scope=f.scope AND rr.target_fact_id=f.fact_id) THEN 'retracted' ELSE 'knowledge_closed' END WHEN NOT upper_inf(f.valid) THEN 'validity_closed' ELSE 'current' END
  FROM page p JOIN {schema}.fact f ON f.scope=$1 AND f.fact_id=p.fact_id
  ORDER BY f.fact_id`
 
-const subjectRecordListSQL = `WITH page AS MATERIALIZED (
- SELECT DISTINCT fact_ref FROM {schema}.projection_dependency
- WHERE scope=$1 AND data_subject_id=$5 AND projection_kind='fact' AND fact_ref {comparison} $2::uuid
- ORDER BY fact_ref LIMIT $3
-)
-SELECT f.version::text,f.fact_id::text,f.subject_entity_id::text,f.object_entity_id::text,f.predicate,
- left(f.statement,$4),octet_length(f.statement),f.source_role,f.recorded_at,
- CASE WHEN NOT upper_inf(f.known) THEN CASE WHEN EXISTS(SELECT 1 FROM {schema}.record_retraction rr WHERE rr.scope=f.scope AND rr.target_fact_id=f.fact_id) THEN 'retracted' ELSE 'knowledge_closed' END WHEN NOT upper_inf(f.valid) THEN 'validity_closed' ELSE 'current' END
- FROM page p JOIN {schema}.fact f ON f.scope=$1 AND f.fact_id=p.fact_ref ORDER BY f.fact_id`
+// ListAbout pages the facts that hold now and name one entity, as their subject or as their
+// object, in the order and with the cursor List uses. It answers "what is held about this thing"
+// without a question, which a recall cannot: a recall is a sample, cut at a fanout and a budget.
+//
+// It lists what holds now and not what stopped. The only indexes that keep an entity's facts in
+// fact_id order are the two the walk reads, and they are partial on exactly that predicate. Paging
+// the closed facts as well needs two more indexes over every version of every fact, maintained on
+// every write and every close; the register records what that was measured to cost and why it is
+// not paid. A closed fact stays on the unfiltered listing and at its own history.
+//
+// An entity belongs to one project. An id from another project, and an id nothing has, both return
+// an empty page: the project is a predicate on every arm and again on the join, so there is no
+// answer that tells the two apart.
+func (s *RecordStore) ListAbout(ctx context.Context, scope, entity, subject string, after *RecordCursor, limit int) (RecordPage, error) {
+	out := RecordPage{Records: make([]RecordSummary, 0)}
+	query, args, err := entityRecordListQuery(scope, entity, subject, after, limit)
+	if err != nil {
+		return out, err
+	}
+	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, orderedSeekSQL); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, s.schema.SQL(query), args...)
+		if err != nil {
+			return err
+		}
+		out, err = readRecordPage(rows, limit)
+		return err
+	})
+	if err != nil {
+		return RecordPage{Records: make([]RecordSummary, 0)}, fmt.Errorf("list records about an entity: %w", err)
+	}
+	return out, nil
+}
+
+// entityRecordListQuery renders the statement and its arguments, so a plan test measures the
+// statement that runs. Every refusal is the listing's own: a caller cannot tell a bad entity id
+// from a bad cursor, and needs no second code to handle.
+func entityRecordListQuery(scope, entity, subject string, after *RecordCursor, limit int) (string, []any, error) {
+	if _, err := NewSchema(scope); err != nil || limit < 1 || limit > MaxRecordPage || len(subject) > MaxRecordSubjectBytes || !utf8.ValidString(subject) || (subject != "" && strings.TrimSpace(subject) == "") {
+		return "", nil, ErrInvalidRecordPage
+	}
+	// The nil UUID names no entity. Accepting it would make an absent filter and a filter on nothing
+	// two spellings a caller could confuse, one listing the project and one listing nothing.
+	entityID, err := uuid.Parse(entity)
+	if err != nil || entityID == uuid.Nil {
+		return "", nil, ErrInvalidRecordPage
+	}
+	cursor := uuid.Nil.String()
+	comparison := ">="
+	if after != nil {
+		id, err := uuid.Parse(after.ID)
+		if err != nil {
+			return "", nil, ErrInvalidRecordPage
+		}
+		cursor = id.String()
+		comparison = ">"
+	}
+	args := []any{scope, cursor, limit + 1, RecordPreviewCharacters, entityID.String()}
+	narrowed := ""
+	if subject != "" {
+		narrowed = entityRecordSubjectSQL
+		args = append(args, subject)
+	}
+	query := strings.ReplaceAll(entityRecordListSQL, "{subject}", narrowed)
+	return strings.ReplaceAll(query, "{comparison}", comparison), args, nil
+}
+
+// One arm for each side of a fact, each an ordered seek that stops at the page, merged in fact_id
+// order. `subject=$5 OR object=$5` would be one statement and no order: two indexes cannot be read
+// as one sequence, so every current fact of the entity would be fetched and sorted to keep a page.
+// UNION and not UNION ALL, because a fact whose subject and object are the same entity is in both
+// arms and is one record.
+//
+// The current-fact predicate is spelled exactly as the walk indexes' own (0065), which is what lets
+// them be used. Retention is checked on each row read, not in an index: facts past their retention
+// and not yet swept are read past, as they are on the walk.
+const entityRecordListSQL = `WITH page AS MATERIALIZED (
+ SELECT fact_id FROM (
+  (SELECT f.fact_id FROM {schema}.fact f
+    WHERE f.scope=$1 AND f.subject_entity_id=$5::uuid AND upper_inf(f.valid) AND upper_inf(f.known)
+      AND f.fact_id {comparison} $2::uuid AND (f.retention_until IS NULL OR f.retention_until > now()){subject}
+    ORDER BY f.fact_id LIMIT $3)
+  UNION
+  (SELECT f.fact_id FROM {schema}.fact f
+    WHERE f.scope=$1 AND f.object_entity_id=$5::uuid AND upper_inf(f.valid) AND upper_inf(f.known)
+      AND f.fact_id {comparison} $2::uuid AND (f.retention_until IS NULL OR f.retention_until > now()){subject}
+    ORDER BY f.fact_id LIMIT $3)
+ ) either ORDER BY fact_id LIMIT $3
+)` + recordSummarySQL
+
+// The data-subject predicate is the one the subject listing applies — a registered source of that
+// subject supports the fact — asked of each fact the entity's arm reads. No index holds a subject's
+// facts by entity, so this narrows after the seek: a page costs the entity's current facts up to
+// where the page fills, and all of them when the subject holds few. That is a stated limit with a
+// test named for it, not a bound.
+const entityRecordSubjectSQL = `
+      AND EXISTS (SELECT 1 FROM {schema}.projection_dependency d
+                   WHERE d.scope=$1 AND d.data_subject_id=$6 AND d.projection_kind='fact' AND d.fact_ref=f.fact_id)`
+
+// orderedSeekSQL holds a page to reading a page. Each arm asks for the first rows of an order an
+// index already keeps, and the planner is free to fetch every matching row and sort instead. It
+// does so when it estimates that fewer rows remain than the page asks for — and it has no
+// statistic for "current", so near the end of a busy entity's facts its estimate is low by a
+// constant factor. Measured at an entity with 10,000 current facts: 1,561 rows read for a page of
+// 100, against 102 with this in force.
+//
+// The alternative was to leave the choice to the planner and state the cost as a limit. That makes
+// the bound a property of an estimate, which holds on the fixture it was measured on. Transaction-
+// local, so it reaches no other statement on the connection; it removes two plan shapes and leaves
+// the choice of index alone.
+const orderedSeekSQL = `SELECT set_config('enable_sort','off',true), set_config('enable_bitmapscan','off',true)`
 
 type RecordTemporalState struct {
 	Valid CitationInterval `json:"valid"`

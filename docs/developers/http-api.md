@@ -715,7 +715,7 @@ func listRecords(subject string) error {
 
 | Call | Send | Get back |
 |---|---|---|
-| `POST /v1/records/list` | `data_subject_id` (optional), `limit` (1–100, default 20), `after` | `records[]`, each with `id`, `version`, `predicate`, `statement_preview`, `statement_bytes`, `preview_truncated`, `source_role`, `recorded_at`, `status`, `subject_entity_id`, `object_entity_id`; plus `next` |
+| `POST /v1/records/list` | `data_subject_id` (optional), `entity_id` (optional: only the current facts naming that entity), `limit` (1–100, default 20), `after` | `records[]`, each with `id`, `version`, `predicate`, `statement_preview`, `statement_bytes`, `preview_truncated`, `source_role`, `recorded_at`, `status`, `subject_entity_id`, `object_entity_id`; plus `next` |
 | `POST /v1/records/history` | `id`, `limit`, `before` | `id`, `version`, `current`, `previous[]`, `retraction`, `next` |
 | `POST /v1/entities/list` | `limit`, `after` | `entities[]` and `next` |
 | `POST /v1/entities/get` | `id` | One entity: `id`, `identity_kind`, `canonical_name`, `aliases`, `first_seen_at` |
