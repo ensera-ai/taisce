@@ -80,6 +80,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -386,12 +387,49 @@ func TestTheExtractionCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load vocabulary: %v", err)
 	}
+	// What each call wrote back, by the provider's own count. The ceiling a request states is set
+	// from this, so the run that checks the prompt is also the run that says how much room a reply
+	// needs — and a later prompt edit that makes replies longer shows here before it is cut.
+	var spent struct {
+		sync.Mutex
+		largest, calls, unreported int64
+		cut                        int
+	}
+	config.Metered = func(call inference.Call) {
+		spent.Lock()
+		defer spent.Unlock()
+		spent.calls++
+		if !call.Reported {
+			spent.unreported++
+		}
+		if call.Cut {
+			spent.cut++
+		}
+		spent.largest = max(spent.largest, call.CompletionTokens)
+	}
+	t.Cleanup(func() {
+		t.Logf("what the model wrote back: %d calls, largest reply %d tokens, %d cut at a ceiling, %d with no count from the provider",
+			spent.calls, spent.largest, spent.cut, spent.unreported)
+		if spent.cut > 0 {
+			t.Errorf("%d replies were cut at the ceiling, so the ceiling is below what this corpus needs", spent.cut)
+		}
+	})
 	extractor := extract.New(inference.NewModel(config), vocabulary)
 
 	var fixed []string
 	for _, c := range corpus() {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
+			spent.Lock()
+			before := spent.largest
+			spent.largest = 0
+			spent.Unlock()
+			defer func() {
+				spent.Lock()
+				t.Logf("message of %d bytes; largest reply %d tokens", len(c.content), spent.largest)
+				spent.largest = max(spent.largest, before)
+				spent.Unlock()
+			}()
 			message := domain.Message{
 				Ordinal: 0, Role: domain.RoleUser, Content: c.content,
 				OccurredAt: time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC),

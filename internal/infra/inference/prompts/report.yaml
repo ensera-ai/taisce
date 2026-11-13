@@ -13,6 +13,13 @@ model_contract:
   # temperature above zero would make every rebuild a slightly different claim about somebody's life.
   temperature: 0
   response_format: json_object
+  # How much the model may write back, relative to the material it was given (see extraction.yaml
+  # for why relative). Measured 2026-11-13 against deepseek-flash: 1,242 tokens for 4 facts,
+  # 1,368 for 30, 3,532 for 120 — a floor of about 1,200 whatever the size, then roughly a third of
+  # a token for each byte of statements and quotes.
+  reply_tokens:
+    base: 4096
+    per_input_byte: 1
 
 # What the model is for. Deliberately narrow: it is describing material it has been handed, and the
 # one failure that matters is a report that says something the material does not.

@@ -35,8 +35,9 @@ const relationsPlaceholder = "{{relations}}"
 // is the one whose absence produces no error and no visible change until somebody plants a fact.
 type promptFile struct {
 	ModelContract struct {
-		Temperature    float32 `yaml:"temperature"`
-		ResponseFormat string  `yaml:"response_format"`
+		Temperature    float32        `yaml:"temperature"`
+		ResponseFormat string         `yaml:"response_format"`
+		ReplyTokens    replyAllowance `yaml:"reply_tokens"`
 	} `yaml:"model_contract"`
 
 	Task         string `yaml:"task"`
@@ -98,6 +99,9 @@ func loadPrompt(raw []byte) (promptFile, error) {
 	if p.ModelContract.ResponseFormat == "" {
 		return promptFile{}, fmt.Errorf("model_contract.response_format is missing")
 	}
+	if err := p.ModelContract.ReplyTokens.stated(); err != nil {
+		return promptFile{}, err
+	}
 	return p, nil
 }
 
@@ -147,8 +151,9 @@ func renderVocabulary(vocabulary domain.Ontology) string {
 // change until somebody plants an instruction in a quote.
 type reportPromptFileShape struct {
 	ModelContract struct {
-		Temperature    float32 `yaml:"temperature"`
-		ResponseFormat string  `yaml:"response_format"`
+		Temperature    float32        `yaml:"temperature"`
+		ResponseFormat string         `yaml:"response_format"`
+		ReplyTokens    replyAllowance `yaml:"reply_tokens"`
 	} `yaml:"model_contract"`
 
 	Task         string `yaml:"task"`
@@ -180,6 +185,9 @@ func loadReportPrompt(raw []byte) (reportPromptFileShape, error) {
 	}
 	if p.ModelContract.ResponseFormat == "" {
 		return reportPromptFileShape{}, fmt.Errorf("model_contract.response_format is missing")
+	}
+	if err := p.ModelContract.ReplyTokens.stated(); err != nil {
+		return reportPromptFileShape{}, err
 	}
 	return p, nil
 }
