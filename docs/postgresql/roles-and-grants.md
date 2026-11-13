@@ -343,6 +343,36 @@ Project isolation inside the memory namespace comes from two things:
 - composite keys that include `scope` keep writes consistent within one project
   ([0023](../../internal/migrate/sql/0023_relationships_agree_on_the_project.sql)).
 
+### What checks the first of those
+
+The first is a rule every statement has to remember, and nothing in the database refuses one that
+forgot: it is valid, and it reaches every project's rows. So the statements are read.
+`TestEveryStatementTiesTheProjectOfEachScopedTableItNames`
+([scopepredicate_test.go](../../internal/infra/pg/scopepredicate_test.go)) reads every statement the
+store packages can issue from their source, asks the migrated schema which tables have a `scope`
+column, and fails on a reference to one whose project the statement ties to nothing.
+
+A statement that is right without the predicate is listed in that file with its reason. Where the
+reason is a fact about the schema, the test asks the database whether it still holds:
+
+| Reason | What is checked |
+|---|---|
+| It addresses one row by a key unique across the instance | A unique index on exactly those columns, with no predicate |
+| It reaches the row through a key that carries the project | A foreign key between the two tables that includes `scope` |
+| It is meant to span projects, or is finished at run time | The reason is stated; nothing checks it |
+
+An entry that no longer matches a statement fails as well.
+
+Its first run found a statement that was wrong. A retention sweep removed a turn's projections by
+identifier alone, and a chunk, a segment and an artifact are unique by project *and* identifier — an
+artifact's is chosen by whoever stores it. A sweep of one project therefore removed another project's
+artifact of the same identifier, unexpired and unswept.
+`TestASweepOfOneProjectLeavesAnotherProjectsRowWithTheSameIdentifier` holds the fix.
+
+What the check is not: it reads text. A predicate that is present and wrong satisfies it, and a
+statement assembled at run time is judged in pieces. It makes a convention a checked convention; it
+does not make it a boundary, which is what a policy in the database would be.
+
 [The security page](../architecture/security.md) covers the tests. The grants do not isolate projects
 from a compromised process that already holds the memory login. Within the memory namespace, the
 project boundary is enforced by the application, not by the database.
