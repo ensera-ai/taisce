@@ -5,6 +5,7 @@ package formation_test
 
 import (
 	"context"
+	"github.com/google/uuid"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -41,8 +42,8 @@ func TestFormationHealthTracksActualAttemptsAndRecovery(t *testing.T) {
 	if err := store.Park(ctx, schema, obs.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Unpark(ctx, schema, obs.ID); err != nil {
-		t.Fatal(err)
+	if changed, err := store.UnparkAudited(ctx, schema, "p1", obs.ID, uuid.NewString()); err != nil || !changed {
+		t.Fatalf("unpark: %v %v", changed, err)
 	}
 	working := formation.NewDriver(workerWith(t, pool, schema, scriptedModel{}, impatient()), store, pg.NewRetentionStore(pool, schema), pg.NewAuditStore(pool, schema), schema, impatient(), quietLogger())
 	if pass, err := working.Once(ctx); err != nil || pass.Formed != 1 {

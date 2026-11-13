@@ -194,7 +194,6 @@ A few more rules:
   first thing to check when a bundle looks wrong.
 
 Query plans for the anchor statement are in [exact anchoring: query plans](../28-anchor-query-plans.md).
-Its alias columns describe an earlier two-index layout.
 
 ### Walking the facts
 

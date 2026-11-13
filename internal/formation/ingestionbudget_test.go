@@ -6,6 +6,7 @@ package formation_test
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -68,8 +69,8 @@ func TestProviderOutageCannotGrowTheBacklogByParkingAndRecoveryRestoresAdmission
 	}
 	recovered.Store(true)
 	for _, o := range observations {
-		if err := store.Unpark(ctx, schema, o.ID); err != nil {
-			t.Fatal(err)
+		if changed, err := store.UnparkAudited(ctx, schema, "p1", o.ID, uuid.NewString()); err != nil || !changed {
+			t.Fatalf("unpark: %v %v", changed, err)
 		}
 	}
 	if _, err := driver.Once(ctx); err != nil {

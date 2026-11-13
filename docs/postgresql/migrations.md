@@ -354,6 +354,12 @@ without moving it.
   carries migration `0082`, a process more than one release behind stands down by itself (next
   section). A process older than that release never looks, and nothing stops it serving on a schema
   that has dropped what it reads.
+- **A break that shows only sometimes.** The suite it runs is the previous release's, at its tag,
+  and cannot be edited. A test in it that depends on timing would fail the check at its own rate on
+  every change and blame the schema each time. So a package that fails is run once more: a failure
+  that repeats refuses the change, and one that does not is printed, named as a second run, and
+  does not. What a schema breaks it breaks every time; what this gives up is a race between a test
+  and something a migration changed. The first failure is always in the output.
 - **Locks and duration**, as the table says.
 
 ### The check, run against a real release — 2026-11-12

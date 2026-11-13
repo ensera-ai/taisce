@@ -183,9 +183,9 @@ trigger requires it to normalize to its entity's `normalized_name`
 [0051](../../internal/migrate/sql/0051_canonical_names_are_the_exact_anchor_key.sql)). So the canonical
 key already matches every recorded spelling, and one B-tree probe per term is the whole lookup.
 
-[28-anchor-query-plans.md](../28-anchor-query-plans.md) records the plan comparison that led to separate
-indexable lookups rather than one combined query. Its alias-lookup rows describe the schema before
-0051, when aliases still had their own GIN index.
+[28-anchor-query-plans.md](../28-anchor-query-plans.md) records the plans of that lookup as the test
+logs them: one probe of `entity_named_identity_uniq` per term, with the project and the name in the
+index condition.
 
 ## Vector indexes
 

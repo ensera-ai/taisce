@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"log/slog"
 	"os"
@@ -579,8 +580,8 @@ func TestUnparkingReturnsTheTurnAndCorrectsTheWatermark(t *testing.T) {
 		}
 	}
 
-	if err := observations.Unpark(ctx, schema, stored.ID); err != nil {
-		t.Fatalf("unpark: %v", err)
+	if changed, err := observations.UnparkAudited(ctx, schema, "p1", stored.ID, uuid.NewString()); err != nil || !changed {
+		t.Fatalf("unpark: %v %v", changed, err)
 	}
 	fresh, err := observations.Freshness(ctx, schema, "p1")
 	if err != nil {
@@ -898,9 +899,9 @@ func TestRecordingAFailureAgainstAFormedOrAbsentTurnIsANoOp(t *testing.T) {
 	if len(parked) != 0 {
 		t.Fatalf("a formed turn was parked")
 	}
-	// And an observation that does not exist at all.
-	if err := observations.Unpark(ctx, schema, "00000000-0000-0000-0000-000000000000"); err != nil {
-		t.Fatalf("unparking an absent turn errored: %v", err)
+	// And an observation that does not exist at all: named as not found, and nothing changed.
+	if changed, err := observations.UnparkAudited(ctx, schema, "p1", "00000000-0000-0000-0000-000000000000", uuid.NewString()); changed || !errors.Is(err, pg.ErrFormationTurnNotFound) {
+		t.Fatalf("unparking an absent turn: %v %v", changed, err)
 	}
 }
 

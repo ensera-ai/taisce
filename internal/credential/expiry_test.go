@@ -12,10 +12,14 @@ import (
 	"github.com/ensera-ai/taisce/internal/migrate"
 )
 
-// brief is a lifetime short enough to outlive inside a test and long enough that the credential is
-// certainly alive when it is first resolved. The credential really expires, by the database's
-// clock; no row is edited to pretend it did.
-const brief = 600 * time.Millisecond
+// brief is a lifetime short enough to outlive inside a test. The credential really expires, by the
+// database's clock; no row is edited to pretend it did.
+//
+// Two seconds, and everything that must happen while a credential is alive is asserted straight
+// after it is issued. At 600 milliseconds with three more statements in between, a runner that had
+// just finished the rest of the suite took longer than the lifetime to get there: the credential
+// had expired, correctly, and the test reported it missing.
+const brief = 2 * time.Second
 
 // TestACredentialPastItsExpiryIsRefusedExactlyAsARevokedOneIs holds the expiry to the one answer
 // every refused token gets, at each door.
@@ -34,6 +38,17 @@ func TestACredentialPastItsExpiryIsRefusedExactlyAsARevokedOneIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// While it lives it resolves, and the grant says when it will stop.
+	if got, err := s.Resolve(ctx, expiring); err != nil || got.ExpiresAt == nil || !got.ExpiresAt.Equal(*grant.ExpiresAt) {
+		t.Fatalf("a credential inside its lifetime must resolve and carry its expiry: %+v %v", got, err)
+	}
+	if _, err := s.ResolveOperator(ctx, operator); err != nil {
+		t.Fatalf("an operator credential inside its lifetime must resolve: %v", err)
+	}
+	if _, known := credential.NewStore(registry(t), string(migrate.ControlSchema)).Known(ctx, expiring, credential.KindProject); !known {
+		t.Fatal("a live credential is not in the set of credentials the instance issued")
+	}
+
 	revoked, revokedGrant, err := s.Issue(ctx, "revoked-for-comparison", "alpha")
 	if err != nil {
 		t.Fatal(err)
@@ -44,17 +59,6 @@ func TestACredentialPastItsExpiryIsRefusedExactlyAsARevokedOneIs(t *testing.T) {
 	dateless, _, err := s.Issue(ctx, "has-no-date", "alpha")
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// While it lives it resolves, and the grant says when it will stop.
-	if got, err := s.Resolve(ctx, expiring); err != nil || got.ExpiresAt == nil || !got.ExpiresAt.Equal(*grant.ExpiresAt) {
-		t.Fatalf("a credential inside its lifetime must resolve and carry its expiry: %+v %v", got, err)
-	}
-	if _, err := s.ResolveOperator(ctx, operator); err != nil {
-		t.Fatalf("an operator credential inside its lifetime must resolve: %v", err)
-	}
-	if _, known := credential.NewStore(registry(t), string(migrate.ControlSchema)).Known(ctx, expiring, credential.KindProject); !known {
-		t.Fatal("a live credential is not in the set of credentials the instance issued")
 	}
 
 	time.Sleep(brief + 300*time.Millisecond)
