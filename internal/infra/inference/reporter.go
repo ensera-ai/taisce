@@ -63,7 +63,7 @@ func NewReporter(config Config) *Reporter {
 // Write asks the model to describe one community.
 func (r *Reporter) Write(ctx context.Context, c report.Context) (report.Report, error) {
 	material := renderContext(c)
-	ceiling := r.config.MaxOutputTokens
+	ceiling := r.config.ceilingFor(reportPrompt.ModelContract.ReplyTokens, len(material))
 	body, err := json.Marshal(chatRequest{
 		MaxTokens:      ceiling,
 		Model:          r.config.Model,

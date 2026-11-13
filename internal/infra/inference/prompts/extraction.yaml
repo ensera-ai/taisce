@@ -18,6 +18,18 @@
 model_contract:
   temperature: 0
   response_format: json_object
+  # How much the model may write back: a base, and an amount for each byte of the message it was
+  # given. Relative to the message, because a fixed number is either too low for a message that
+  # asserts a great deal or too high to bound one that only asks for a long answer.
+  #
+  # Measured 2026-11-13 against deepseek-flash. The regression corpus, whose messages are 23 to 212
+  # bytes: 57 replies, the largest 856 tokens. Dense messages, one claim a sentence: 2,707 tokens
+  # for 592 bytes, 8,642 for 2,399, 24,753 for 7,228 — between 3.4 and 4.6 tokens a byte. The base
+  # is about twice the largest short reply and the rate about twice the densest, so that the
+  # ceiling is met by a reply that has gone wrong and not by one that is merely full.
+  reply_tokens:
+    base: 2048
+    per_input_byte: 8
 
 # What the model is being asked to do.
 task: |-

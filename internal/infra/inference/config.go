@@ -49,12 +49,13 @@ const (
 	// and it should need one variable.
 	EnvEmbeddingEndpoint = "TAISCE_INFERENCE_EMBEDDING_ENDPOINT"
 	EnvEmbeddingAPIKey   = "TAISCE_INFERENCE_EMBEDDING_API_KEY"
-	// EnvMaxOutputTokens is the most a generation model may write back for one call. Unset, nothing
-	// is stated and the provider's own limit applies.
+	// EnvMaxOutputTokens is the most a generation model may write back for one call, when the
+	// operator states it. Unset, each request states what its prompt allows a reply to what it was
+	// given (replyAllowance), so no call is ever sent without a ceiling.
 	//
-	// The operator's to set because the right number depends on the model: one that reasons before
-	// it answers spends the allowance on reasoning, and a ceiling that suits one model returns
-	// nothing at all from another. The token counts on the scrape are what to choose it from.
+	// The operator's to set because one kind of model needs it: a model that reasons before it
+	// answers spends the allowance on reasoning, and the prompt's own figure, measured on a model
+	// that does not, may return nothing from one that does. A value here replaces the prompt's.
 	EnvMaxOutputTokens = "TAISCE_INFERENCE_MAX_OUTPUT_TOKENS"
 )
 
@@ -87,8 +88,8 @@ type Config struct {
 	// to its turn budget so that the deadline that fires is the one the operator configured and
 	// the one the failure reports, rather than a second, lower number hidden in the client.
 	Timeout time.Duration
-	// MaxOutputTokens, when positive, is the ceiling stated on every generation request. Zero states
-	// none, and the provider's own limit applies.
+	// MaxOutputTokens, when positive, is the ceiling stated on every generation request. Zero leaves
+	// each request to state what its prompt allows.
 	MaxOutputTokens int
 	// Metered is told what each generation call cost, as far as the provider said. Optional. Called
 	// for a reply that is then refused as well as for one that is used, because both were paid for.

@@ -308,11 +308,16 @@ rate(taisce_model_replies_cut_total[15m])
   nothing to show the other half was lost. So it is a failed attempt, the turn is tried again, and a
   turn that is cut every time is parked where you can see it. The reply's tokens are still counted:
   it was paid for.
-- **No ceiling is stated unless you state one**, with `TAISCE_INFERENCE_MAX_OUTPUT_TOKENS`. The right
-  number depends on the model. One that reasons before it answers spends the allowance on its
-  reasoning: asked for a single word under a ceiling of 64 tokens, such a model returned an empty
-  reply. See [D46](decisions/D46.md). Watch `taisce_model_completion_tokens_total` for a while, set a ceiling well above what
-  you see, and watch `taisce_model_replies_cut_total` stay at zero.
+- **Every call states a ceiling.** Unless you state one, it is what the prompt allows a reply to
+  what it was given: a base, plus an amount for each byte the model read. A short message that asks
+  for a long answer is held to a short one; a long message that asserts a great deal is allowed the
+  reply it needs. The figures are in each prompt file and were measured on 2026-11-13
+  ([D65](decisions/D65.md)).
+- **State your own for a model that reasons before it answers**, with
+  `TAISCE_INFERENCE_MAX_OUTPUT_TOKENS`. Such a model spends the allowance on its reasoning: asked for
+  a single word under a ceiling of 64 tokens, one returned an empty reply. Your number replaces the
+  prompt's on every call. Watch `taisce_model_completion_tokens_total` for a while, set it well above
+  what you see, and watch `taisce_model_replies_cut_total` stay at zero.
 
 **Where the numbers come from, and what that costs.** A request is timed in the API process and a
 turn in the worker, and the scrape is answered by the management process. Each process counts in

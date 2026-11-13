@@ -13,6 +13,12 @@ model_contract:
   # should say the same thing about what survived.
   temperature: 0
   response_format: json_object
+  # How much the model may write back, relative to the material it was given (see extraction.yaml
+  # for why relative). A summary is shorter than what it summarises. Measured 2026-11-13 against
+  # deepseek-flash: 138 tokens for 774 characters of material, 1,374 for 7,865, 872 for 52,848.
+  reply_tokens:
+    base: 2048
+    per_input_byte: 0.5
 
 task: |-
   You are condensing a stretch of somebody's conversation history into a summary that will stand in
