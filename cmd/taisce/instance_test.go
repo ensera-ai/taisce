@@ -284,6 +284,31 @@ func TestAProcessWaitingForAMigrationSaysSoOnceAndOnceWhenItEnds(t *testing.T) {
 	}
 }
 
+// TestAProcessMoreThanOneReleaseBehindSaysSoOnce holds the other reason a process is not ready to
+// being said where an operator looks, once, and in words that do not suggest waiting.
+func TestAProcessMoreThanOneReleaseBehindSaysSoOnce(t *testing.T) {
+	var logged bytes.Buffer
+	w := &schemaWait{}
+	log := slog.New(slog.NewTextHandler(&logged, nil))
+	old := fmt.Errorf("%w: it was built for version 70, the schema is at version 82 and serves binaries built for 78 or later", pg.ErrBinaryBehind)
+	for i := 0; i < 5; i++ {
+		if err := w.note(log, old); !errors.Is(err, pg.ErrBinaryBehind) {
+			t.Fatalf("the reason for not being ready was not passed on: %v", err)
+		}
+	}
+	if n := strings.Count(logged.String(), "not ready"); n != 1 {
+		t.Fatalf("five probes logged the reason %d times:\n%s", n, logged.String())
+	}
+	for _, want := range []string{"level=ERROR", "built for version 70", "78 or later", "one release at a time"} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("the line does not say %q:\n%s", want, logged.String())
+		}
+	}
+	if strings.Contains(logged.String(), "becomes ready on its own") {
+		t.Errorf("a process that is too old was told to wait:\n%s", logged.String())
+	}
+}
+
 // A generation call is counted under its purpose, and one the provider said nothing about is counted
 // as unknown rather than as free.
 func TestGenerationCallsAreCountedByPurposeAndUnknownIsNotZero(t *testing.T) {

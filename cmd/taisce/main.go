@@ -574,6 +574,9 @@ func startDriver(ctx context.Context, log *slog.Logger, memory *pgxpool.Pool, sc
 type schemaWait struct {
 	mu      sync.Mutex
 	waiting bool
+	// outdated is set once this process has said it is more than one release behind the schema.
+	// It does not clear: nothing a migration does makes an old binary newer.
+	outdated bool
 }
 
 func (w *schemaWait) note(log *slog.Logger, err error) error {
@@ -581,7 +584,13 @@ func (w *schemaWait) note(log *slog.Logger, err error) error {
 	w.mu.Lock()
 	changed := behind != w.waiting
 	w.waiting = behind
+	first := errors.Is(err, pg.ErrBinaryBehind) && !w.outdated
+	w.outdated = w.outdated || first
 	w.mu.Unlock()
+	if first {
+		// The other direction, said once and at a higher level: this does not end by waiting.
+		log.Error("not ready: "+err.Error(), "next", "upgrade one release at a time, or let the roll replace this process")
+	}
 	switch {
 	case changed && behind:
 		log.Warn("not ready: "+err.Error(), "next", "this process becomes ready on its own when the migration commits")

@@ -44,6 +44,9 @@ func ProvisionMemorySchema(ctx context.Context, pool *pgxpool.Pool, name string)
 		if _, err := apply(ctx, on, schema, all); err != nil {
 			return fmt.Errorf("migrate memory namespace %q: %w", name, err)
 		}
+		if err := recordOldestServed(ctx, on, schema); err != nil {
+			return err
+		}
 		return grantMemoryToDataPlane(ctx, on, schema)
 	})
 }

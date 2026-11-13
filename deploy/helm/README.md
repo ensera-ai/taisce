@@ -360,8 +360,11 @@ at the same time. Nothing orders the two, and nothing needs to:
   something the one before had already stopped using.
 
 That holds from one release to the next. **Upgrade one release at a time.** An upgrade that skips a
-release is not promised to roll cleanly: pods two releases old may fail requests until they are
-replaced. To skip, scale `api`, `worker` and `manage` to zero for the upgrade.
+release is not promised to roll cleanly. From the release after 0.7, pods more than one release
+behind report not ready as soon as the migration commits, so they stop taking traffic instead of
+failing requests until they are replaced; for that moment nothing may be ready until the new pods
+are. Pods of 0.7 and earlier do not carry that check and may fail requests during such a roll. To
+skip a release without either, scale `api`, `worker` and `manage` to zero for the upgrade.
 
 Going back is the same promise read the other way: the previous release's image runs on the new
 schema, so `helm rollback` by one release does not need a restore. The schema itself never goes
