@@ -42,6 +42,73 @@ func connectMCP(t *testing.T, h *harness, token string) *mcp.ClientSession {
 	return session
 }
 
+// The recall tool says how to read an absence, in the names a real answer carries.
+//
+// A description is a prompt, and the two ways it goes wrong are both silent: an edit drops the one
+// sentence that told a caller what an empty answer meant, or a field is renamed and the description
+// goes on naming the old one. So this asks a question that names nothing the memory holds, over the
+// protocol, and holds the description to the answer that comes back — every field it must mention is
+// one the answer has, at the path the description gives, and the absence it describes first is the
+// one this answer reports.
+//
+// What it does not hold: that a model acts on the description. That is a property of the model and
+// the host, and nothing here can assert it.
+func TestTheRecallToolSaysHowToReadAnAbsenceInTheFieldsAnAnswerCarries(t *testing.T) {
+	h := newHarness(t, "api_mcp_absence")
+	session := connectMCP(t, h, h.token)
+	ctx := context.Background()
+
+	listed, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var description string
+	for _, tool := range listed.Tools {
+		if tool.Name == "recall" {
+			description = tool.Description
+		}
+	}
+
+	answered, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "recall",
+		Arguments: map[string]any{"question": "Where does Zebediah Quillfeather keep the ledger?"}})
+	if err != nil || answered.IsError {
+		t.Fatalf("recall: %v %+v", err, answered)
+	}
+	var bundle map[string]any
+	if err := json.Unmarshal(mustJSON(t, answered.StructuredContent), &bundle); err != nil {
+		t.Fatal(err)
+	}
+	reach, _ := bundle["reach"].(map[string]any)
+	if named, _ := reach["named_nothing_known"].(bool); !named {
+		t.Fatalf("a question naming nothing this memory holds must say so, got reach %v", bundle["reach"])
+	}
+
+	for _, field := range []string{"reach.named_nothing_known", "reach.neighbourhood_capped", "degraded", "truncated"} {
+		if !strings.Contains(description, field) {
+			t.Fatalf("the recall description does not say how to read %s:\n%s", field, description)
+		}
+		at := bundle
+		parts := strings.Split(field, ".")
+		for i, part := range parts {
+			value, present := at[part]
+			if !present {
+				t.Fatalf("the description names %s and the answer carries no such field: %v", field, bundle)
+			}
+			if i < len(parts)-1 {
+				at, _ = value.(map[string]any)
+			}
+		}
+	}
+	// The one cause of an absence the bundle cannot carry is a turn not formed yet, and the tool that
+	// reports it has to exist under the name the description sends a caller to.
+	if !strings.Contains(description, "freshness") {
+		t.Fatalf("the recall description does not send a caller to freshness:\n%s", description)
+	}
+	if !strings.Contains(strings.Join(api.MCPToolNames(), ","), "freshness") {
+		t.Fatal("the description sends a caller to a tool that is not exposed")
+	}
+}
+
 // The tool list is exactly the six, in the order declared, and none of them deletes: a host reads
 // the list as a menu, and erasure, export and feedback promotion are deliberately absent from it.
 func TestMCPListsExactlyTheSixToolsAndNoneDeletes(t *testing.T) {
