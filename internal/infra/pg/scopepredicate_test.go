@@ -321,8 +321,9 @@ var excused = []excuse{
 	{file: "commands.go", name: "project", untied: []string{"project"},
 		why: "`taisce project list`, over the administrative connection"},
 	{file: "notificationstore.go", name: "Claim", untied: []string{"notification_delivery d", "notification_endpoint e"},
-		why:    "the delivery worker takes the next due delivery in the instance, and reads its endpoint by key",
-		unique: [][2]string{{"notification_delivery", "delivery_id"}, {"notification_endpoint", "endpoint_id"}}},
+		why:      "the delivery worker takes the next due delivery in the instance, and reads its endpoint through the key that carries the project",
+		unique:   [][2]string{{"notification_delivery", "delivery_id"}},
+		together: [][2]string{{"notification_delivery", "notification_endpoint"}}},
 
 	// ── One row, by a key unique across the instance ────────────────────────────────────────
 	{file: "observationstore.go", name: "appendTurnTx", untied: []string{"observation o"},
@@ -345,8 +346,8 @@ var excused = []excuse{
 	{file: "notificationstore.go", name: "Failed", untied: []string{"notification_delivery"},
 		why: "the delivery this worker claimed", unique: [][2]string{{"notification_delivery", "delivery_id"}}},
 	{file: "notificationstore.go", name: "Deliveries", untied: []string{"notification_endpoint e"},
-		why:    "the endpoint of a delivery whose project is named, by the endpoint's key; that the two are in one project is the writer's doing, and no key holds it",
-		unique: [][2]string{{"notification_endpoint", "endpoint_id"}}},
+		why:      "the endpoint of a delivery whose project is named, reached through the key that carries the project",
+		together: [][2]string{{"notification_delivery", "notification_endpoint"}}},
 	{file: "erasurestore.go", name: "erase", untied: []string{"erasure_request"},
 		why: "the request this erasure opened", unique: [][2]string{{"erasure_request", "request_id"}}},
 	{file: "erasurestore.go", name: "Held", untied: []string{"erasure_request"},
