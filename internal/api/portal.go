@@ -740,7 +740,13 @@ func ledgerVerdict(v domain.AuditVerification) (bool, string) {
 	if !v.Valid {
 		return false, "The chain does not verify: " + v.Failure
 	}
-	return true, "The chain holds across " + itoa(v.Seals) + " seal(s) over " + itoa(v.Entries) + " entries, with " + itoa(v.Unsealed) + " entries written since the last seal and covered by nothing yet."
+	verdict := "The chain holds across " + itoa(v.Seals) + " seal(s) over " + itoa(v.Entries) + " entries, with " + itoa(v.Unsealed) + " entries written since the last seal and covered by nothing yet."
+	if v.Archived > 0 {
+		// Said beside the verdict, because "the chain holds" over what is here says nothing of
+		// what left: those entries verify from the files they left in.
+		verdict += " " + strconv.FormatInt(v.Archived, 10) + " earlier entries were archived and are verified from their files, not here."
+	}
+	return true, verdict
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

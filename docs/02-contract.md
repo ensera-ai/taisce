@@ -1219,6 +1219,7 @@ Takes no body.
 | `Unsealed` | integer |
 | `Head` | string |
 | `Failure` | string |
+| `Archived` | integer |
 
 
 ## Refusals

@@ -539,6 +539,13 @@ demand. **Verifying** recomputes the chain.
 - **API:** `POST /manage/v1/audit/seal` and `POST /manage/v1/audit/verify`. Read `Valid` in the answer:
   the call succeeds even when verification fails.
 
+**Archiving** is how the ledger is kept to a size. `taisce audit archive --older-than 2160h --out <file>`
+writes every sealed range older than that to a file and removes it from the ledger, leaving a
+checkpoint the chain continues from. `taisce audit verify-archive --head <digest> <file>` checks such a
+file with no database. It is a command to schedule: nothing archives on its own, and a file you
+discard is a range of the ledger you no longer have
+([how it is kept to a size](../architecture/governance.md#how-it-is-kept-to-a-size)).
+
 Write the head down somewhere the database cannot reach. A rewritten ledger cannot produce a head that
 matches one recorded earlier.
 

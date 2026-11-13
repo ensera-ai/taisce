@@ -866,8 +866,9 @@ superuser.
 - `entries_digest`: SHA-256 over the entries' named fields in a fixed order (`audit_entries_digest`);
 - `digest`: SHA-256 over the previous seal's digest followed by this seal's entries digest.
 
-The first seal chains to 32 zero bytes. Seals are append-only through the same triggers. So rewriting
-a sealed entry changes its seal's digest, and every digest after it.
+The first seal chains to 32 zero bytes. Seals are append-only through the same triggers, with the one
+exception [below](#how-it-is-kept-to-a-size). So rewriting a sealed entry changes its seal's digest,
+and every digest after it.
 
 **Why batches.** Chaining every entry to the one before it would make every recall wait on every
 other. That would be a cost on every call to defend against a rare case.
@@ -879,13 +880,88 @@ digest in `Driver.Run` ([driver.go](../../internal/formation/driver.go)).
 
 - `taisce audit seal` seals on demand, prints the head, and tells you to record it somewhere the
   database cannot reach.
-- `taisce audit verify` recomputes every seal (`AuditStore.Verify`) and reports the first failure by
+- `taisce audit verify` recomputes every seal the ledger holds (`AuditStore.Verify`), starting from
+  the last checkpoint when ranges have been archived, and reports the first failure by
   what it means: an altered entry; a re-linked chain, which is what removing a seal looks like; or a
   seal whose digest disagrees with its own contents. It exits non-zero on failure, and always says how
   many entries no seal covers yet.
 
 With an operator credential, the same two operations are `POST /manage/v1/audit/seal` and
 `/audit/verify`, and each is itself recorded.
+
+### How it is kept to a size
+
+Nothing in the ledger can be changed. Left at that, it is a table that grows with traffic for as
+long as the instance lives, and a verification whose cost grows with it. So one thing may leave: a
+range that is sealed, once it has been written to a file that verifies.
+
+```sh
+taisce audit archive --older-than 2160h --out ledger-2026-11.jsonl
+taisce audit verify-archive --head <digest> ledger-2026-11.jsonl
+```
+
+**`audit archive`** takes every seal written longer ago than `--older-than`, and the entries they
+cover. In order:
+
+1. It writes them to the file, checking each seal against its entries and against the seal before
+   it as it goes. A ledger that does not verify is not archived.
+2. It makes the file durable under its final name. It never writes over a file.
+3. In one transaction it writes a **checkpoint**, removes the range, and records `audit.archive` on
+   the ledger with an operator principal.
+
+Every failure before step 3 leaves the ledger whole. A failure in step 3 leaves the ledger whole and
+a complete export beside it. There is no state in which an entry is in neither.
+
+**The checkpoint** is a row in `audit_checkpoint`: the seal the range ran through, the chain's digest
+at that seal, how many entries and seals left, and the SHA-256 of the file. It is what the chain
+continues from. The next seal chains to it as it would have to the seal that left, and
+`taisce audit verify` starts from it, so what remains verifies to the same head as before
+(`TestASealedRangeLeavesTheLedgerUnderACheckpointAndTheChainStillVerifies`).
+
+**What the database holds to, whoever asks**
+([0079](../../internal/migrate/sql/0079_a_sealed_range_can_leave_the_ledger.sql),
+`TestACheckpointCoversOnlyWhatIsSealedAndOnlyAnOperatorWritesOne`):
+
+- an entry or a seal is deleted only if a checkpoint covers it, and otherwise refused in the words it
+  always was;
+- a checkpoint names a seal the ledger holds, by its last entry and its digest, and runs further than
+  the one before — so nothing unsealed can be covered;
+- a checkpoint is never changed or removed;
+- the memory role holds no privilege to write one, or to delete an entry.
+
+**`audit verify-archive`** checks a file with no database: each seal against its entries, each seal
+against the one before, and the end of the file against `--head`. The file holds each entry as the
+exact line its seal was computed over, so the check is SHA-256 and nothing that depends on how
+PostgreSQL writes a number ([ledgerarchive.go](../../internal/ledgerarchive/ledgerarchive.go)).
+`--head` is the digest the worker logged when the range's last seal was written, or the
+`previous_digest` of the archive that follows. Without it the command says the file was checked
+against itself only, which anybody able to write a file can satisfy.
+
+**The size this gives.** One entry takes about 261 bytes with its three indexes: 126 in the table
+and 135 in the indexes, measured on PostgreSQL 18.6 on 2026-11-13 over 1.1 million entries with a
+36-character principal (`TestALedgerEntryTakesTheBytesItsBoundIsStatedIn` holds it under 300). The
+ledger then holds what was written inside the window, plus what was written since the last archive
+ran:
+
+| Recorded operations | Entries a day | Held with a 90-day window, archived monthly |
+|---|---|---|
+| 1 a second | 86,400 | about 10 million entries, 2.7 GB |
+| 10 a second | 864,000 | about 104 million entries, 27 GB |
+| 100 a second | 8,640,000 | about 1.04 billion entries, 271 GB |
+
+That is arithmetic on a measured size, not a measurement of an instance under that load. A freshness
+poll is not one entry per call ([D56](../decisions/D56.md)).
+
+**What it does not do.**
+
+- **Run itself.** Archiving needs somewhere to put a file, and that is the operator's to choose. It
+  is a command to schedule, not a setting.
+- **Keep the file.** The database cannot see a file. An archive that is discarded has discarded those
+  entries; the ledger then says only how many left and the digest of the file they left in.
+- **Return disk to the operating system.** Removed rows free space inside the table for new entries.
+  The table stops growing at about the size of its window; it does not shrink without a rewrite.
+- **Answer from an archive.** The console's activity view, `LastActed` and the ledger pages read the
+  ledger as it stands. A credential that last acted before the window appears as never having acted.
 
 ### What it proves against someone with database access
 
@@ -912,6 +988,11 @@ controls both halves.
   also insert a bogus seal, which makes verification fail: detectable, but disruptive.
 - **The CLI's direct audit path.** `taisce audit seal` and `verify` over the administrative
   connection do not record themselves, and the worker's periodic seals are recorded only in the log.
+  `taisce audit archive` does record itself, in the transaction that removes the range.
+- **An owner who writes a checkpoint by hand.** The schema stops a checkpoint covering anything
+  unsealed. It cannot stop the owner checkpointing a sealed range without exporting it: the entries
+  are then gone, and what remains is a checkpoint naming a file nobody has. The seal digests in the
+  log still say what the chain was.
 
 ## Operations at a glance
 
@@ -945,6 +1026,8 @@ In the table below:
 | `taisce recover facts` | Operator DB | Restores missing facts and support from receipts | `formation.recover` with an invocation principal, in the transaction |
 | `taisce erasure replay` | Operator DB and the erasure record key | Erases again what a restore returned; receipts under their first identifiers | `erase` per erasure applied, with an invocation principal, after the erasure commits |
 | `taisce formation unpark` | Operator DB, or Operator | Resets one parked turn and its watermark | `formation.unpark`, in the transaction |
+| `taisce audit archive` | Operator DB and a file | Writes a sealed range to a file, a checkpoint, and removes the range | `audit.archive` with an invocation principal, in the transaction |
+| `taisce audit verify-archive` | A file, and no database | Nothing | Nothing |
 | `taisce audit seal`, `verify` | Operator DB | Adds a seal, or nothing | Nothing on the direct path; `audit.seal` or `audit.verify` through `/manage/v1` |
 
 ## Where to go next
