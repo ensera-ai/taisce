@@ -129,16 +129,44 @@ make vuln-released RELEASE=v0.6.1
 ```
 
 Two limits, both deliberate. The scan reads a binary, so it reports vulnerable code that was
-*linked in*, which is wider than code this service calls: a finding is a reason to look, not proof
-that you are exposed. And it covers the service's own binaries, not the PostgreSQL image a release
-also publishes, which is another project's software with its own advisories.
+*linked in*, which is wider than code this service calls. And it covers the service's own binaries,
+not the PostgreSQL image a release also publishes, which is another project's software with its own
+advisories.
+
+So a finding is followed by a second question, answered in the same run and printed in the same
+issue: does the release's own code *call* the vulnerable code? That is decided from the release's
+source at its tag, with the toolchain its binary says it was built by. Calling it is still not proof
+that your deployment can be reached through it. It is the line the patch policy is drawn on.
+
+## The patch policy
+
+What follows a finding, and when.
+
+- **Which release.** The policy covers the latest release. When it is affected, the answer is a
+  release that is not: the next patch on the current line, or the first release of the next line if
+  that is what `main` has become. Older releases are not patched; the way off one is to upgrade.
+- **When the release's code calls the vulnerable code:** a release that clears it is published
+  within **7 days** of the scan's issue being opened. If no fixed version of the affected toolchain
+  or module exists yet, the 7 days run from the day one is published.
+- **When the release links the vulnerable code and does not call it:** the next release clears it.
+  No date is promised, and the issue says so.
+- **When that question could not be decided** — the scanner failed, or the release's source could
+  not be read — it is taken as yes, and the date applies.
+
+The issue is the record. It is opened by the scan with the date already in it, and it stays open
+until a release that scans clean is the latest one. Whether the policy was kept is the difference
+between two dates on a public page.
+
+One maintainer approves every release, so this is one person's promise. It is stated as a number
+because a number can be seen to have been missed.
 
 ## What is deliberately not promised
 
-**No time is promised between an advisory against a release and a patch release that clears it.**
-The scan above says when a release is affected. What follows — how soon a patch release is cut, and
-from which line — has not been decided, and a number written here before it is would be one nobody
-agreed to keep.
+**No older release is patched, and no date is promised for an advisory a release only links.** The
+patch policy above covers the latest release, and puts its date on code the release calls.
+
+**Nothing is promised about the PostgreSQL image.** A release publishes one and does not scan it;
+its advisories are its own project's to announce.
 
 No release process defends against a maintainer who controls the repository, the workflow and the
 registry account together. The controls above make a release traceable to a public commit and a

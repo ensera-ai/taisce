@@ -30,6 +30,11 @@
 # Exits 0 when no binary is affected, 3 when one is (the scanner's own code for "affected"), and
 # anything else when the release could not be read — which is not the same as clean and must not
 # look like it.
+#
+# When a binary is affected it goes on to say which kind of finding this is, because the patch
+# policy treats them differently: whether the release's own code calls the vulnerable code, or
+# only links it (scripts/released-called.sh). That verdict is one more line of output and does not
+# change the exit code: affected is affected.
 set -euo pipefail
 
 tag="${1:?usage: released-advisories.sh <release tag> [<directory>]}"
@@ -78,6 +83,17 @@ fi
 echo
 if [ "$affected" -gt 0 ]; then
   echo "release $tag: $affected of $judged binaries carry a published advisory"
+  # Which kind. The toolchain is read from a binary that was shipped, so the source is judged
+  # against the standard library the release actually carries.
+  toolchain="$(go version "$keep/taisce-image-linux-amd64" | awk '{print $NF}')"
+  called=0
+  "$(dirname "$0")/released-called.sh" "$tag" "$toolchain" > "$keep/called.txt" 2>&1 || called=$?
+  case "$called" in
+    3) echo "release $tag: its own code calls the vulnerable code" ;;
+    0) echo "release $tag: it links the vulnerable code and does not call it" ;;
+    *) echo "release $tag: whether its own code calls the vulnerable code could not be decided, and is taken as yes"
+       sed 's/^/   /' "$keep/called.txt" | tail -5 ;;
+  esac
   exit 3
 fi
 echo "release $tag: $judged binaries judged, none carries a published advisory"
