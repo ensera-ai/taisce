@@ -80,6 +80,21 @@ See [the HTTP API](http-api.md) for what each field means and what comes back.
 **What a tool returns.** A result is the call's JSON response, in two forms: as structured content
 for hosts that read JSON, and as text for hosts that only show text to the model.
 
+**What an empty or thin `recall` means.** The tool's description tells the model, because the
+description is all a host shows it, and a reader of this page should know what the model was told:
+
+| The answer carries | It means | What to do |
+|---|---|---|
+| `reach.named_nothing_known: true` | The question named nothing this memory holds | Say so; do not answer from elsewhere |
+| anchors, and few or no facts | The thing is known and little was said about it | Report what is there |
+| a name in `degraded` | That surface did not run | Its silence is not a fact about memory |
+| `truncated: true` | The answer was cut to `max_characters` | Ask for more, unless the next row applies |
+| `reach.neighbourhood_capped: true` | One entity had more facts than a walk takes | The bundle is a sample; asking for more returns the same facts |
+
+A turn observed moments ago may not be formed yet, and the bundle cannot say that. `freshness` does.
+What none of this covers is a question that names something known and asks about something else:
+it comes back with that thing's facts, and nothing in the answer marks them as beside the point.
+
 **When a tool is refused**, you get a tool error the model can read, not a protocol error. The text
 reads like `400 invalid_question: a question is required`. It's `<status> <code>: <message>`, using
 the same codes as [the HTTP API](http-api.md#errors). On `429 rate_limited`, wait and retry. Retry
