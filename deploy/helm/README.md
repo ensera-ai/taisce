@@ -218,9 +218,26 @@ the object store exists, that its credentials work, and that a backup has comple
 notes print the two commands that do. And a backup nobody has restored from is a hope — rehearse a
 restore into a second cluster before depending on this one.
 
-**A restore brings back what was erased.** Everything erased since the backup was taken is in the
-backup, and nothing re-applies an erasure after a restore. Until that changes, keep your own record
-of erasure requests and repeat them after restoring.
+**A restore brings back what was erased, and one command erases it again.** Everything erased since
+the backup was taken is in the backup, and the receipts are not. Each erasure therefore writes a line
+to the API's log, holding keyed digests and no identifier, and after a restore those lines are
+replayed before the instance serves:
+
+```sh
+kubectl logs deploy/<release>-taisce-api --since=<age of the backup> > taisce.log   # or export from your log store
+kubectl exec -i deploy/<release>-taisce-manage -- /taisce erasure replay --records - < taisce.log
+```
+
+Three things this depends on, none of which the chart can check:
+
+- **The logs outlive the backups.** A line that aged out of the log store is an erasure nothing will
+  repeat. `kubectl logs` reaches only what the node still holds; a log store is what makes this work.
+- **The key outlives the cluster.** It is the Secret `<release>-taisce-erasure-record`, generated once
+  and kept. Copy it somewhere that is not this cluster. Without it the lines cannot be read.
+- **Replay before serving.** Run late, a replay also removes what a person wrote after the restore.
+
+[Governance](../../docs/architecture/governance.md#after-a-restore) says what a line holds and what
+somebody holding one can learn.
 
 
 ## Shrinking it, deliberately

@@ -349,6 +349,8 @@ var excused = []excuse{
 		unique: [][2]string{{"notification_endpoint", "endpoint_id"}}},
 	{file: "erasurestore.go", name: "erase", untied: []string{"erasure_request"},
 		why: "the request this erasure opened", unique: [][2]string{{"erasure_request", "request_id"}}},
+	{file: "erasurestore.go", name: "Held", untied: []string{"erasure_request"},
+		why: "whether this instance has a receipt for an erasure, by the receipt's identifier; a replay asks before it knows the project is here at all", unique: [][2]string{{"erasure_request", "request_id"}}},
 	{file: "chunkrecovery.go", name: "recoverMessageChunkTx", untied: []string{"projection_dependency"},
 		why:    "one registration by its whole key; the project is what the statement reads back and compares",
 		unique: [][2]string{{"projection_dependency", "source_observation_id,projection_kind,projection_id"}}},

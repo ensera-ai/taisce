@@ -56,6 +56,7 @@ const usage = `taisce — memory for agents
   taisce audit seal                seal everything written since the last seal
   taisce formation parked          inspect a bounded page of parked turn metadata (--project required)
   taisce formation unpark          retry one parked turn (--project required, then the observation id)
+  taisce erasure replay            apply again the erasures a restore undid (--records, --dry-run)
   taisce artifact limits           inspect or replace project artifact storage allowances
   taisce recover facts             restore a bounded page of missing facts (--project required)
   taisce recover chunks            restore message chunks with stable IDs (--project required)
@@ -173,6 +174,8 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 			return c.formation(ctx, args[1:], os.Stdout)
 		}
 		return formationCommand(ctx, args[1:], os.Stdout)
+	case "erasure":
+		return erasureCommand(ctx, args[1:], os.Stdin, os.Stdout)
 	case "artifact":
 		return artifactCommand(ctx, args[1:], os.Stdout)
 	case "recover":

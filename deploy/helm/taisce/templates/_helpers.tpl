@@ -10,6 +10,14 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "taisce.image" -}}{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}{{- end -}}
 {{- define "taisce.serviceAccount" -}}{{ .Values.serviceAccount.name | default (include "taisce.name" .) }}{{- end -}}
 {{- define "taisce.credentialsSecret" -}}{{ .Values.credentials.existingSecret | default (printf "%s-credentials" (include "taisce.name" .)) }}{{- end -}}
+{{- define "taisce.erasureRecordSecret" -}}{{ .Values.erasureRecord.existingSecret | default (printf "%s-erasure-record" (include "taisce.name" .)) }}{{- end -}}
+{{/* The key an erasure's trace is digested with, for the role that erases and the role that
+     replays. Never optional: a pod that started without it would erase and leave no trace, in a
+     deployment whose operator was told it leaves one. */}}
+{{- define "taisce.erasureRecordEnv" -}}
+- name: TAISCE_ERASURE_RECORD_KEY
+  valueFrom: {secretKeyRef: {name: {{ include "taisce.erasureRecordSecret" . | quote }}, key: key}}
+{{- end -}}
 {{/* Where the runtime roles connect: the operator's read-write service, or the external secret. */}}
 {{- define "taisce.dbHost" -}}{{ include "taisce.db" . }}-rw{{- end -}}
 {{/* How a connection to the operator's database decides who answered it.

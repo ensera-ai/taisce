@@ -76,6 +76,19 @@ x-service: &service
     TAISCE_MEMORY_DSN: postgres://taisce_data:${TAISCE_DATA_PASSWORD:-change-me-data}@postgres:5432/taisce?sslmode=disable&pool_max_conns=${TAISCE_MEMORY_POOL:-8}&pool_min_conns=2
     TAISCE_SCHEMA: ${TAISCE_SCHEMA:-memory}
 
+    # The key an erasure's trace is digested with. Each erasure writes a line to this process's log
+    # so that a restore of the database cannot take the record of it away, and `taisce erasure
+    # replay` reads those lines back to erase again what a restore returned.
+    #
+    # Empty by default, and deliberately: a default written in this file would be a key everybody
+    # holds, which is no key. Without one the service says so at start and erasures leave no trace.
+    # Set it to at least 32 random characters, keep a copy somewhere that is not this machine, and
+    # keep the service's logs somewhere that is not this machine either — a trace on the disk that
+    # is restored is restored along with it.
+    #
+    #     openssl rand -base64 36
+    TAISCE_ERASURE_RECORD_KEY: ${TAISCE_ERASURE_RECORD_KEY:-}
+
     # ── The model ──────────────────────────────────────────────────────────────────────────────
     #
     # Extraction needs a model, and the default is DeepSeek's hosted API: nothing to download or
