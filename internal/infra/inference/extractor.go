@@ -69,7 +69,7 @@ func (e *StatusError) HTTPStatus() int { return e.Status }
 // path a customer is waiting on. A retry buried here would make the two indistinguishable and would
 // hold a connection open through a backoff nobody chose.
 func (m *Model) Propose(ctx context.Context, message domain.Message, vocabulary domain.Ontology) ([]extract.Proposal, error) {
-	ceiling := m.config.MaxOutputTokens
+	ceiling := m.config.ceilingFor(extractionPrompt.ModelContract.ReplyTokens, len(message.Content))
 	body, err := json.Marshal(chatRequest{
 		Model:     m.config.Model,
 		MaxTokens: ceiling,
