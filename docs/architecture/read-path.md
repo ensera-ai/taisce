@@ -677,12 +677,25 @@ are separate; only the fact walk is one snapshot.
 - The anchor query is bounded by the candidate count and the 256-match refusal.
 - The walk carries at most 64 facts per direction per entity to the next hop, over at most two hops,
   so the rows *carried* depend on depth, not on corpus size.
-- The rows *read* at a busy entity are bounded too, and that is measured rather than inferred.
-  `fact_subject_walk_idx` and `fact_object_walk_idx` are ordered so that a branch seeks them in
-  fact-id order and stops at the cap. `TestTheFanoutCapBoundsTheRowsAHubEntityIsReadFor` asserts it
-  with `EXPLAIN (ANALYZE)` against a hub named by 5,000 facts on each side among 50,000 facts about
-  something else: each walk index reads at most `Fanout + 1` rows, the one extra being the row that
-  detects the cap. So the work of one hop does not grow with that entity's number of facts.
+- The rows *read* at a busy entity are bounded too, and that is measured rather than inferred. A
+  walk reads one project and names it by equality, and `fact_subject_project_walk_idx` and
+  `fact_object_project_walk_idx` hold a project's current facts by entity in fact-id order, so a
+  branch is one seek that stops at the cap
+  ([0081](../../internal/migrate/sql/0081_the_walk_names_its_project.sql), [D63](../decisions/D63.md)).
+  Two tests assert it with `EXPLAIN (ANALYZE)`, on two shapes of data, because the first shape alone
+  hid a defect. `TestTheFanoutCapBoundsTheRowsAHubEntityIsReadFor` uses a hub named by 5,000 facts
+  on each side among 50,000 about something else. `TestTheFanoutCapBoundsABusyEntityAmongManyQuietOnes`
+  uses 6,000 entities with about twenty facts each and one with 5,000: the shape of an instance,
+  where the planner plans for a quiet entity. Each side reads at most `Fanout + 1` rows, the one
+  extra being the row that detects the cap. So the work of one hop does not grow with that entity's
+  number of facts.
+- **A read of the past is bounded differently.** A read of what was *valid* at a moment finds its
+  facts by the moment and stops at the cap. A read of what was *believed* at a moment — alone, or
+  about another moment — reads every fact of the entity it is at: which version was believed is
+  found per fact, so no order lets the walk stop early. Its cost is that entity's history, never
+  another entity's and never the instance's. `TestAReadOfThePastReadsItsOwnEntityAndNeverTheInstance`
+  holds both halves: one row at an entity named by one fact, and all 5,000 at an entity that has
+  5,000.
 - The row limit and the character budget cut the answer, not the work: the final ordering needs the
   whole reachable set first.
 

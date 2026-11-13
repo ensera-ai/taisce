@@ -10,3 +10,6 @@ var (
 	FactsValidAtQueryForTesting = selectFactsValidAtSQL
 	FactsKnownAtQueryForTesting = selectFactsKnownAtSQL
 )
+
+// FactsBitemporalQueryForTesting is the read of what was believed at one moment about another.
+var FactsBitemporalQueryForTesting = selectFactsBitemporalSQL

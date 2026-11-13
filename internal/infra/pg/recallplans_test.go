@@ -82,13 +82,21 @@ func TestTheFanoutCapBoundsTheRowsAHubEntityIsReadFor(t *testing.T) {
 		}
 	}
 	inspect(plans[0].Plan)
-	for _, index := range []string{"fact_subject_walk_idx", "fact_object_walk_idx"} {
-		rows, ok := read[index]
-		if !ok {
-			t.Fatalf("the traversal did not seek %s; it read the fact table through %v", index, read)
+	// Each side of the hop is served by an index that holds the entity's facts in fact_id order:
+	// the one that leads with the project (0081), or, while it remains for the previous release,
+	// the one that leads with the entity (0065). Either stops at the cap.
+	for _, side := range []string{"subject", "object"} {
+		rows, sought := 0.0, false
+		for _, index := range []string{"fact_" + side + "_project_walk_idx", "fact_" + side + "_walk_idx"} {
+			if n, ok := read[index]; ok {
+				rows, sought = rows+n, true
+			}
+		}
+		if !sought {
+			t.Fatalf("the traversal did not seek a walk index for the %s side; it read the fact table through %v", side, read)
 		}
 		if rows > float64(domain.Fanout+1) {
-			t.Fatalf("%s read %v rows for a cap of %d and one row of signal", index, rows, domain.Fanout)
+			t.Fatalf("the %s side read %v rows for a cap of %d and one row of signal", side, rows, domain.Fanout)
 		}
 	}
 }
