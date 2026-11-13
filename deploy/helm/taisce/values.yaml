@@ -98,6 +98,13 @@ postgresql:
 credentials:
   existingSecret: ""
 
+# The key an erasure's trace is digested with (docs/architecture/governance.md, "After a restore").
+# Left empty, the chart generates one once and keeps it across upgrades; an existing secret must
+# carry it under `key`, at least 32 characters. Keep a copy outside the cluster: without it, the
+# erasures recorded so far cannot be applied again after a restore.
+erasureRecord:
+  existingSecret: ""
+
 inference:
   endpoint: ""            # OpenAI-compatible base URL; required for formation
   extractorModel: ""

@@ -1,0 +1,30 @@
+# Copyright 2026 The Taisce Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The key an erasure's trace is digested with. The trace goes to the process log so that a restore
+# of the database cannot take it away, and it holds a keyed digest where an identifier would be, so
+# that the log does not become the list of people who asked to be forgotten.
+#
+# Its own secret, and not a key beside the role passwords: those belong to the database and are
+# replaced with it, and this has to outlive the database it describes. Generated once and kept. A
+# key regenerated on upgrade would make every trace written so far unreadable.
+#
+# Keep a copy of it outside the cluster. A cluster rebuilt without it cannot replay anything.
+{{- if not .Values.erasureRecord.existingSecret }}
+{{- $name := include "taisce.erasureRecordSecret" . }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels: {{- include "taisce.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  {{- if $existing }}
+  key: {{ index $existing.data "key" }}
+  {{- else }}
+  key: {{ randAlphaNum 48 | b64enc }}
+  {{- end }}
+{{- end }}

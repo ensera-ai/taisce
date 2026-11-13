@@ -535,6 +535,7 @@ exported. The tables below list every variable the binary reads outside its test
 |---|---|---|---|
 | `TAISCE_BUNDLE_CHARACTERS` | `api`, `all` | 16,000 (`recall.DefaultBudget`) | the recall character budget; a caller may ask for less, never more. An unparsable or non-positive value falls back to the default instead of refusing to start (`bundleBudget`) |
 | `TAISCE_REQUIRE_FORMATION` | `api`, `all` | `false` | when `true`, readiness also requires a recent worker heartbeat; must parse as a boolean |
+| `TAISCE_ERASURE_RECORD_KEY` | `api`, `all`, and `taisce erasure replay` | unset | the key each erasure's trace is digested with ([after a restore](governance.md#after-a-restore)). Unset, the service warns once at start and erasures leave no trace. Set and shorter than 32 characters, the process refuses to start |
 | `TAISCE_FORMATION_TURN_BUDGET` | `worker`, `all` | `5m` (`formation.DefaultPolicy`) | how long one formation attempt may take, and the model client's timeout; anything but a positive duration is refused |
 
 ### Inference

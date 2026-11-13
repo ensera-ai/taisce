@@ -6,11 +6,13 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ensera-ai/taisce/internal/domain"
@@ -18,7 +20,40 @@ import (
 
 // Eraser deletes everything derived from a data subject's observations — or from a named set of
 // source observations — and counts what survived.
-type Eraser struct{ pool *pgxpool.Pool }
+type Eraser struct {
+	pool     *pgxpool.Pool
+	recorder ErasureRecorder
+}
+
+// ErasureRecorder is handed what an erasure selected, so that a trace of it can be left somewhere
+// a restore of this database cannot reach.
+//
+// It is called inside the erasure's transaction, after everything is deleted and counted and
+// before the commit. That order is the point. Called after the commit, a process that died between
+// the two would leave an erasure with no trace, and a later restore would undo it for good. Called
+// before, the failure that remains is a trace of an erasure that then did not commit — and
+// replaying that erases something its owner asked to have erased.
+//
+// An error from it fails the erasure: no trace, no erasure, and the caller is told.
+type ErasureRecorder func(requestID, project, kind string, identifiers []string) error
+
+// The two kinds a recorder is told of. They are the two selectors an erasure takes.
+const (
+	ErasureOfSubject = "subject"
+	ErasureOfSources = "source"
+)
+
+// ReappliedErasureReason is the reason on a receipt written by a replay. The reason first given is
+// not kept outside the database — it is free text, and the trace holds none — so the receipt that
+// comes back says what it is instead.
+const ReappliedErasureReason = "applied again after a restore"
+
+// Recording returns the eraser with a recorder attached. Without one, an erasure leaves no trace
+// outside the database and a restore to a point before it brings back what it removed.
+func (e *Eraser) Recording(recorder ErasureRecorder) *Eraser {
+	e.recorder = recorder
+	return e
+}
 
 // NewEraser builds an eraser.
 func NewEraser(pool *pgxpool.Pool) *Eraser { return &Eraser{pool: pool} }
@@ -178,7 +213,7 @@ func (e *Eraser) Erase(ctx context.Context, schema Schema, scope, dataSubjectID,
 		// one very implausible outcome.
 		return domain.Erasure{}, fmt.Errorf("an erasure needs a data subject")
 	}
-	return e.erase(ctx, schema, scope, sourceSelection{subject: dataSubjectID}, reason)
+	return e.erase(ctx, schema, scope, sourceSelection{subject: dataSubjectID}, reason, "")
 }
 
 // EraseSources removes a set of observations by their own identity — a document that was observed
@@ -198,12 +233,86 @@ func (e *Eraser) EraseSources(ctx context.Context, schema Schema, scope string, 
 			return domain.Erasure{}, fmt.Errorf("an erasure by source names observations by id: %q is not one", id)
 		}
 	}
-	return e.erase(ctx, schema, scope, sourceSelection{sources: sources}, reason)
+	return e.erase(ctx, schema, scope, sourceSelection{sources: sources}, reason, "")
 }
 
-func (e *Eraser) erase(ctx context.Context, schema Schema, scope string, sel sourceSelection, reason string) (domain.Erasure, error) {
+// ErrErasureAlreadyHeld is returned by a replay of an erasure this database already has a receipt
+// for. It is not a failure: the erasure is in this database's history, so the restore did not undo
+// it.
+var ErrErasureAlreadyHeld = errors.New("this database already holds a receipt for that erasure")
+
+// ReapplySubject erases a person again, under the identifier their erasure first had.
+//
+// It is the same walk as Erase and writes the same receipt. The identifier is the one thing that
+// differs, and it is what makes a replay safe to run twice: the receipt comes back under its own
+// identifier, so a second replay finds it and does nothing.
+func (e *Eraser) ReapplySubject(ctx context.Context, schema Schema, scope, requestID, dataSubjectID string) (domain.Erasure, error) {
+	if dataSubjectID == "" {
+		return domain.Erasure{}, fmt.Errorf("an erasure needs a data subject")
+	}
+	return e.reapply(ctx, schema, scope, requestID, sourceSelection{subject: dataSubjectID})
+}
+
+// ReapplySources erases a set of turns again, under the identifier their erasure first had.
+func (e *Eraser) ReapplySources(ctx context.Context, schema Schema, scope, requestID string, sources []string) (domain.Erasure, error) {
+	if len(sources) == 0 {
+		return domain.Erasure{}, fmt.Errorf("an erasure by source names at least one observation")
+	}
+	return e.reapply(ctx, schema, scope, requestID, sourceSelection{sources: sources})
+}
+
+func (e *Eraser) reapply(ctx context.Context, schema Schema, scope, requestID string, sel sourceSelection) (domain.Erasure, error) {
+	if _, err := uuid.Parse(requestID); err != nil {
+		return domain.Erasure{}, fmt.Errorf("an erasure is replayed under the identifier it had: %q is not one", requestID)
+	}
+	out, err := e.erase(ctx, schema, scope, sel, ReappliedErasureReason, requestID)
+	var refused *pgconn.PgError
+	if errors.As(err, &refused) && refused.Code == "23505" && refused.ConstraintName == "erasure_request_pkey" {
+		return domain.Erasure{}, ErrErasureAlreadyHeld
+	}
+	return out, err
+}
+
+// Held reports whether this database has a receipt for an erasure, in any project. A replay asks
+// before it looks for anything to erase: an erasure the database remembers is one the restore did
+// not undo.
+func (e *Eraser) Held(ctx context.Context, schema Schema, requestID string) (bool, error) {
+	if _, err := uuid.Parse(requestID); err != nil {
+		return false, nil
+	}
+	var held bool
+	// By the receipt's own identifier, which is unique across the instance. The project is not
+	// named because the question is whether the erasure happened here at all.
+	err := e.pool.QueryRow(ctx, schema.SQL(
+		`SELECT EXISTS (SELECT 1 FROM {schema}.erasure_request WHERE request_id=$1::uuid AND completed_at IS NOT NULL)`), requestID).Scan(&held)
+	return held, err
+}
+
+// Erasable lists what a project holds that an erasure of that kind could name: the people, or the
+// turns. A replay digests each and compares it with a trace, which is the only way to find a
+// person from a digest of them.
+//
+// The people are those registered and those any turn names, because a turn can name a subject
+// nobody registered. Everything an erasure removes for a person is reached from one of the two.
+func (e *Eraser) Erasable(ctx context.Context, schema Schema, scope, kind string) ([]string, error) {
+	query := `SELECT subject_id FROM {schema}.data_subject WHERE scope=$1
+	           UNION SELECT data_subject_id FROM {schema}.observation WHERE scope=$1 AND data_subject_id IS NOT NULL`
+	if kind == ErasureOfSources {
+		query = `SELECT observation_id::text FROM {schema}.observation WHERE scope=$1`
+	}
+	rows, err := e.pool.Query(ctx, schema.SQL(query), scope)
+	if err != nil {
+		return nil, fmt.Errorf("list what an erasure could name: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+func (e *Eraser) erase(ctx context.Context, schema Schema, scope string, sel sourceSelection, reason, requestID string) (domain.Erasure, error) {
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
 	out := domain.Erasure{
-		RequestID:            uuid.New().String(),
+		RequestID:            requestID,
 		Scope:                scope,
 		DataSubjectID:        sel.subject,
 		SourceObservationIDs: sel.sources,
@@ -407,6 +516,15 @@ func (e *Eraser) erase(ctx context.Context, schema Schema, scope string, sel sou
 		if _, err := tx.Exec(ctx, schema.SQL(closeErasureSQL),
 			out.RequestID, out.CompletedAt, residual); err != nil {
 			return fmt.Errorf("close erasure request: %w", err)
+		}
+		if e.recorder != nil {
+			kind, identifiers := ErasureOfSubject, []string{sel.subject}
+			if sel.bySource() {
+				kind, identifiers = ErasureOfSources, sel.sources
+			}
+			if err := e.recorder(out.RequestID, scope, kind, identifiers); err != nil {
+				return fmt.Errorf("leave a trace of the erasure outside the database: %w", err)
+			}
 		}
 		return nil
 	})

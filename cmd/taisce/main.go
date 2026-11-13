@@ -237,6 +237,10 @@ func run(ctx context.Context, log *slog.Logger) error {
 	// management surface to report. Stopped after the listeners and the driver, and before the pool
 	// it writes through is closed, so what was counted in the last seconds of a rolling restart is
 	// not lost on every restart.
+	recorder, err := erasureRecorder(log)
+	if err != nil {
+		return err
+	}
 	measurements := pg.NewMeasurements(memory, schema)
 	measuring, stopMeasuring := context.WithCancel(context.Background())
 	measured := make(chan struct{})
@@ -324,7 +328,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 				Exporter:     pg.NewExporter(memory, schema),
 				Projects:     pg.NewProjectStore(memory, schema),
 				Observations: pg.NewObservationStore(memory),
-				Eraser:       pg.NewEraser(memory),
+				Eraser:       pg.NewEraser(memory).Recording(recorder),
 				Recaller: recall.NewWithBudget(pg.NewRecallStore(memory, schema), bundleBudget(log)).
 					WithSemantic(api.NewSemanticSurfaces(entityCandidates, reportCandidates, passages, pg.NewCommunityStore(memory, schema))),
 				Citations:        pg.NewCitationStore(memory, schema),

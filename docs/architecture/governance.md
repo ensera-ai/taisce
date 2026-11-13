@@ -293,6 +293,78 @@ again.
 deletes the segment, and the compaction pass writes a new one from what survived
 ([migration 0055](../../internal/migrate/sql/0055_a_segment_stands_in_for_the_turns_it_covers.sql)).
 
+### After a restore
+
+A restore returns the database to an earlier moment. Everything erased since then is in it again,
+and the receipts for those erasures are not. Left there, the system holds people it was told to
+forget and has no record that it was told.
+
+So an erasure leaves a trace outside the database, and a command applies the traces again.
+
+**The trace.** When `TAISCE_ERASURE_RECORD_KEY` is set, each erasure writes one or more lines to the
+process log, of the form `taisce-erasure-record:v1:…`. A line holds the erasure's identifier, the
+project, whether it named a person or a set of turns, and a keyed digest of each identifier it
+named ([erasurerecord.go](../../internal/erasurerecord/erasurerecord.go)). It holds no identifier,
+no reason and no content. The line is written inside the erasure's transaction, before the commit:
+an erasure that could not leave a trace does not happen
+(`TestAnErasureThatCannotLeaveATraceDoesNotHappen`).
+
+**The replay.** After a restore, and before the instance serves again:
+
+```sh
+taisce erasure replay --records taisce.log --dry-run
+taisce erasure replay --records taisce.log
+```
+
+`--records` is a file of log lines, or `-` for standard input. The lines may be wrapped in whatever
+the log pipeline adds; anything that is not a trace is ignored. For each erasure in them the command
+asks whether this database holds its receipt. If it does, the restore did not undo it and nothing is
+done. If it does not, the command digests every person or turn the project holds, erases the ones
+the trace names through the same walk any erasure takes, and writes the receipt back under the
+identifier the erasure first had, with the reason `applied again after a restore`. That is what
+makes a second run do nothing. Each erasure applied again is one `erase` entry on the ledger, with
+an operator principal the report names.
+
+The report is counts and states, never an identifier:
+
+| State | Meaning |
+|---|---|
+| `applied` | Erased again; the receipt is back. `residual` must be zero |
+| `already held` | This database has the receipt. Nothing done |
+| `nothing held` | The trace names nobody this database holds: erased before the backup, or never here |
+| `would apply` | `--dry-run` only |
+| `refused` | Written under a different key, missing one of its lines, or naming a project this database lacks. The command exits non-zero |
+
+`TestAnErasureARestoreUndidIsAppliedAgainFromItsTrace` runs the whole of it against a database put
+back to before two erasures.
+
+**What somebody holding a trace can learn.**
+
+| They hold | They can learn |
+|---|---|
+| The log | That an erasure happened in a project, when, and of how many turns. Not whose |
+| The log and the key | Whether an identifier they already know was erased. They cannot list who was |
+| The key | Nothing |
+
+**What this does not cover.**
+
+- **No key, no trace.** Without `TAISCE_ERASURE_RECORD_KEY` the service says so once at start and
+  erasures leave nothing behind. The chart generates a key; the compose file does not, because a
+  default written in a file is a key everybody holds.
+- **A lost key.** Traces written under a key that is gone cannot be read by anything. Keep a copy
+  outside the cluster.
+- **A line the log lost.** An erasure whose trace never reached the log store, or aged out of it, is
+  not repeated, and nothing detects that. Keep the logs at least as long as the oldest backup you
+  would restore from.
+- **A replay run late.** A replay erases by identifier. Run after the instance has gone back to
+  work, it also removes what that person has written since. Restore, replay, then serve.
+- **The restore itself.** The test puts a namespace's rows back on one database. It does not
+  exercise an archive, a recovery or the time either takes; that is a drill on a real cluster
+  ([#267](https://github.com/ensera-ai/taisce/issues/267)).
+- **Removals that are not erasures.** A withdrawn entity, a deleted artifact, a retracted record and
+  an expired turn are also returned by a restore. Retention expires the turn again on its next
+  sweep. The other three leave no trace and are not repeated.
+
 ### What erasure cannot reach
 
 The residual is a query against live rows, inside the database that holds them. It proves that no
@@ -307,11 +379,8 @@ it, and a receipt cannot count it.
 **Backups.** A base backup or archived WAL segment taken before the erasure still contains the erased
 rows, until it ages out under your backup policy.
 
-> [!WARNING]
-> Restoring to a point before an erasure brings the data back, and loses the `erasure_request` row
-> with it. Nothing in Taisce re-applies an erasure after a restore. If you need that, keep the
-> receipts outside the database and replay them. (This follows from the design; no test exercises
-> it.)
+Restoring to a point before an erasure brings the data back, and loses the `erasure_request` row
+with it. What is done about that is the next section.
 
 **WAL, replicas and the heap.**
 
@@ -874,6 +943,7 @@ In the table below:
 | `taisce rebuild project`, `cancel` | Operator DB | Job checkpoint and per-source generations | `formation.rebuild.start`, `formation.rebuild.cancel`, atomic |
 | `taisce rebuild reports` | Operator DB and a model | Writes missing or stale reports | Nothing on the ledger |
 | `taisce recover facts` | Operator DB | Restores missing facts and support from receipts | `formation.recover` with an invocation principal, in the transaction |
+| `taisce erasure replay` | Operator DB and the erasure record key | Erases again what a restore returned; receipts under their first identifiers | `erase` per erasure applied, with an invocation principal, after the erasure commits |
 | `taisce formation unpark` | Operator DB, or Operator | Resets one parked turn and its watermark | `formation.unpark`, in the transaction |
 | `taisce audit seal`, `verify` | Operator DB | Adds a seal, or nothing | Nothing on the direct path; `audit.seal` or `audit.verify` through `/manage/v1` |
 

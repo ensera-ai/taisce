@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,58 @@ func TestTheChartLintsAndItsDefaultsAreHighlyAvailableAndClosed(t *testing.T) {
 	}
 	if strings.Count(out, "replicas: 2") != 2 {
 		t.Errorf("expected two replicas for the API and for the workers, got %d occurrences", strings.Count(out, "replicas: 2"))
+	}
+}
+
+// TestTheChartGivesTheRolesThatEraseAndReplayAKeyOfItsOwn holds the trace of an erasure to being
+// on by default in a cluster, and to a key that does not live or die with the database's.
+//
+// The role that erases needs the key to write a trace and the role that replays needs it to read
+// one. A worker does neither and is not given it. The reference is not optional: a pod that
+// started without the key would erase and leave no trace while its operator had been told it
+// leaves one.
+func TestTheChartGivesTheRolesThatEraseAndReplayAKeyOfItsOwn(t *testing.T) {
+	out := render(t)
+	documents := strings.Split(out, "\n---\n")
+	holding := func(source string) string {
+		t.Helper()
+		var all []string
+		for _, document := range documents {
+			if strings.Contains(document, "# Source: taisce/templates/"+source) {
+				all = append(all, document)
+			}
+		}
+		if len(all) == 0 {
+			t.Fatalf("the rendering has no %s", source)
+		}
+		return strings.Join(all, "\n---\n")
+	}
+	secret := holding("erasure-record.yaml")
+	if !strings.Contains(secret, "name: t-taisce-erasure-record") || !strings.Contains(secret, "helm.sh/resource-policy: keep") ||
+		!regexp.MustCompile(`(?m)^  key: [A-Za-z0-9+/=]{60,}$`).MatchString(secret) {
+		t.Errorf("the erasure record key must be generated, long, and kept across upgrades:\n%s", secret)
+	}
+	const reference = "- name: TAISCE_ERASURE_RECORD_KEY\n              valueFrom: {secretKeyRef: {name: \"t-taisce-erasure-record\", key: key}}"
+	for _, role := range []string{"api.yaml", "manage.yaml"} {
+		if !strings.Contains(holding(role), reference) {
+			t.Errorf("%s is not given the erasure record key", role)
+		}
+	}
+	if strings.Contains(holding("worker.yaml"), "TAISCE_ERASURE_RECORD_KEY") {
+		t.Error("the worker is given the erasure record key and neither erases nor replays")
+	}
+	if strings.Contains(holding("api.yaml"), "optional") || strings.Contains(holding("manage.yaml"), "optional") {
+		t.Error("the reference to the erasure record key is optional")
+	}
+	// It is not one of the database's secrets: replacing those leaves it alone.
+	if strings.Contains(holding("credentials.yaml"), "erasure") {
+		t.Error("the erasure record key is kept with the role passwords")
+	}
+
+	// An operator who brings their own names it, and the chart then generates none.
+	own := render(t, "--set", "erasureRecord.existingSecret=my-erasure-key")
+	if strings.Contains(own, "name: t-taisce-erasure-record") || !strings.Contains(own, `secretKeyRef: {name: "my-erasure-key", key: key}`) {
+		t.Error("an existing erasure record secret must be used as given, and none generated beside it")
 	}
 }
 
