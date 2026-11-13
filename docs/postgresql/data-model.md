@@ -379,7 +379,10 @@ An `entity` is a node. There are two ways to identify one:
 - **Named entities** are identified by `(scope, normalized_name)`, where normalization lowercases,
   trims and collapses whitespace. `entity_type` is an attribute, not part of the identity. If it were
   part of the key, one thing extracted once as a `place` and once as a `thing` would become two
-  nodes, each holding half its facts.
+  nodes, each holding half its facts. What extraction writes there is one of six kinds — person,
+  organisation, place, time, value, thing — and a kind a model wrote outside them is dropped before
+  it is stored ([D70](../decisions/D70.md)). The column itself does not refuse a seventh
+  ([#289](https://github.com/ensera-ai/taisce/issues/289)), and the first write wins.
 - **Speaker entities** ([0022](../../internal/migrate/sql/0022_speakers_have_project_scoped_identity.sql)).
   A first-person reference ("I", "me", "أنا") resolves to a speaker entity identified by
   `(scope, speaker_subject_id)`, bound to the stored observation's data subject rather than to a name.

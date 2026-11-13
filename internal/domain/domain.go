@@ -506,6 +506,40 @@ const (
 	CardinalityMany Cardinality = "many"
 )
 
+// KindThing is the kind an entity has when nothing said what it is.
+const KindThing = "thing"
+
+// Kinds is what an entity, or the object end of a relation, can be.
+//
+// The authority is the schema, which closes the same six on `predicate.object_kind`; this is a copy
+// held in memory for the one place that needs it without a query — judging a kind a model wrote.
+// A test holds the copy to the constraint, so adding a seventh in one place and not the other fails
+// rather than drifting.
+//
+// # Why a closed set and not whatever the model says
+//
+// A kind is read as a category: a caller switches on it, and nobody attaches the words behind it.
+// Everything else a model writes is checked against something it cannot influence — the relation
+// against the vocabulary, the quote against the source — or is returned as somebody's words with
+// the evidence beside it. A kind taken as written would be the one field that is neither, and a
+// field the prompt asks to be one of six is not a field bounded to six.
+func Kinds() []string {
+	return []string{"person", "organisation", "place", "time", "value", KindThing}
+}
+
+// IsKind reports whether s is one of Kinds, spelled exactly as the schema spells it.
+//
+// Exactly, because the schema's check is exact: `Person` and `organization` are refused there, and
+// a second, more forgiving rule here would be two definitions of one set.
+func IsKind(s string) bool {
+	for _, k := range Kinds() {
+		if s == k {
+			return true
+		}
+	}
+	return false
+}
+
 // Predicate is one relation in the closed vocabulary.
 //
 // The authority is the `predicate` table, which `fact.predicate` references — so this is a copy of

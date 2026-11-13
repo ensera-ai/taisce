@@ -214,8 +214,18 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 		}
 		seen[identity] = struct{}{}
 
+		// A kind outside the closed set is treated as a kind the model did not give. The claim is
+		// kept: its relation is admitted and its quote was found, and the kind was never what made
+		// it a fact. Refusing it instead would let a model that mislabels one field cost a deployment
+		// facts it has the evidence for (D70).
+		subjectType := p.SubjectType
+		if !domain.IsKind(subjectType) {
+			// Left empty rather than set to `thing` here: storage already gives an entity nobody
+			// typed that kind, and one default in one place is easier to keep true than two.
+			subjectType = ""
+		}
 		objectType := p.ObjectType
-		if objectType == "" {
+		if !domain.IsKind(objectType) {
 			// The vocabulary says what the object end of this relation is. Using it means a
 			// `scheduled_for` object is typed as a time even when the model volunteered nothing,
 			// rather than defaulting to `thing` and losing the one piece of typing that was never
@@ -237,7 +247,7 @@ func (e *Extractor) Extract(ctx context.Context, message domain.Message) (Result
 			ByteStart:     start,
 			ByteEnd:       end,
 			SourceOrdinal: message.Ordinal,
-			SubjectType:   p.SubjectType,
+			SubjectType:   subjectType,
 			ObjectType:    objectType,
 			SemanticType:  predicate.SemanticType,
 			Cardinality:   predicate.Cardinality,
