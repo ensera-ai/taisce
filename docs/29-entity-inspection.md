@@ -5,7 +5,8 @@
 
 Every fact Taisce holds has a subject and often an object, and each is an entity: a person, a place,
 an organisation, or a speaker in a conversation. These two operations let you look at those entities
-directly: list what a project knows about, and look up the one behind a record.
+directly: list what a project knows about, and look up the one behind a record. From an entity you
+can then [list the facts that name it](#see-what-is-held-about-an-entity).
 
 Both are read-only. Read-only credentials can use them. The project always comes from your
 credential, and a request body cannot change it.
@@ -47,6 +48,23 @@ for a speaker, the `speaker_subject_id` it is bound to.
 
 - A named entity and a speaker are different kinds of identity, even when their names look the same.
 - The response does not guess that two entities are the same, and it does not search descriptions.
+
+## See what is held about an entity
+
+These two operations return identity, not facts. To page the facts that hold now and name an
+entity, send its ID to the record inventory:
+
+```http
+POST /v1/records/list
+Authorization: Bearer <project-credential>
+Content-Type: application/json
+
+{"entity_id":"ENTITY_UUID","limit":20}
+```
+
+So you can go either way: from a record to the entity behind it, or from an entity to its records.
+[Browsing records](11-record-inspection.md#list-the-facts-about-one-entity) says what the list
+holds and what it leaves out.
 
 ## What to watch out for
 

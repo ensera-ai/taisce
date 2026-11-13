@@ -12,8 +12,12 @@ import (
 	"github.com/ensera-ai/taisce/internal/infra/pg"
 )
 
+// EntityID narrows the inventory to the facts that hold now and name one entity. It is optional and
+// a request without it is the request it always was: v1 is frozen, and a field may be added to a
+// request only if a request that omits it is still accepted and still means the same thing.
 type recordListRequest struct {
 	DataSubjectID string           `json:"data_subject_id,omitempty"`
+	EntityID      string           `json:"entity_id,omitempty"`
 	After         *pg.RecordCursor `json:"after,omitempty"`
 	Limit         *int             `json:"limit,omitempty"`
 }
@@ -37,7 +41,13 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request, grant crede
 		writeError(w, http.StatusInternalServerError, codeInternal, "records could not be inspected")
 		return
 	}
-	out, err := s.records.List(r.Context(), grant.Project, request.DataSubjectID, request.After, limit)
+	var out pg.RecordPage
+	var err error
+	if request.EntityID == "" {
+		out, err = s.records.List(r.Context(), grant.Project, request.DataSubjectID, request.After, limit)
+	} else {
+		out, err = s.records.ListAbout(r.Context(), grant.Project, request.EntityID, request.DataSubjectID, request.After, limit)
+	}
 	if err != nil {
 		s.recordReadError(w, r, grant, domain.AuditRecordList, err)
 		return

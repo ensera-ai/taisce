@@ -707,6 +707,7 @@ POST `/v1/records/list` → 200
 | Field | Type |
 |---|---|
 | `data_subject_id` | string |
+| `entity_id` | string |
 | `after` | {id: string}, optional |
 | `limit` | integer, optional |
 

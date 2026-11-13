@@ -142,4 +142,108 @@ func TestRecordInspectionReportsStorageFailureWithoutDatabaseDetails(t *testing.
 			t.Fatalf("storage failure: %d %s", status, body)
 		}
 	}
+	// The entity's page is a different statement in a transaction of its own, and fails the same way:
+	// no database text, and not the id the caller sent.
+	entity := uuid.NewString()
+	status, body = h.raw(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": entity}, h.token)
+	if status != 500 || strings.Contains(string(body), h.schema.String()) || strings.Contains(string(body), entity) {
+		t.Fatalf("storage failure on an entity's page: %d %s", status, body)
+	}
+}
+
+// TestTheRecordInventoryNarrowsToOneEntityOverHTTP holds the entity filter at the boundary a caller
+// meets it: the field is optional and a request without it is unchanged, a request with it returns
+// the facts naming that entity and no others, a malformed id is the listing's own refusal, and a
+// credential for another project that names this project's entity is told nothing — the same empty
+// page an id nobody has would get.
+func TestTheRecordInventoryNarrowsToOneEntityOverHTTP(t *testing.T) {
+	h := newHarness(t, "api_record_entity")
+	ctx := context.Background()
+	h.do(t, http.MethodPost, "/v1/observations", map[string]any{"data_subject_id": "subject-1", "messages": []map[string]any{{"role": "user", "content": "I work at Ensera and I live in Dublin."}}}, 201, nil)
+	h.form(t)
+	var whole pg.RecordPage
+	h.do(t, http.MethodPost, "/v1/records/list", map[string]any{}, 200, &whole)
+	var ensera string
+	if err := h.pool.QueryRow(ctx, h.schema.SQL(`SELECT entity_id::text FROM {schema}.entity WHERE scope='p1' AND normalized_name='ensera'`)).Scan(&ensera); err != nil {
+		t.Fatal(err)
+	}
+	naming := map[string]bool{}
+	for _, record := range whole.Records {
+		if (record.SubjectID != nil && *record.SubjectID == ensera) || (record.ObjectID != nil && *record.ObjectID == ensera) {
+			naming[record.ID] = true
+		}
+	}
+	if len(naming) == 0 || len(naming) == len(whole.Records) {
+		t.Fatalf("%d of %d records name the entity; the fixture cannot tell a filter from none", len(naming), len(whole.Records))
+	}
+	var about pg.RecordPage
+	h.do(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": ensera}, 200, &about)
+	if len(about.Records) != len(naming) || about.Next != nil {
+		t.Fatalf("the entity's page held %d records; %d name it", len(about.Records), len(naming))
+	}
+	for _, record := range about.Records {
+		if !naming[record.ID] || record.Status != "current" {
+			t.Fatalf("the entity's page held %+v, which does not name it or does not hold now", record)
+		}
+	}
+	// Both filters, and the cursor, are still the listing's.
+	var narrowed, nobody, onward pg.RecordPage
+	h.do(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": ensera, "data_subject_id": "subject-1"}, 200, &narrowed)
+	h.do(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": ensera, "data_subject_id": "subject-2"}, 200, &nobody)
+	h.do(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": ensera, "after": map[string]any{"id": about.Records[len(about.Records)-1].ID}}, 200, &onward)
+	if len(narrowed.Records) != len(naming) || len(nobody.Records) != 0 || len(onward.Records) != 0 {
+		t.Fatalf("narrowed to its subject %d, to another subject %d, past its last record %d", len(narrowed.Records), len(nobody.Records), len(onward.Records))
+	}
+	// An empty field is an absent one, as an empty data subject is.
+	var unfiltered pg.RecordPage
+	h.do(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": ""}, 200, &unfiltered)
+	if len(unfiltered.Records) != len(whole.Records) {
+		t.Fatalf("an empty entity id listed %d records, not the project's %d", len(unfiltered.Records), len(whole.Records))
+	}
+	// A malformed id is the listing's refusal. One that is not a string never reaches the listing:
+	// the body is refused as a body, as it is for every field.
+	for body, code := range map[string]string{
+		`{"entity_id":"ensera"}`:                               "invalid_record_page",
+		`{"entity_id":"00000000-0000-0000-0000-000000000000"}`: "invalid_record_page",
+		`{"entity_id":" "}`:                                    "invalid_record_page",
+		`{"entity_id":"` + ensera + `","limit":101}`:           "invalid_record_page",
+		`{"entity_id":"` + ensera + `","after":{"id":"bad"}}`:  "invalid_record_page",
+		`{"entity_id":7}`:                                      "invalid_body",
+	} {
+		status, raw := h.rawBody(t, http.MethodPost, "/v1/records/list", body, h.token)
+		var refused struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if status != 400 || json.Unmarshal(raw, &refused) != nil || refused.Error.Code != code {
+			t.Fatalf("%s: %d %s, wanted 400 %s", body, status, raw, code)
+		}
+	}
+	if err := migrate.ProvisionScope(ctx, h.pool, h.schema.String(), "p2"); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := credential.NewStore(h.pool, string(migrate.ControlSchema)).Issue(ctx, "other-entity-project", "p2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, foreign := h.raw(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": ensera}, token)
+	_, unknown := h.raw(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": uuid.NewString()}, token)
+	if status != 200 || string(foreign) != string(unknown) || strings.Contains(string(foreign), ensera) {
+		t.Fatalf("another project's credential was answered %d %s; an id nobody has is answered %s", status, foreign, unknown)
+	}
+	entries, err := pg.NewAuditStore(h.pool, h.schema).Recent(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(entries)
+	if strings.Contains(string(encoded), ensera) {
+		t.Fatal("the entity id a caller asked about entered the audit")
+	}
+	h.do(t, http.MethodPost, "/v1/erasures", map[string]any{"data_subject_id": "subject-1", "reason": "test"}, 200, nil)
+	var erased pg.RecordPage
+	h.do(t, http.MethodPost, "/v1/records/list", map[string]any{"entity_id": ensera}, 200, &erased)
+	if len(erased.Records) != 0 {
+		t.Fatalf("after its only source was erased the entity's page held %d records", len(erased.Records))
+	}
 }

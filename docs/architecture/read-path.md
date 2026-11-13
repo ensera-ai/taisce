@@ -582,7 +582,7 @@ wording, or a model being available. All of them:
 |---|---|---|
 | `POST /v1/citations/resolve` | A fact id to its kept record, status and every evidence row, each quote checked against the exact bytes of its message | 8 sources per page by default, 32 at most; 256 KiB of text per page; one read-only repeatable-read transaction per page |
 | `POST /v1/messages/get` | A chunk id to a window of its source message, bound by a SHA-256 content digest | Windows of up to 4,096 bytes; later windows require the digest |
-| `POST /v1/records/list`, `/records/history` | Kept facts, optionally by subject; the earlier intervals of one fact | 20 per page by default, 100 at most; previews of 512 characters |
+| `POST /v1/records/list`, `/records/history` | Kept facts, optionally by subject; the current facts naming one entity; the earlier intervals of one fact | 20 per page by default, 100 at most; previews of 512 characters |
 | `POST /v1/entities/list`, `/entities/get` | Kept entities; one entity's canonical name, spellings and speaker binding | 1–100 per page; previews of 512 characters |
 
 A citation does not re-run recall. A saved fact id stays resolvable after it is replaced, and the
