@@ -1,0 +1,47 @@
+-- Copyright 2026 The Taisce Authors
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- ── The walk names its project, so the cap bounds a busy entity among quiet ones ────────────────
+--
+-- Each hop of the walk takes an entity's current facts in fact_id order and stops at the fanout
+-- cap. 0065 gave it two indexes that hold them in that order, led by the entity, with the project
+-- checked on each row — because the walk named its projects as a list, and no single order can be
+-- read across the several ranges a list on a leading column is.
+--
+-- That bound held on a fixture where one entity holds most of the facts. On one shaped like an
+-- instance — thousands of entities with a few facts each and one busy one — it did not. Measured
+-- on 305,000 facts: 5,000 rows read at the busy entity for a cap of 64.
+--
+-- ── WHY ─────────────────────────────────────────────────────────────────────────────────────────
+--
+-- The planner chooses a plan for a hop before it knows which entity the hop is at, so it plans for
+-- a typical one. It also cannot know that an entity belongs to one project, so it prices the
+-- entity-led index as fetching that entity's rows from every project and discarding the others.
+-- Against that stood an index that leads with the project and the entity and holds no order:
+-- cheaper to reach by its estimate, followed by a sort of what, for a typical entity, is a handful
+-- of rows. It chose that. For a typical entity it was right. For the busy one it read everything.
+--
+-- ── WHAT CHANGES ────────────────────────────────────────────────────────────────────────────────
+--
+-- A walk reads one project — the only caller there is has always named exactly one — and names it
+-- by equality. These two indexes lead with the project, then the entity, then fact_id. With both
+-- equalities in the index and the order after them, the ordered seek is never the dearer plan: it
+-- reaches the same rows as any other index could and does not sort them. Same fixture: 65 rows.
+--
+-- Leading with the project was not enough on its own. With the project still named as a list, the
+-- same index read 5,000: 0065's reasoning about lists holds, and the list is what had to go.
+--
+-- ── WHAT STAYS, AND FOR HOW LONG ────────────────────────────────────────────────────────────────
+--
+-- The entity-led indexes of 0065 stay. The previous release's walk still names its projects as a
+-- list and is planned on them, and a release's schema is one the previous release can serve on.
+-- They have no reader in this release and are removed by the one after.
+--
+-- ── WHAT IT COSTS ───────────────────────────────────────────────────────────────────────────────
+--
+-- Two more indexes on every fact written or superseded, beside the two they replace, for one
+-- release. Built inside the migration's transaction, so writes to fact wait while they build.
+CREATE INDEX fact_subject_project_walk_idx ON {schema}.fact (scope, subject_entity_id, fact_id)
+    WHERE upper_inf(valid) AND upper_inf(known) AND subject_entity_id IS NOT NULL;
+CREATE INDEX fact_object_project_walk_idx ON {schema}.fact (scope, object_entity_id, fact_id)
+    WHERE upper_inf(valid) AND upper_inf(known) AND object_entity_id IS NOT NULL;

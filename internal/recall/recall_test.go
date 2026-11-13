@@ -2,6 +2,7 @@ package recall_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -256,11 +257,13 @@ func TestAnEntityIsAnAnchorFromEitherEndOfAFact(t *testing.T) {
 	}
 }
 
-// ── The soft boundary ─────────────────────────────────────────────────────────────────────────
+// ── One project ─────────────────────────────────────────────────────────────────────────────────
 //
-// A project is a permission, so the authorised set is an argument on every read. A principal granted
-// two projects recalls across both in one bundle; one granted a single project sees only it.
-func TestARecallSeesOnlyTheProjectsItWasAuthorisedFor(t *testing.T) {
+// A recall reads the one project its caller was authorised for. A second project's facts do not
+// come back, and a recall asked to read two is refused: the walk names its project by equality,
+// which is what bounds each hop, and a walk across two would read only the first while appearing
+// to have read both.
+func TestARecallReadsTheOneProjectItWasAuthorisedFor(t *testing.T) {
 	ctx := context.Background()
 	_, _, recaller := world(t, "rc_scope",
 		turn("p1", "Marta works at Ensera."),
@@ -279,12 +282,8 @@ func TestARecallSeesOnlyTheProjectsItWasAuthorisedFor(t *testing.T) {
 		t.Fatalf("expected only p1's fact, got %+v", only.Facts)
 	}
 
-	both, err := recaller.Recall(ctx, []string{"p1", "p2"}, "What about Marta and Cork?")
-	if err != nil {
-		t.Fatalf("recall across two projects: %v", err)
-	}
-	if len(both.Facts) != 2 {
-		t.Fatalf("a principal granted both projects should recall across them: %+v", both.Facts)
+	if both, err := recaller.Recall(ctx, []string{"p1", "p2"}, "What about Marta and Cork?"); !errors.Is(err, pg.ErrWalkReadsOneProject) {
+		t.Fatalf("a recall across two projects must be refused, got %+v %v", both.Facts, err)
 	}
 }
 

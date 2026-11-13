@@ -5,6 +5,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -129,6 +130,9 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 	return s.FactsAboutForSubject(ctx, scopes, entityIDs, limit, sources, at, hops, "")
 }
 
+// ErrWalkReadsOneProject is returned when a walk is asked to read more than one project.
+var ErrWalkReadsOneProject = errors.New("a walk reads one project, and was asked for several")
+
 // FactsAboutForSubject applies attribution before fanout at EVERY hop, including through shared
 // named entities. Filtering the final bundle would already have let other people's edges guide it.
 // The second return says whether any branch of the walk hit the fanout cap. It is not the same thing
@@ -139,6 +143,16 @@ func (s *RecallStore) FactsAbout(ctx context.Context, scopes, entityIDs []string
 func (s *RecallStore) FactsAboutForSubject(ctx context.Context, scopes, entityIDs []string, limit int,
 	sources []string, at domain.AsOf, hops int, subject string) ([]domain.CitedFact, bool, error) {
 
+	// A walk reads one project. With none named it reads nothing — a read must not widen because
+	// its permission list is missing. With several it is refused, because the statement names its
+	// project by equality: that is what lets each hop be one ordered seek that stops at the cap
+	// (0081), and a walk across projects would quietly read only the first.
+	if len(scopes) == 0 {
+		return nil, false, nil
+	}
+	if len(scopes) > 1 {
+		return nil, false, ErrWalkReadsOneProject
+	}
 	if len(sources) == 0 {
 		// An empty set returns nothing rather than everything. A caller that computed its source
 		// list and got nothing meant nothing; the alternative — treating empty as unrestricted — is
@@ -285,7 +299,7 @@ WITH RECURSIVE reachable AS (
                          lower(f.valid) AS valid_from, upper(f.valid) AS valid_until, f.source_role,
                          row_number() OVER (ORDER BY f.fact_id) AS ordinal
                     FROM {schema}.fact f
-                   WHERE f.scope = ANY($1)
+                   WHERE f.scope = ($1::text[])[1]
                      AND f.subject_entity_id = r.entity_id
                      AND f.source_role = ANY($4)
                      AND ($7::text IS NULL OR f.data_subject_id=$7)
@@ -307,7 +321,7 @@ WITH RECURSIVE reachable AS (
                          lower(f.valid) AS valid_from, upper(f.valid) AS valid_until, f.source_role,
                          row_number() OVER (ORDER BY f.fact_id) AS ordinal
                     FROM {schema}.fact f
-                   WHERE f.scope = ANY($1)
+                   WHERE f.scope = ($1::text[])[1]
                      AND f.object_entity_id = r.entity_id
                      AND f.source_role = ANY($4)
                      AND ($7::text IS NULL OR f.data_subject_id=$7)
