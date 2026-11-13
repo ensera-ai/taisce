@@ -237,6 +237,25 @@ states it. The usage score that would rank suggested expressions returns 0.0 for
 own test pins that as a known defect (**Fact**, `semantic/tests/test_usage_score.py`). Feedback here
 changes nothing until somebody promotes it into a correction or a retraction, and then it does.
 
+**Its knowledge graph, and ours — two graphs of different things.** Its nodes are databases, schemas,
+tables, columns, saved queries, business terms and their attributes; its edges are foreign keys,
+shared queries and relations between terms such as `IS_A`, `PART_OF`, `REPRESENTS` and `SEMANTIC_FK`
+(**Fact**, `catalog/constants.py`, `semantic/constants.py`). It holds no fact about an individual
+thing: rows stay in the source database (**Inference**, from the README). The graph here is the
+facts themselves, each edge carrying when it held, when it was known, and the words behind it; no
+time or evidence on an edge was found there (**Unverified**). Both are tables in PostgreSQL and
+neither uses a graph engine (**Fact**, README). So neither is a superset of the other, and "the same
+knowledge graph" is not a claim either side can make.
+
+What its graph can be asked that ours cannot is two things, tracked in
+[#294](https://github.com/ensera-ai/taisce/issues/294). It serves a path between two terms and a
+paged list of a node's neighbours, and a view of the whole graph (**Fact**,
+`server/exploration/router.py`; the path function itself was not read). Here a recall walks one or
+two hops from each entity a question names, so a connection can be visible in an answer and nothing
+states it as one; and the facts around one entity can be reached only by asking a question, which
+returns a bounded, unranked sample, because the record inventory filters by data subject and by
+nothing else.
+
 ## Rejected, so it is not proposed again
 
 **A model discovering entity types**, for the reason given above: it moves a decision a foreign key
@@ -269,7 +288,12 @@ no counterpart in free text; erasure by subject with a counted residual is the m
 per-record class was removed as inert. *A generation model per purpose*: four roles with fallback
 there (**Fact**, README); one model serves extraction, reports and compaction here and no measurement
 says a second would pay. *Loading the vocabulary from a file*: adding a relation already answers
-"already there" distinctly so that a script can loop, and a second format has no reader.
+"already there" distinctly so that a script can loop, and a second format has no reader. *A graph
+engine or a graph query language*: it uses neither. *A picture of the whole graph*: its graph is a
+few dozen terms over a schema, and a fact graph is as large as its project. *Applying `instance_of`,
+`part_of` or `same_as` when answering*: they are relations a fact can carry and resolution does not
+apply them; doing so changes what an answer contains, and waits on the same measure as any other
+change to the read path ([#282](https://github.com/ensera-ai/taisce/issues/282)).
 
 ## What this does not tell us
 
