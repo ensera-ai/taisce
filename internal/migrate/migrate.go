@@ -39,6 +39,16 @@ const maxIdentifierLength = 63
 //go:embed sql/*.sql control/*.sql
 var scripts embed.FS
 
+// oldestServed is the newest memory migration the previous release carries: the oldest schema
+// version a binary may have been built for and still serve on the schema this one installs.
+//
+// A file of its own, and not a constant, because it changes with every release and is the one
+// thing a release has to remember to move. A test reads the previous release's tag and fails when
+// the two disagree, so it cannot be forgotten for longer than one build.
+//
+//go:embed oldest-served
+var oldestServed string
+
 // Memory and control have independent migration sequences within one instance. Schema parameters
 // support upgrades of existing namespace names and isolated database fixtures, not tenant routing.
 const (
@@ -119,6 +129,34 @@ func BuiltFor() (int, error) {
 	return all[len(all)-1].Version, nil
 }
 
+// OldestServed is the oldest schema version a binary may have been built for and still serve on
+// the schema this binary installs: the previous release's.
+func OldestServed() (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(oldestServed))
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("the oldest schema version served is not a migration number: %q", strings.TrimSpace(oldestServed))
+	}
+	return n, nil
+}
+
+// recordOldestServed writes that number into a namespace that has just been migrated.
+//
+// After the migrations and not in one: a migration that has been released is never edited, and
+// this moves every release. It only ever rises. A namespace migrated by a newer binary and then
+// reached by an older runner keeps the newer number, because what the schema needs from a binary
+// did not go down when an older one looked at it.
+func recordOldestServed(ctx context.Context, on statements, schema Schema) error {
+	oldest, err := OldestServed()
+	if err != nil {
+		return err
+	}
+	if _, err := on.Exec(ctx, schema.SQL(
+		`UPDATE {schema}.schema_serves SET oldest_binary = GREATEST(oldest_binary, $1) WHERE singleton`), oldest); err != nil {
+		return fmt.Errorf("record the oldest binary %q serves: %w", schema, err)
+	}
+	return nil
+}
+
 // Apply upgrades an instance memory namespace. Each migration and its version marker commit in
 // one transaction, so failure leaves the last fully applied version. Project creation never calls it.
 func Apply(ctx context.Context, pool *pgxpool.Pool, schema Schema) (applied []int, err error) {
@@ -127,8 +165,10 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, schema Schema) (applied []in
 		return nil, err
 	}
 	err = withNamespaceLock(ctx, pool, schema, func(on statements) error {
-		applied, err = apply(ctx, on, schema, all)
-		return err
+		if applied, err = apply(ctx, on, schema, all); err != nil {
+			return err
+		}
+		return recordOldestServed(ctx, on, schema)
 	})
 	return applied, err
 }

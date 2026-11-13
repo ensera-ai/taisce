@@ -76,7 +76,12 @@ func RecordFormationStandDowns(ctx context.Context, db HealthExecutor, schema Sc
 // was built for.
 var ErrSchemaBehind = errors.New("the schema is older than this binary was built for")
 
-// CheckSchemaBuiltFor refuses a schema older than the version this binary was built to run against.
+// ErrBinaryBehind is returned when the schema has moved further than this binary's release was
+// ever checked against.
+var ErrBinaryBehind = errors.New("this binary is older than the schema serves")
+
+// CheckSchemaBuiltFor refuses a schema older than the version this binary was built to run against,
+// and a schema that has moved past what this binary's release was checked against.
 //
 // # What it is for
 //
@@ -97,8 +102,13 @@ var ErrSchemaBehind = errors.New("the schema is older than this binary was built
 // migration commits, before a new one has been probed — a moment with nothing ready, on every
 // upgrade, to guard against something that check already refuses.
 //
-// What that leaves is a process two or more releases old, which the promise does not cover and this
-// does not refuse (#257).
+// # The other side, and why it is not symmetrical
+//
+// What that promise does not cover is a process two or more releases old. So the schema carries the
+// oldest version a binary may have been built for and still serve (0082): the previous release's,
+// written by whoever migrated. A binary built for less reports not ready. The previous release is
+// at that number, not below it, and stays ready — so the roll of an ordinary upgrade is untouched,
+// and only a binary no check ever ran against this schema stands down when the migration commits.
 //
 // A namespace with no record of migrations at all is behind by everything.
 func CheckSchemaBuiltFor(ctx context.Context, pool *pgxpool.Pool, schema Schema, builtFor int) error {
@@ -115,6 +125,16 @@ func CheckSchemaBuiltFor(ctx context.Context, pool *pgxpool.Pool, schema Schema,
 	if applied < builtFor {
 		return fmt.Errorf("%w: it is at version %d and this binary was built for version %d; "+
 			"waiting for the migration", ErrSchemaBehind, applied, builtFor)
+	}
+	// The schema is at least what this binary was built for, so the table that holds the number
+	// exists whenever this binary is new enough to ask.
+	var oldest int
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT oldest_binary FROM {schema}.schema_serves WHERE singleton`)).Scan(&oldest); err != nil {
+		return fmt.Errorf("read the oldest binary the schema serves: %w", err)
+	}
+	if builtFor < oldest {
+		return fmt.Errorf("%w: it was built for version %d, the schema is at version %d and serves binaries built for %d or later; "+
+			"this process is more than one release behind and is waiting to be replaced", ErrBinaryBehind, builtFor, applied, oldest)
 	}
 	return nil
 }

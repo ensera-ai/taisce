@@ -313,6 +313,33 @@ about what a serving process needs: `internal/migrate` asserts the migration set
 `internal/docsite` asserts the generated schema reference, and `scripts` asserts the repository's
 scripts and workflows.
 
+### A process more than one release behind stands down
+
+The promise is one release at a time, and an operator can still upgrade across two in one step. The
+processes of the old release then serve, until the roll replaces them, on a schema that was only
+checked against the release in between.
+
+So the schema records the oldest schema version a binary may have been built for and still serve:
+`schema_serves.oldest_binary`, written after the migrations by whoever ran them
+([0082](../../internal/migrate/sql/0082_the_schema_says_how_old_a_binary_may_be.sql)). It is the
+newest migration the previous release carries. On the readiness check it already runs, a process
+compares the version it was built for with that number:
+
+| The process was built for | It is |
+|---|---|
+| a version newer than the schema | not ready, and waiting for the migration |
+| the schema's version, or the previous release's | ready |
+| anything older | not ready, and says once in its log that it is more than one release behind |
+
+The previous release is at the number and not below it, so an ordinary upgrade keeps its old
+processes serving exactly as before. `TestABinaryTwoReleasesOldIsNotReadyAndThePreviousOneIs` holds
+all three rows.
+
+The number is a file, `internal/migrate/oldest-served`, because it moves with every release.
+`TestTheOldestBinaryServedIsThePreviousReleases` reads the previous release's tag and fails when the
+file does not name that release's schema, so the first change after a release cannot be merged
+without moving it.
+
 ### What it does not cover
 
 - **Rows only the new release writes.** The previous release's tests write the previous release's
@@ -323,8 +350,10 @@ scripts and workflows.
 - **What the previous release's suite does not exercise.** The suite is the working definition of
   what that release needs. It is wide, and it is not everything; the model path is in neither
   release's suite.
-- **A process two or more releases old.** Nothing stops it serving on a schema that has since
-  dropped what it reads. [#257](https://github.com/ensera-ai/taisce/issues/257) is that gap.
+- **A process two or more releases old, if it predates the check below.** From the release that
+  carries migration `0082`, a process more than one release behind stands down by itself (next
+  section). A process older than that release never looks, and nothing stops it serving on a schema
+  that has dropped what it reads.
 - **Locks and duration**, as the table says.
 
 ### The check, run against a real release — 2026-11-12
