@@ -402,11 +402,34 @@ after the suite, which is how `make test` calls it. Two at once need two databas
 Adding a table, a nullable column, a column with a default, an index, or a wider `CHECK` list needs
 no second step.
 
+A `CHECK` can land in one release when the same migration puts a `BEFORE` trigger in front of it
+that makes every write satisfy it. The trigger runs before the check, so the previous release never
+meets a refusal. That is only right when changing the value is itself the decided behaviour, not a
+way around the table above.
+[0083](../../internal/migrate/sql/0083_an_entitys_kind_is_one_of_six_whoever_writes_it.sql) does
+this for an entity's kind ([D72](../decisions/D72.md)).
+
 Some early migrations carry upgrade logic of their own. Control 0003 backfills a credential's single
 project. [0024](../../internal/migrate/sql/0024_project_names_fit_the_provisioning_contract.sql)
 refuses invalid historical project names atomically.
 [0025](../../internal/migrate/sql/0025_unfinished_observations_reserve_ingestion_capacity.sql) keeps a
 backlog that exceeds its new limit. They remain and are tested.
+
+[0083](../../internal/migrate/sql/0083_an_entitys_kind_is_one_of_six_whoever_writes_it.sql) rewrites
+rows. An entity whose kind is not one of the six becomes a `thing`, and the kind it had is not kept.
+To see what an upgrade across it will change, count first, in each memory namespace:
+
+```sql
+SELECT entity_type, count(*) FROM memory.entity
+ WHERE entity_type <> ALL (ARRAY['person','organisation','place','time','value','thing'])
+ GROUP BY 1 ORDER BY 2 DESC;
+```
+
+It also switches one trigger off for one statement. Any update of an entity discards its embedding
+under a lock held to the end of the transaction, and a migration is one transaction: rewriting
+20,000 entities that way failed with "out of shared memory". A migration that updates many rows of
+a table whose triggers take a lock per row has the same problem, and the same question to answer
+before it switches anything off: does the trigger's work depend on the column being changed?
 
 ## Adding a migration
 

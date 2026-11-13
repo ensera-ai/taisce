@@ -269,7 +269,8 @@ func TestTheVocabularyTypesTheObjectWhenTheModelDidNot(t *testing.T) {
 // each claim is still a claim, because the kind was never what made it one.
 //
 // What this does not hold: the column itself. A statement that does not pass through this package
-// can still write anything there, and that is #289.
+// is held by the schema, which stores a kind outside the six as `thing` and refuses a seventh
+// wherever that did not happen (D72).
 func TestAKindOutsideTheClosedSetIsTreatedAsNotGiven(t *testing.T) {
 	content := "Atlas works at Ensera."
 	for _, written := range []string{

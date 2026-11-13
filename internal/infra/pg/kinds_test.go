@@ -21,32 +21,38 @@ import (
 // catalogue rather than from the migration's text: what matters is the rule in force, not the file
 // that once wrote it.
 //
-// It is the constraint on a relation's object end that is read, because that is where the schema
-// closes the set today. The column an entity's own kind is stored in carries no constraint yet
-// (#289), which is why this test cannot be about that column.
+// The schema states the set in three places, and each is read: the constraint on a relation's
+// object end, the constraint on the column an entity's own kind is stored in, and the condition of
+// the trigger that gives that column `thing` for anything else. The last two are one rule in two
+// halves — the trigger decides what is not a kind and the check refuses it — so a kind added to one
+// and not the other would be stored by the first and refused by the second.
 func TestTheKindsExtractionAdmitsAreTheKindsTheSchemaAdmits(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
 	schema := tenant(t, pool, "kinds_are_one_set")
 
-	var definition string
-	if err := pool.QueryRow(ctx, schema.SQL(`
-		SELECT pg_get_constraintdef(c.oid)
-		  FROM pg_constraint c
-		 WHERE c.conname = 'predicate_object_kind_chk'
-		   AND c.conrelid = '{schema}.predicate'::regclass`)).Scan(&definition); err != nil {
-		t.Fatalf("read the constraint that closes a relation's object kind: %v", err)
-	}
-
-	var inSchema []string
-	for _, m := range regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(definition, -1) {
-		inSchema = append(inSchema, m[1])
-	}
 	inMemory := domain.Kinds()
-	sort.Strings(inSchema)
 	sort.Strings(inMemory)
-	if len(inSchema) == 0 || strings.Join(inSchema, ",") != strings.Join(inMemory, ",") {
-		t.Fatalf("the schema admits %v and extraction admits %v; they are one set\nconstraint: %s", inSchema, inMemory, definition)
+	for stated, read := range map[string]string{
+		"the check on a relation's object kind": `SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+		 WHERE c.conname = 'predicate_object_kind_chk' AND c.conrelid = '{schema}.predicate'::regclass`,
+		"the check on an entity's kind": `SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+		 WHERE c.conname = 'entity_kind_chk' AND c.conrelid = '{schema}.entity'::regclass`,
+		"the condition of the trigger on an entity's kind": `SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t
+		 WHERE t.tgname = 'entity_kind_outside_the_six_is_not_given' AND t.tgrelid = '{schema}.entity'::regclass`,
+	} {
+		var definition string
+		if err := pool.QueryRow(ctx, schema.SQL(read)).Scan(&definition); err != nil {
+			t.Fatalf("read %s: %v", stated, err)
+		}
+		var inSchema []string
+		for _, m := range regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(definition, -1) {
+			inSchema = append(inSchema, m[1])
+		}
+		sort.Strings(inSchema)
+		if len(inSchema) == 0 || strings.Join(inSchema, ",") != strings.Join(inMemory, ",") {
+			t.Fatalf("%s admits %v and extraction admits %v; they are one set\n%s", stated, inSchema, inMemory, definition)
+		}
 	}
 
 	// Each kind is also put to the constraint itself, so the reading of its definition above is not
