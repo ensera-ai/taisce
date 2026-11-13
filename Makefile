@@ -18,7 +18,7 @@ PERF_COMPOSE = TAISCE_PORT=$(PERF_PORT) TAISCE_PERF_POSTGRES_PORT=$(PERF_POSTGRE
 	TAISCE_INFERENCE_API_KEY=perf-forms-nothing TAISCE_INFERENCE_ALLOWLIST=forms-nothing.invalid \
 	docker compose --project-name $(PERF_PROJECT) -f compose.yaml -f compose.perf.yaml
 
-.PHONY: substrate db-up db-down test vuln vuln-released gate gate-image licence signoff version test-inference golden build contract freeze-contract decisions \
+.PHONY: substrate db-up db-down test upgrade-check vuln vuln-released gate gate-image licence signoff version test-inference golden build contract freeze-contract decisions \
 	perf-config perf-up perf-down perf-reset-stats perf-workload perf-stats site site-serve
 
 substrate:
@@ -84,6 +84,13 @@ COVER_PROFILE ?= coverage.out
 test: licence
 	TAISCE_TEST_DSN="$(TEST_DSN)" go test -count=1 -timeout 30m -coverpkg=./... -coverprofile=$(COVER_PROFILE) ./...
 	./scripts/coverage-gate.sh $(COVER_PROFILE)
+	TAISCE_TEST_DSN="$(TEST_DSN)" ./scripts/upgrade-check.sh
+
+# The previous release, run on this tree's migrations: what an upgrade promises (D58). It is the last
+# step of `make test` and not a target somebody remembers, for the reason coverage is: a gate nobody
+# runs is not a gate. Named here as well so a migration can be checked without the whole suite.
+upgrade-check:
+	TAISCE_TEST_DSN="$(TEST_DSN)" ./scripts/upgrade-check.sh
 
 # The gate a change passes before it merges: the same checks the hosted workflow ran —
 # licence, the full suite with the coverage floor, vet, and the reachable-advisory check — in a Linux

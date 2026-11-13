@@ -183,7 +183,7 @@ flowchart TD
    administrative connection. It runs before anything is minted, so a deployment whose boundary has
    drifted stops here.
 4. **Provision the project** named by `-project` (default `default`) with `ProvisionScope`.
-5. **Issue credentials.**
+6. **Issue credentials.**
    - An operator credential is minted only when none is live.
    - A project credential is minted only when no live credential reaches this project.
    - A restart therefore mints nothing, and bootstrapping a new project on an existing instance does
@@ -269,36 +269,109 @@ later migrations changed. The schema today works like this:
 
 The [data model](data-model.md#where-early-migration-comments-differ) lists the other differences.
 
-## Upgrades before the first supported release
+## What an upgrade promises
 
-Taisce has not had its first supported release yet. Until then:
+An upgrade is a roll. The migration commits while processes of the previous release are still
+serving, and they go on serving against the new schema until the last of them is replaced. Two
+promises cover the two halves of that, and each has something that runs behind it
+([D58](../decisions/D58.md)).
+
+**A new process waits for its schema.** It does not report ready on a schema older than the one it
+was built for; it takes no traffic, and becomes ready on its own when the migration commits
+(`CheckSchemaBuiltFor` in [operationalhealth.go](../../internal/infra/pg/operationalhealth.go);
+[D47](../decisions/D47.md)).
+
+**The previous release can serve on this release's schema.** A release may add to the schema. What it
+removes, renames or tightens must be something the release before it does not rely on. So a removal
+takes two releases: one that stops reading the thing, and the next, which drops it.
 
 | Promised | Not promised |
 |---|---|
-| The migrations build the current schema reproducibly from an empty database. | Compatibility between one unreleased commit's schema and another's. |
-| Each migration is atomic with its version marker. | Repair of legacy data from earlier unreleased deployments. |
-| Atomic writes, project boundaries, least privilege, provenance, erasure and rebuild hold at every commit. | Compatibility shims, mixed-binary operation or zero-downtime upgrades. |
-| A schema baseline, version support, upgrades and rollback will be defined before the first supported release. | Down migrations. |
+| A rolling upgrade from one release to the next: both releases serve on the new schema while the roll lasts. | A rolling upgrade that skips a release. Go one release at a time, or scale serving to zero for the upgrade. |
+| The previous release's binary can be put back on the new schema, for the same reason and with the same limit: what the newer release wrote in the meantime is not covered. | Down migrations. A schema goes forward only; going back further than one release is a restore. |
+| Each migration is atomic with its version marker, and a released migration is never edited. | That a migration is quick. One that locks a busy table blocks the processes serving on it until it commits. |
+| The migrations build the current schema reproducibly from an empty database. | Anything about rows only the new release writes — see below. |
 
-One thing an upgrade does have, whatever is later promised: **a process does not report ready on a
-schema older than the one it was built for.** An upgrade starts new processes and the migration at
-the same moment, and nothing orders them. A new process that reaches the database first waits,
-unready and taking no traffic, and becomes ready on its own when the migration commits
-(`CheckSchemaBuiltFor` in [operationalhealth.go](../../internal/infra/pg/operationalhealth.go);
-[D47](../decisions/D47.md)). The check is one-sided. A process from the previous release, still
-serving after the migration, is not refused: whether it is safe there depends on what a migration is
-allowed to change between releases, which is the promise in the right-hand column that has not been
-made.
+### What holds it
 
-Some early migrations do carry upgrade logic. Control 0003 backfills a credential's single project.
-[0024](../../internal/migrate/sql/0024_project_names_fit_the_provisioning_contract.sql) refuses invalid
-historical project names atomically.
+[scripts/upgrade-check.sh](../../scripts/upgrade-check.sh) is the last step of `make test`, so it runs
+in the build, in the release's own gate and in `make gate`. It finds the newest release before the
+commit by its tag and then:
+
+1. refuses any change to a migration that release shipped — a database that recorded the version
+   never runs the file again, so new installs and upgraded ones would stop being the same schema;
+2. if nothing was added, stops: the schema is the one that release was built and tested on;
+3. otherwise checks that release's source out beside this one, replaces its two migration directories
+   with this tree's, and runs every one of its packages whose tests open the database.
+
+The code and the assertions are the previous release's. Only the schema is new. A migration that
+takes away something that release needs fails in the pull request that adds it, and the failing test
+is the previous release's own, naming what it could no longer do.
+
+Three of that release's packages are left out, because their tests are about the repository and not
+about what a serving process needs: `internal/migrate` asserts the migration set itself,
+`internal/docsite` asserts the generated schema reference, and `scripts` asserts the repository's
+scripts and workflows.
+
+### What it does not cover
+
+- **Rows only the new release writes.** The previous release's tests write the previous release's
+  data. If this release starts writing a value the previous one reads and does not know — a new kind
+  in a column it switches on — no test of either release puts the two together. A change like that
+  ships its reader a release before its writer, and nothing here checks that it did. This matters
+  for a moment during a roll, and for as long as it lasts after going back a release.
+- **What the previous release's suite does not exercise.** The suite is the working definition of
+  what that release needs. It is wide, and it is not everything; the model path is in neither
+  release's suite.
+- **A process two or more releases old.** Nothing stops it serving on a schema that has since
+  dropped what it reads. [#257](https://github.com/ensera-ai/taisce/issues/257) is that gap.
+- **Locks and duration**, as the table says.
+
+### The check, run against a real release — 2026-11-12
+
+The fixture test shows the check's mechanics. This is it run for real, on a development machine,
+against v0.7.0 and a real database: once with an addition and once with a removal. Both migrations
+were scratch files and are not in the tree.
+
+| Migration added on top of v0.7.0's schema | v0.7.0's packages | Result |
+|---|---|---|
+| `ALTER TABLE formation_health ADD COLUMN note text`, and a new table | 8 run, 8 pass | `v0.7.0 passes on this tree's schema`, exit 0 |
+| `ALTER TABLE formation_health RENAME COLUMN heartbeat_at TO beat_at` | 8 run, 4 fail, 21 tests | `v0.7.0 does not pass on this tree's schema`, exit 1 |
+
+The eight packages are `cmd/taisce`, `internal/api`, `internal/conformance`, `internal/credential`,
+`internal/formation`, `internal/infra/inference`, `internal/infra/pg` and `internal/recall`. The
+rename failed four of them — `cmd/taisce`, `internal/api`, `internal/formation` and
+`internal/infra/pg` — and the first failure names the cause in the previous release's own words:
+
+```
+--- FAIL: TestOperatorHealthCommandReturnsOnlyAggregates
+    health_test.go:132: read operational health: ERROR: column h.heartbeat_at does not exist (SQLSTATE 42703)
+```
+
+That is a v0.7.0 process failing its health read on the new schema, which is what an operator would
+have seen during the roll.
+
+One thing the first attempt taught: the two runs were started against one database and interfered,
+because some of that release's tests use fixed namespace names. The check is one run on one database,
+after the suite, which is how `make test` calls it. Two at once need two databases.
+
+### Writing a change that removes something
+
+| To do this | This release | The next release |
+|---|---|---|
+| Drop a column or table | Stop reading and writing it | Drop it |
+| Rename a column | Add the new one, write both, read the new one | Drop the old one |
+| Make a column `NOT NULL`, or add a `CHECK` | Write values that satisfy it everywhere; backfill | Add the constraint |
+| Change what a trigger or function refuses | Only if the previous release never sends what it will now refuse | Otherwise, here |
+
+Adding a table, a nullable column, a column with a default, an index, or a wider `CHECK` list needs
+no second step.
+
+Some early migrations carry upgrade logic of their own. Control 0003 backfills a credential's single
+project. [0024](../../internal/migrate/sql/0024_project_names_fit_the_provisioning_contract.sql)
+refuses invalid historical project names atomically.
 [0025](../../internal/migrate/sql/0025_unfinished_observations_reserve_ingestion_capacity.sql) keeps a
-backlog that exceeds its new limit. They remain and are tested. New migrations do not add logic of
-that kind for deployments that do not exist.
-
-The mechanism does not change either way: a database that recorded a version never runs that file
-again. Revise the schema by adding a migration, unless the database is disposable.
+backlog that exceeds its new limit. They remain and are tested.
 
 ## Adding a migration
 
@@ -308,9 +381,12 @@ again. Revise the schema by adding a migration, unless the database is disposabl
    cover. Add `COMMENT ON` where a DBA reading the catalog would need the reason.
 3. **Name every object through `{schema}`**, never through a literal namespace. In a control
    migration `{schema}` renders as `control`.
-4. **Keep it transaction-safe.** Use no `CONCURRENTLY` and no `VACUUM`, and weigh the locks held until
+4. **Check what the previous release needs from what you change.** Adding is free; removing,
+   renaming or tightening follows [the two-release table](#writing-a-change-that-removes-something).
+   `make upgrade-check` runs the previous release against your migration without the whole suite.
+5. **Keep it transaction-safe.** Use no `CONCURRENTLY` and no `VACUUM`, and weigh the locks held until
    commit against a table that is being served.
-5. **Decide what the memory login may do with a new table.** `grantMemoryToDataPlane` grants
+6. **Decide what the memory login may do with a new table.** `grantMemoryToDataPlane` grants
    `SELECT, INSERT, UPDATE, DELETE` on every table in the namespace. A table that holds policy (that
    is, anything deciding what the runtime may do) needs two more entries:
    - the `REVOKE` list in [planes.go](../../internal/migrate/planes.go);
@@ -318,14 +394,14 @@ again. Revise the schema by adding a migration, unless the database is disposabl
      with a drift case in [privileges_test.go](../../internal/migrate/privileges_test.go).
 
    Missing either entry fails silently.
-6. **A trigger function that must write what the memory login cannot** is declared
+7. **A trigger function that must write what the memory login cannot** is declared
    `SECURITY DEFINER` with `SET search_path=pg_catalog,pg_temp`. It schema-qualifies every relation,
    checks `TG_TABLE_SCHEMA`, `TG_TABLE_NAME` and `TG_OP`, and is followed by
    `REVOKE ALL ON FUNCTION ... FROM PUBLIC`. See
    [0025](../../internal/migrate/sql/0025_unfinished_observations_reserve_ingestion_capacity.sql) and
    [0037](../../internal/migrate/sql/0037_agent_artifacts_are_bounded_owned_storage.sql).
-7. **A new audit operation** re-declares `audit_operation_chk` with the complete list.
-8. **A new extension is not a migration.** It is a change to
+8. **A new audit operation** re-declares `audit_operation_chk` with the complete list.
+9. **A new extension is not a migration.** It is a change to
    [deploy/postgres](../../deploy/postgres/Dockerfile), to its initdb script and to the chart's
    initialisation list, and something in the code must read it.
 
