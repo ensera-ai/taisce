@@ -64,6 +64,48 @@ func TestAnApostropheOrHyphenInsideAWordSurvives(t *testing.T) {
 	}
 }
 
+// TestAPossessiveNamesTheThingAndNotADifferentThing holds a question's candidates to offering a
+// name without its possessive, as a second exact candidate and never as a guess.
+func TestAPossessiveNamesTheThingAndNotADifferentThing(t *testing.T) {
+	got := recall.Terms("What is Dervla Quinn's role at McDonald's, and where is O'Brien's desk?")
+	have := map[string]bool{}
+	for _, term := range got {
+		have[term] = true
+	}
+	// The name, with and without the possessive: the question may mean either, and each is looked
+	// up exactly. A name that really ends in 's is still offered as written.
+	for _, want := range []string{"dervla quinn's", "dervla quinn", "quinn", "mcdonald's", "mcdonald", "o'brien's", "o'brien"} {
+		if !have[want] {
+			t.Errorf("%q is not among the candidates: %v", want, got)
+		}
+	}
+	// Only the end of a candidate is a possessive. The apostrophe inside a name is the name.
+	for _, never := range []string{"o", "obrien", "dervla's", "quinn role"} {
+		if have[never] {
+			t.Errorf("%q is among the candidates, which is a guess and not a name that was written: %v", never, got)
+		}
+	}
+	if len(have) != len(got) {
+		t.Errorf("the candidate list repeats itself: %v", got)
+	}
+}
+
+// TestAQuestionInThePossessiveReachesWhatItNames is the same property against a real database: the
+// ordinary way to ask about a person finds the person.
+func TestAQuestionInThePossessiveReachesWhatItNames(t *testing.T) {
+	ctx := context.Background()
+	_, _, recaller := world(t, "rc_possessive", turn("p1", "Marta works at Ensera."))
+	for _, question := range []string{"Where is Marta's job?", "What do we know about Ensera's people?"} {
+		bundle, err := recaller.Recall(ctx, []string{"p1"}, question)
+		if err != nil {
+			t.Fatalf("%q: %v", question, err)
+		}
+		if len(bundle.Anchors) == 0 || len(bundle.Facts) != 1 {
+			t.Errorf("%q anchored %d entities and returned %d facts; it names something stored", question, len(bundle.Anchors), len(bundle.Facts))
+		}
+	}
+}
+
 // ── The journey, against a real deployment ────────────────────────────────────────────────────
 
 func testPool(t *testing.T) *pgxpool.Pool {

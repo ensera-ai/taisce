@@ -260,6 +260,28 @@ func corpus() []corpusCase {
 			content: "Thanks, that worked perfectly.",
 			why:     "#45 — an empty result is the correct answer far more often than not",
 		},
+		// ── A requirements document ────────────────────────────────────────────────────────────
+		//
+		// Measured on 2026-11-13: every date in a timetable was refused as not current, because
+		// the day had not come. What a deadline states is what the date is, and that holds now.
+		{
+			name:    "a deadline that has not come",
+			content: "Proposals are due on 4 April 2027.",
+			must:    []string{"due_on"},
+			why:     "a requirements document lost its whole timetable to the present-tense rule",
+		},
+		{
+			name:    "a scheduled start",
+			content: "The contract is scheduled to start on 1 June 2027.",
+			must:    []string{"scheduled_for"},
+			why:     "a schedule says what the date is, which holds before the date arrives",
+		},
+		{
+			name:    "a plan is still not the thing planned",
+			content: "I will move to Germany next year.",
+			mustNot: []string{"lives_in", "located_in"},
+			why:     "the guidance for deadlines must not let a future relation in as a present one",
+		},
 	}
 }
 

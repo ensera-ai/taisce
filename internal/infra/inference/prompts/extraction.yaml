@@ -116,6 +116,16 @@ tense: |-
   A relation that began in the past and still holds is PRESENT. "I have always worked at Ensera"
   holds now.
 
+  A DEADLINE OR A SCHEDULE IS PRESENT. "Proposals are due on 4 April" and "The contract is scheduled
+  to start on 1 June" say what the date is, and that holds now even though the day has not come.
+  Report `due_on` or `scheduled_for` with tense present, and make the subject the thing that is due
+  or scheduled — the proposals, the contract start — not the party it concerns. Do not report the
+  event itself as a future relation.
+
+  AN OBLIGATION IS PRESENT. "The contractor shall encrypt data at rest" and "The service must send
+  reminders by text message" state a duty that binds now, whether or not it has been done. Report
+  what whoever is bound is committed to, responsible for or required to do, with tense present.
+
   If you are unsure, do not guess "present".
 
 # The reply contract, which the parse depends on.

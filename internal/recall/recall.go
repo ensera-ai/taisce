@@ -510,6 +510,18 @@ func (r *Recaller) composeRest(ctx context.Context, scopes []string, question st
 //
 // Punctuation is dropped at token boundaries and nowhere else, so `work?` reaches `work` while
 // `o'brien` and `co-op` survive as written.
+//
+// # A possessive names the thing, not a different thing
+//
+// "What is Marta's role?" names Marta. The apostrophe is kept inside a word for `o'brien`, so the
+// word arrives as `marta's`, and an exact probe for that finds nothing. A window whose last word
+// ends in `'s` is therefore offered twice: as written, and without the possessive. Both are exact
+// probes of a whole candidate name. Nothing is stemmed and nothing is guessed — a name that really
+// ends in `'s` is still found as written, and the form without it matches only if an entity of
+// exactly that name is stored.
+//
+// Only the last word of a window, because that is where a possessive on a name sits: "Dervla
+// Quinn's" is a possessive of the two-word name, not of its first word.
 // Budget is what the recaller was built with, for the operations that share it.
 func (r *Recaller) Budget() Budget { return r.budget }
 
@@ -526,11 +538,13 @@ func Terms(question string) []string {
 	for start := range words {
 		for length := 1; length <= longestAnchor && start+length <= len(words); length++ {
 			term := strings.Join(words[start:start+length], " ")
-			if term == "" || seen[term] {
-				continue
+			for _, candidate := range []string{term, strings.TrimSuffix(term, "'s")} {
+				if candidate == "" || seen[candidate] {
+					continue
+				}
+				seen[candidate] = true
+				terms = append(terms, candidate)
 			}
-			seen[term] = true
-			terms = append(terms, term)
 		}
 	}
 	return terms
