@@ -336,8 +336,6 @@ var excused = []excuse{
 		why: "a turn the worker claimed under its project's lock", unique: [][2]string{{"observation", "observation_id"}}},
 	{file: "observationstore.go", name: "Park", untied: []string{"observation"},
 		why: "a turn the worker claimed under its project's lock", unique: [][2]string{{"observation", "observation_id"}}},
-	{file: "observationstore.go", name: "Unpark", untied: []string{"observation"},
-		why: "one turn by its identifier; the project is read back from the row and locked", unique: [][2]string{{"observation", "observation_id"}}},
 	{file: "embeddingbuild.go", name: "commitEmbeddingInputs", untied: []string{"observation o"},
 		why:    "the turn a message belongs to, reached from a chunk whose project is named",
 		unique: [][2]string{{"observation", "observation_id"}, {"turn_message", "chunk_id"}}},

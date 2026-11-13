@@ -325,6 +325,12 @@ scripts and workflows.
   release's suite.
 - **A process two or more releases old.** Nothing stops it serving on a schema that has since
   dropped what it reads. [#257](https://github.com/ensera-ai/taisce/issues/257) is that gap.
+- **A break that shows only sometimes.** The suite it runs is the previous release's, at its tag,
+  and cannot be edited. A test in it that depends on timing would fail the check at its own rate on
+  every change and blame the schema each time. So a package that fails is run once more: a failure
+  that repeats refuses the change, and one that does not is printed, named as a second run, and
+  does not. What a schema breaks it breaks every time; what this gives up is a race between a test
+  and something a migration changed. The first failure is always in the output.
 - **Locks and duration**, as the table says.
 
 ### The check, run against a real release — 2026-11-12

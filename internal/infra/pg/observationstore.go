@@ -571,38 +571,6 @@ SELECT observation_id::text, log_offset, formation_attempts, formation_error, pa
  WHERE scope = $1 AND parked_at IS NOT NULL
  ORDER BY log_offset`
 
-// Unpark returns a turn to the backlog, clearing what it learned from failing.
-//
-// Kept beside Park because a decision to stop trying that cannot be reversed is not a decision, it
-// is a deletion with extra steps.
-func (s *ObservationStore) Unpark(ctx context.Context, schema Schema, observationID string) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var scope string
-		err := tx.QueryRow(ctx, schema.SQL(unparkSQL), observationID).Scan(&scope)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("unpark turn: %w", err)
-		}
-		if _, err := tx.Exec(ctx, schema.SQL(lockScopeWatermarkSQL), scope); err != nil {
-			return fmt.Errorf("lock scope watermark: %w", err)
-		}
-		// Recomputed downward: the turn is in the backlog again, so a watermark that advanced past
-		// it while it was parked is now claiming a turn is formed that is not.
-		if _, err := tx.Exec(ctx, schema.SQL(advanceFormedWatermarkSQL), scope); err != nil {
-			return fmt.Errorf("advance formed watermark: %w", err)
-		}
-		return nil
-	})
-}
-
-const unparkSQL = `
-UPDATE {schema}.observation
-   SET parked_at = NULL, formation_attempts = 0, formation_failed_at = NULL, formation_error = NULL
- WHERE observation_id = $1 AND parked_at IS NOT NULL
-RETURNING scope`
-
 // ScopesWithBacklog names the scopes that have work waiting.
 //
 // The driver asks this rather than being told which scopes exist, because a scope is created by the

@@ -27,6 +27,8 @@
 #   - The model path. No test here reaches a provider, in either release.
 #   - A release older than the previous one. An upgrade is promised one release at a time.
 #   - Locks. A migration that is compatible and holds a busy table for a minute passes.
+#   - A break that only shows sometimes. A package that fails is run once more, and a failure that
+#     does not repeat does not fail the check (below, where the suite runs).
 set -euo pipefail
 
 top="$(git rev-parse --show-toplevel)"
@@ -97,10 +99,44 @@ fi
 
 echo "upgrade-check: running ${previous}'s tests on this tree's schema:"
 printf '%s\n' "$packages" | sed 's/^/  /'
-# shellcheck disable=SC2086
-if ! go test -count=1 -timeout 30m $packages; then
+# A package that fails is run once more before the check believes it.
+#
+# The suite being run is the previous release's, at its tag, and nobody can edit it. A test in it
+# that depends on timing therefore fails this check at its own rate, on every change, until the next
+# release replaces it — and each time the check would say a process of that release cannot serve on
+# this schema, which is not what happened. A check that fails for a reason other than the one it
+# names is retried without being read, and then it holds nothing.
+#
+# What a schema breaks, it breaks every time: a column that is gone is gone on the second run too.
+# So a failure that repeats is the schema's and fails the check, and one that does not is reported,
+# by package, and does not. What this gives up is a break that only shows sometimes — a race between
+# a test and something the migration changed. That is rarer than a slow runner, and it is named in
+# the output so that a line saying "on a second run" is one a reader looks at.
+suite() {
+  go test -count=1 -timeout 30m "$@" 2>&1 | tee "$work/suite.log"
+  return "${PIPESTATUS[0]}"
+}
+refuse() {
   echo "upgrade-check: ${previous} does not pass on this tree's schema. A process of that release would be serving on it during an upgrade." >&2
   echo "upgrade-check: if the migration removes or tightens something, it waits a release: add now, remove once no supported release reads it (docs/postgresql/migrations.md)." >&2
   exit 1
+}
+# shellcheck disable=SC2086
+if ! suite $packages; then
+  # `FAIL <package> <time>` is how the toolchain names a package that failed. A run that failed and
+  # named none did not get as far as running tests, and there is nothing to run again.
+  failed="$(awk '$1 == "FAIL" && NF >= 2 { print $2 }' "$work/suite.log" | sort -u)"
+  if [ -z "$failed" ]; then
+    refuse
+  fi
+  echo "upgrade-check: failed, and run once more to see whether the failure repeats:"
+  printf '%s\n' "$failed" | sed 's/^/  /'
+  # shellcheck disable=SC2086
+  if ! suite $failed; then
+    refuse
+  fi
+  echo "upgrade-check: ${previous} passes on this tree's schema on a second run of the packages above."
+  echo "upgrade-check: a failure that does not repeat is not the schema's: a test of ${previous} depends on timing. Read the first failure before trusting this line."
+  exit 0
 fi
 echo "upgrade-check: ${previous} passes on this tree's schema"

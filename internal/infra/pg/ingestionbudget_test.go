@@ -75,8 +75,8 @@ func TestBacklogCapacitySurvivesParkingAndReleasesOnFormationOrErasure(t *testin
 		t.Fatal(err)
 	}
 	assertIngestionAccounting(t, pool, schema, 3)
-	if err := store.Unpark(ctx, schema, first.ID); err != nil {
-		t.Fatal(err)
+	if changed, err := store.UnparkAudited(ctx, schema, "p1", first.ID, uuid.NewString()); err != nil || !changed {
+		t.Fatalf("unpark: %v %v", changed, err)
 	}
 	assertIngestionAccounting(t, pool, schema, 3)
 	for i := 0; i < 2; i++ {

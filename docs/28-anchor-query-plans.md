@@ -3,18 +3,21 @@
 
 # Exact anchoring: query plans
 
-Recall starts by finding the entities your question names. It matches each term against an
-entity's canonical name and its aliases. This page shows which query plans PostgreSQL picks for that
-lookup, measured on 2026-09-08 on a synthetic dataset.
+Recall starts by finding the entities your question names. It matches each term of the question
+against an entity's normalised name, inside the projects you may read. This page shows the query
+plan PostgreSQL picks for that lookup, read on 2026-11-13 on PostgreSQL 18.6 from a synthetic
+dataset.
 
 ## What this means for you
 
-- **The lookup uses indexes, not a table scan**, for a hit on a name, a hit on an alias, a missing
-  term and 128 missing terms at once.
+- **The lookup is one probe of a unique index per term, and nothing else.** A hit, a miss and 128
+  misses at once all use `entity_named_identity_uniq`, and none scans the entity table.
+- **The index leads with the project.** A probe for a name in your project descends to your
+  project's part of the index; another project's entities of the same name are not read.
 - **A question can match at most 256 entities.** A 257th match is refused before recall walks the
   graph.
-- **This shows query shape, not speed.** It was measured on a local machine and says nothing about
-  production latency, throughput or corpus size.
+- **This shows query shape, not speed.** It was read on a development machine and says nothing
+  about latency, throughput or corpus size.
 
 ## Run it yourself
 
@@ -23,39 +26,49 @@ TAISCE_TEST_DSN=<test database> go test -count=1 -v ./internal/infra/pg -run '^T
 ```
 
 The test ([`anchorplans_test.go`](../internal/infra/pg/anchorplans_test.go)) creates an isolated
-namespace with two projects, each holding 10,000 entities with 16 normalised aliases. It analyzes the
-table, then runs the real production query under `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`. It logs
-the full plans, fails if a table scan comes back on this dataset, and checks the returned project and
-match count. It does not turn off sequential scans to force a result.
+namespace with two projects, each holding 10,000 entities of the same names. It analyzes the table,
+then runs the production statement under `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`. It logs the full
+plans, fails if the entity table is scanned or the index is not used, and checks the returned
+project and match count. It does not turn off sequential scans to force a result.
 
 ## What the plans show
 
-| Query case | One combined OR expression (earlier form) | Separate name lookup and per-term alias lookup (current) |
-|---|---|---|
-| Name hit | Sequential scan of entities; 10,000 rows passed the project filter and 10,000 were rejected | B-tree lookup on project and name, plus an alias GIN probe |
-| Alias hit | Same sequential scan | Alias GIN probe finds two rows across projects; the project filter keeps one |
-| Missing term | Same sequential scan | Empty B-tree and GIN probes |
-| 128 missing terms | Parallel entity scan, matching every term across the project | 128 B-tree and 128 GIN probes, no entity table scan in the recorded plan |
+| Query case | Plan | Probes | Rows returned | Rows discarded by a filter |
+|---|---|---|---|---|
+| A name that is stored | Index scan on `entity_named_identity_uniq`, condition on project and name | 1 | 1 | 0 |
+| A name stored under many spellings | The same | 1 | 1 | 0 |
+| A name that is not stored | The same | 1 | 0 | 0 |
+| 128 names that are not stored | The same, once per term | 128 | 0 | 0 |
 
-A batched `normalized_aliases && $2` form used the indexes for single terms, but switched to a
-sequential scan for 128 terms, reading and discarding all 20,000 rows. So Taisce keeps one alias
-probe per term. Those repeated probes can read more buffers than a scan would, especially when the
-GIN index has pending entries, so using an index is not a promise of speed.
+Every case has the project and the name in the index condition and nothing in a filter, so no row
+is read and then thrown away. The second project's 10,000 entities carry the same names and none of
+them is touched: the index is on `(scope, normalized_name)`, and the probe names both.
+
+Work grows with the number of terms in the question, one probe each, and not with the number of
+entities stored.
+
+## Why there is one index and one probe
+
+An entity has one normalised name, and it is the key. The spellings a source used — different case,
+different spacing — are kept in `entity_name_receipt`, and a trigger requires every one of them to
+normalise to that same key ([0043](../internal/migrate/sql/0043_entity_name_variants_have_source_owners.sql),
+[0051](../internal/migrate/sql/0051_canonical_names_are_the_exact_anchor_key.sql)). So the probe on
+the name already reaches every spelling, and there is no second structure to search.
+
+What that leaves out is everything that is not the same name after normalisation: a misspelling, an
+inflection, a different word order. Those are not found by this statement. Whether they should be
+is an open decision ([#157](https://github.com/ensera-ai/taisce/issues/157)).
 
 ## How matches are ordered
 
 Matches are capped at 257 rows before the final sort. A 257th match refuses the request before the
 graph is walked. With 256 or fewer, every matching entity and term pair is sorted by longest term,
-then canonical name, then entity ID. A term listed twice, or a term that matches both a name and an
-alias, does not produce a duplicate match. Entity identity and attribution are unchanged.
+then canonical name, then entity ID. A term listed twice does not produce a duplicate match. Entity
+identity and attribution are unchanged.
 
-## What to watch out for
+## When the question is about one person
 
-The alias index covers the whole instance. When projects share an alias, the lookup can read index
-entries belonging to other projects before the project filter removes them. The test proves you only
-get your own project's results. It does not prove the work done is independent of other projects.
-
-Questions about one data subject also have to look up which sources support each entity. A separate
-alias table keyed by project would need to be compared under realistic alias skew, concurrent writes,
-erasure and index maintenance before it could replace the current layout. No such change has been
-made.
+A recall for one data subject adds two things to the statement: the entity that stands for the
+speaker, found by a probe of `entity_speaker_identity_uniq` on project and subject, and a check that
+each named entity has a source belonging to that subject, read from `projection_dependency`. The
+test above plans the statement without a subject; the per-subject form is not in the table.

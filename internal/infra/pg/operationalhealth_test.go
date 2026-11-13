@@ -6,6 +6,7 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/google/uuid"
 	"strings"
 	"testing"
 
@@ -57,8 +58,8 @@ func TestOperationalHealthSeparatesRequiredFormationAndNeverReturnsMemory(t *tes
 			t.Fatalf("diagnostics contain memory identifier/content: %s", wire)
 		}
 	}
-	if err := store.Unpark(ctx, schema, obs.ID); err != nil {
-		t.Fatal(err)
+	if changed, err := store.UnparkAudited(ctx, schema, "p1", obs.ID, uuid.NewString()); err != nil || !changed {
+		t.Fatalf("unpark: %v %v", changed, err)
 	}
 	if err := store.MarkFormed(ctx, schema, obs.ID); err != nil {
 		t.Fatal(err)

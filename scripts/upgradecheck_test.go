@@ -67,6 +67,19 @@ func TestTheReleaseStillFindsTheColumnItReads(t *testing.T) {
 		}
 	}
 }
+
+// A test that depends on timing, as a published release may carry: it fails the first time it is
+// run and passes after, when the environment asks it to.
+func TestThatIsSlowTheFirstTime(t *testing.T) {
+	marker := os.Getenv("FAILS_THE_FIRST_TIME")
+	if marker == "" {
+		return
+	}
+	if _, err := os.Stat(marker); err != nil {
+		_ = os.WriteFile(marker, nil, 0o600)
+		t.Fatal("the runner was slow this time")
+	}
+}
 `)
 	git("init", "--quiet", "--initial-branch=main")
 	git("add", "-A")
@@ -135,6 +148,26 @@ func TestAMigrationThePreviousReleaseCannotServeOnIsRefused(t *testing.T) {
 		}
 	})
 
+	// The previous release's suite cannot be edited, so a test in it that depends on timing would
+	// fail every change at its own rate and blame the schema each time.
+	t.Run("a failure of the release's own test that does not repeat is reported and not believed", func(t *testing.T) {
+		repo := released(t)
+		add(repo, "internal/migrate/sql/0002_a_thing_may_have_more.sql", "ALTER TABLE {schema}.thing ADD COLUMN more text;\n")
+		t.Setenv("FAILS_THE_FIRST_TIME", filepath.Join(t.TempDir(), "ran-once"))
+		out, err := upgradeCheck(t, repo, true)
+		if err != nil {
+			t.Fatalf("a test that failed once and then passed failed the check:\n%s", out)
+		}
+		for _, want := range []string{"TestThatIsSlowTheFirstTime", "run once more", "example.test/released/store", "on a second run", "depends on timing"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the check must show the first failure and say the pass was a second run; it lacks %q:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "v0.1.0 passes on this tree's schema\n") {
+			t.Errorf("a pass on a second run was reported in the words of a clean pass:\n%s", out)
+		}
+	})
+
 	for _, plane := range []string{"sql", "control"} {
 		t.Run("a removal of what the release reads is refused, in "+plane, func(t *testing.T) {
 			repo := released(t)
@@ -146,6 +179,10 @@ func TestAMigrationThePreviousReleaseCannotServeOnIsRefused(t *testing.T) {
 			// Refused by the release's own test, by name — not by this tree's, which passes anything.
 			if !strings.Contains(out, "TestTheReleaseStillFindsTheColumnItReads") || !strings.Contains(out, "v0.1.0 does not pass on this tree's schema") {
 				t.Errorf("the refusal must come from the previous release's test and say so:\n%s", out)
+			}
+			// What the schema broke is broken on the second run too, and that is what refuses it.
+			if strings.Count(out, "--- FAIL: TestTheReleaseStillFindsTheColumnItReads") != 2 || !strings.Contains(out, "run once more") {
+				t.Errorf("a failure that repeats must be seen to repeat before it is refused:\n%s", out)
 			}
 		})
 	}
