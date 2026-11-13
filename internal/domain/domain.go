@@ -1126,6 +1126,8 @@ const (
 	AuditFormationParked = "formation.parked"
 	AuditAuditSeal       = "audit.seal"
 	AuditAuditVerify     = "audit.verify"
+	// AuditAuditArchive is a sealed range leaving the ledger for a file, under a checkpoint.
+	AuditAuditArchive = "audit.archive"
 	// AuditAuditActivity is the console reading the ledger's own counts for a window: how many
 	// operations, of which kinds, allowed or refused. A read of the ledger is on the ledger like any
 	// other read an operator makes.
@@ -1174,7 +1176,7 @@ func RecordableOperation(name string) bool {
 		return true
 	case AuditRebuildStart, AuditRebuildCancel:
 		return true
-	case AuditProjectList, AuditCredentialList, AuditRefusalSummary, AuditErasureList, AuditFormationStatus, AuditFormationParked, AuditAuditSeal, AuditAuditVerify, AuditAuditActivity:
+	case AuditProjectList, AuditCredentialList, AuditRefusalSummary, AuditErasureList, AuditFormationStatus, AuditFormationParked, AuditAuditSeal, AuditAuditVerify, AuditAuditActivity, AuditAuditArchive:
 		return true
 	case AuditVocabularyAdd, AuditVocabularyList:
 		return true
@@ -1341,4 +1343,19 @@ type AuditVerification struct {
 	// Failure says which seal disagreed and how — an altered entry and a re-linked chain are
 	// different accusations, and a verifier that says only "invalid" tells nobody what happened.
 	Failure string
+	// Archived is how many entries have left the ledger under a checkpoint. They are not covered by
+	// this verification: they are checked from the files they left in, against the digest the
+	// chain here starts from. Zero when nothing has been archived.
+	Archived int64
+}
+
+// LedgerArchive describes a sealed range that was exported: where the chain stood before it, the
+// seal and entry it runs through, and the chain's digest at that seal.
+type LedgerArchive struct {
+	PreviousDigest []byte
+	ThroughSeal    int64
+	ThroughEntry   int64
+	Seals          int
+	Entries        int64
+	Head           []byte
 }

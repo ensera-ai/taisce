@@ -6,8 +6,11 @@ package pg
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"sort"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ensera-ai/taisce/internal/domain"
+	"github.com/ensera-ai/taisce/internal/ledgerarchive"
 )
 
 // AuditStore appends to the ledger.
@@ -414,9 +418,22 @@ func (s *AuditStore) Seal(ctx context.Context) (domain.AuditSeal, error) {
 // since it was sealed" — and it distinguishes an altered ENTRY from a re-linked CHAIN, because those
 // are different accusations and a verifier that says only "invalid" tells nobody what happened.
 func (s *AuditStore) Verify(ctx context.Context) (domain.AuditVerification, error) {
+	// Verification starts where the last archived range ended. What left the ledger is checked
+	// from the file it left in; what is checked here is what the ledger still holds, so the cost
+	// follows the size of the ledger and not the age of the instance.
+	out := domain.AuditVerification{}
+	expectedPrevious := make([]byte, 32)
+	var through int64
+	err := s.pool.QueryRow(ctx, s.schema.SQL(`
+		SELECT c.through_seal, c.digest, (SELECT coalesce(sum(entries), 0) FROM {schema}.audit_checkpoint)
+		  FROM {schema}.audit_checkpoint c ORDER BY c.checkpoint_id DESC LIMIT 1`)).
+		Scan(&through, &expectedPrevious, &out.Archived)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return domain.AuditVerification{}, fmt.Errorf("read the checkpoint: %w", err)
+	}
 	rows, err := s.pool.Query(ctx, s.schema.SQL(`
 		SELECT seal_id, from_entry, to_entry, entry_count, entries_digest, previous_digest, digest
-		  FROM {schema}.audit_seal ORDER BY seal_id`))
+		  FROM {schema}.audit_seal WHERE seal_id > $1 ORDER BY seal_id`), through)
 	if err != nil {
 		return domain.AuditVerification{}, fmt.Errorf("read seals: %w", err)
 	}
@@ -440,8 +457,7 @@ func (s *AuditStore) Verify(ctx context.Context) (domain.AuditVerification, erro
 		return domain.AuditVerification{}, err
 	}
 
-	out := domain.AuditVerification{Seals: len(seals)}
-	expectedPrevious := make([]byte, 32)
+	out.Seals = len(seals)
 	for _, sl := range seals {
 		var recomputed []byte
 		if err := s.pool.QueryRow(ctx, s.schema.SQL(
@@ -481,7 +497,8 @@ func (s *AuditStore) Verify(ctx context.Context) (domain.AuditVerification, erro
 	// between a verification and a reassurance.
 	if err := s.pool.QueryRow(ctx, s.schema.SQL(
 		`SELECT count(*) FROM {schema}.audit_entry
-		  WHERE entry_id > coalesce((SELECT max(to_entry) FROM {schema}.audit_seal), -1)`)).
+		  WHERE entry_id > coalesce((SELECT max(to_entry) FROM {schema}.audit_seal),
+		                            (SELECT max(through_entry) FROM {schema}.audit_checkpoint), -1)`)).
 		Scan(&out.Unsealed); err != nil {
 		return domain.AuditVerification{}, fmt.Errorf("count unsealed: %w", err)
 	}
@@ -499,8 +516,9 @@ func (s *AuditStore) Verify(ctx context.Context) (domain.AuditVerification, erro
 //
 // What it does not say:
 //   - It is the newest entry the ledger still holds. A principal absent from the result has no
-//     entry in the ledger as it stands, which is "never" only for as long as nothing removes old
-//     entries.
+//     entry in the ledger as it stands. That is "never" on an instance that has archived nothing,
+//     and "not since the oldest entry still held" on one that has: an archived range is in a
+//     file, and this does not read files.
 //   - It counts a refusal recorded against the credential as an appearance. A credential refused
 //     for lack of access was still presented by somebody, and that is the thing an operator
 //     deciding whether it is in use wants to know.
@@ -531,4 +549,149 @@ func (s *AuditStore) LastActed(ctx context.Context, principals []string) (map[st
 		out[principal] = at
 	}
 	return out, rows.Err()
+}
+
+// ErrNothingToArchive is returned when no seal is old enough to leave. It is not a failure: the
+// ledger is already as small as the cutoff allows.
+var ErrNothingToArchive = errors.New("no sealed range is older than that")
+
+// Export writes every range sealed at least olderThan ago to out, and says what it wrote.
+//
+// It removes nothing. Removing is Checkpoint's, and is done only after the caller has made the file
+// durable: a range leaves the ledger when it is safely somewhere else, and not a statement before.
+//
+// A range is old enough when its seal was written at least that long ago. A seal is written after
+// every entry it covers, so everything in such a range is older still.
+//
+// The age is measured by the database's clock, not the caller's. A seal's time is the database's,
+// and a cutoff computed on the operator's machine would be compared with it across whatever the
+// two clocks disagree by — enough, between a laptop and a container, to archive a range a moment
+// too young or to find nothing in a ledger that has plenty.
+//
+// # It verifies what it writes
+//
+// Each seal's entries are digested as they are written and compared with the seal, and each seal is
+// checked against the one before. So a file this returns without error is one that verifies, and a
+// ledger that does not verify is not archived — exporting a range that had been altered would
+// launder it into a file whose seals nobody would think to doubt. The digest is computed over the
+// lines that go into the file, not over the table a second time, so what is checked is what left.
+//
+// One snapshot serves the whole export: a seal written meanwhile is simply not in it.
+func (s *AuditStore) Export(ctx context.Context, olderThan time.Duration, out io.Writer) (domain.LedgerArchive, error) {
+	var archive domain.LedgerArchive
+	if olderThan < 0 {
+		return archive, fmt.Errorf("an age to archive beyond cannot be negative")
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return archive, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	var after int64
+	archive.PreviousDigest = make([]byte, 32)
+	if err := tx.QueryRow(ctx, s.schema.SQL(
+		`SELECT through_seal, digest FROM {schema}.audit_checkpoint ORDER BY checkpoint_id DESC LIMIT 1`)).
+		Scan(&after, &archive.PreviousDigest); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return archive, fmt.Errorf("read the checkpoint: %w", err)
+	}
+	if err := tx.QueryRow(ctx, s.schema.SQL(
+		`SELECT seal_id, to_entry FROM {schema}.audit_seal
+		  WHERE seal_id > $1 AND sealed_at <= now() - make_interval(secs => $2) ORDER BY seal_id DESC LIMIT 1`),
+		after, olderThan.Seconds()).Scan(&archive.ThroughSeal, &archive.ThroughEntry); errors.Is(err, pgx.ErrNoRows) {
+		return archive, ErrNothingToArchive
+	} else if err != nil {
+		return archive, fmt.Errorf("find the range to archive: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, s.schema.SQL(`
+		SELECT seal_id, from_entry, to_entry, entry_count, entries_digest, previous_digest, digest, sealed_at
+		  FROM {schema}.audit_seal WHERE seal_id > $1 AND seal_id <= $2 ORDER BY seal_id`), after, archive.ThroughSeal)
+	if err != nil {
+		return archive, fmt.Errorf("read seals: %w", err)
+	}
+	type sealed struct {
+		ledgerarchive.Seal
+		entries, previous, digest []byte
+	}
+	seals, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (sealed, error) {
+		var sl sealed
+		err := row.Scan(&sl.ID, &sl.FromEntry, &sl.ToEntry, &sl.EntryCount, &sl.entries, &sl.previous, &sl.digest, &sl.SealedAt)
+		sl.EntriesDigest, sl.PreviousDigest, sl.Digest = hex.EncodeToString(sl.entries), hex.EncodeToString(sl.previous), hex.EncodeToString(sl.digest)
+		return sl, err
+	})
+	if err != nil {
+		return archive, fmt.Errorf("read seals: %w", err)
+	}
+
+	file := ledgerarchive.NewWriter(out)
+	if err := file.Header(archive.PreviousDigest, archive.ThroughSeal, archive.ThroughEntry); err != nil {
+		return archive, err
+	}
+	archive.Head = archive.PreviousDigest
+	for _, sl := range seals {
+		if err := file.Seal(sl.Seal); err != nil {
+			return archive, err
+		}
+		lines, err := tx.Query(ctx, s.schema.SQL(
+			`SELECT {schema}.audit_entry_line(e) FROM {schema}.audit_entry e WHERE e.entry_id BETWEEN $1 AND $2 ORDER BY e.entry_id`),
+			sl.FromEntry, sl.ToEntry)
+		if err != nil {
+			return archive, fmt.Errorf("read the entries of seal %d: %w", sl.ID, err)
+		}
+		recomputed := ledgerarchive.NewEntriesDigest()
+		var line string
+		if _, err := pgx.ForEachRow(lines, []any{&line}, func() error {
+			recomputed.Add(line)
+			return file.Entry(line)
+		}); err != nil {
+			return archive, fmt.Errorf("write the entries of seal %d: %w", sl.ID, err)
+		}
+		if recomputed.Count() != sl.EntryCount || !bytes.Equal(recomputed.Sum(), sl.entries) ||
+			!bytes.Equal(sl.previous, archive.Head) || !bytes.Equal(ledgerarchive.Chain(sl.previous, sl.entries), sl.digest) {
+			return archive, fmt.Errorf("the ledger does not verify at seal %d, so nothing is archived: run `taisce audit verify`", sl.ID)
+		}
+		archive.Head = sl.digest
+		archive.Seals++
+		archive.Entries += int64(sl.EntryCount)
+	}
+	return archive, nil
+}
+
+// Checkpoint removes an exported range from the ledger and leaves a checkpoint where it was.
+//
+// One transaction: the checkpoint, the removal, and the ledger's own entry for the act. The
+// checkpoint is written first because the schema permits the removal only once a checkpoint covers
+// it (0079), and refuses a checkpoint that does not name a seal the ledger holds by its digest — so
+// a description of a range that is not the ledger's own cannot make room for anything.
+//
+// The entry for the act is written after the removal and is therefore not removed by it: it is the
+// first thing in the ledger that follows the range that left.
+func (s *AuditStore) Checkpoint(ctx context.Context, archive domain.LedgerArchive, fileDigest []byte, principal string) error {
+	entry := domain.AuditEntry{Operation: domain.AuditAuditArchive, Principal: principal, PrincipalKind: domain.PrincipalOperator,
+		Magnitude: int(min(archive.Entries, math.MaxInt32)), Outcome: domain.OutcomeAllowed}
+	if err := entry.Validate(); err != nil {
+		return err
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, s.schema.SQL(`
+			INSERT INTO {schema}.audit_checkpoint (through_seal, through_entry, digest, entries, seals, archive_digest)
+			VALUES ($1, $2, $3, $4, $5, $6)`),
+			archive.ThroughSeal, archive.ThroughEntry, archive.Head, archive.Entries, archive.Seals, fileDigest); err != nil {
+			return fmt.Errorf("write the checkpoint: %w", err)
+		}
+		// Every identity's rows: the ledger is the instance's, and a range leaves whole.
+		if _, err := tx.Exec(ctx, s.schema.SQL(`DELETE FROM {schema}.audit_entry WHERE entry_id <= $1`), archive.ThroughEntry); err != nil {
+			return fmt.Errorf("remove the archived entries: %w", err)
+		}
+		if _, err := tx.Exec(ctx, s.schema.SQL(`DELETE FROM {schema}.audit_seal WHERE seal_id <= $1`), archive.ThroughSeal); err != nil {
+			return fmt.Errorf("remove the archived seals: %w", err)
+		}
+		if _, err := tx.Exec(ctx, s.schema.SQL(`
+			INSERT INTO {schema}.audit_entry (operation, principal, principal_kind, project, magnitude, outcome)
+			VALUES ($1, $2, $3, '', $4, $5)`), entry.Operation, entry.Principal, entry.PrincipalKind, entry.Magnitude, entry.Outcome); err != nil {
+			return fmt.Errorf("record the archive on the ledger: %w", err)
+		}
+		return nil
+	})
 }

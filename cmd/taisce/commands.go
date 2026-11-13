@@ -54,6 +54,8 @@ const usage = `taisce — memory for agents
   taisce backlog limits            set how many unformed turns may wait (-instance, -per-project)
   taisce audit verify              recompute the ledger's chain and report what it covers
   taisce audit seal                seal everything written since the last seal
+  taisce audit archive             move sealed ranges older than --older-than into --out, under a checkpoint
+  taisce audit verify-archive      check an archived range with no database (--head, then the file)
   taisce formation parked          inspect a bounded page of parked turn metadata (--project required)
   taisce formation unpark          retry one parked turn (--project required, then the observation id)
   taisce erasure replay            apply again the erasures a restore undid (--records, --dry-run)
@@ -165,6 +167,14 @@ func dispatch(ctx context.Context, log *slog.Logger, args []string) error {
 	case "observer":
 		return observerCommand(ctx, args[1:])
 	case "audit":
+		// Archiving writes a file where the operator is, and checking one needs no service at
+		// all: neither is a request to the management surface, whatever the environment says.
+		if len(args) > 1 && args[1] == "archive" {
+			return auditArchiveCommand(ctx, args[2:], os.Stdout)
+		}
+		if len(args) > 1 && args[1] == "verify-archive" {
+			return auditVerifyArchiveCommand(args[2:], os.Stdout)
+		}
 		if c, ok := managementFromEnv(); ok {
 			return c.audit(ctx, args[1:])
 		}
@@ -732,7 +742,7 @@ func adminPool(ctx context.Context) (*pgxpool.Pool, pg.Schema, error) {
 // their own auditor that they have not rewritten their own records.
 func auditCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taisce audit verify | taisce audit seal")
+		return fmt.Errorf("usage: taisce audit verify | taisce audit seal | taisce audit archive | taisce audit verify-archive")
 	}
 	admin, schema, err := adminPool(ctx)
 	if err != nil {
@@ -787,6 +797,11 @@ func reportVerification(v domain.AuditVerification) error {
 		return fmt.Errorf("the audit ledger does not verify")
 	}
 	fmt.Printf("verified: %d seals covering %d entries\nhead: %x\n", v.Seals, v.Entries, v.Head)
+	if v.Archived > 0 {
+		// What this did not check, said every time for the same reason as the unsealed count.
+		fmt.Printf("\n%d entries left the ledger under a checkpoint and are not covered by this check. "+
+			"They verify from their archives: `taisce audit verify-archive`.\n", v.Archived)
+	}
 	if v.Unsealed > 0 {
 		// Said every time rather than only when it looks large. A verification that reports only
 		// what it covers is a reassurance.
