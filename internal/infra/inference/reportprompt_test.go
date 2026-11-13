@@ -184,6 +184,9 @@ func stripFence(rendered string) string {
 const minimalReportFile = `model_contract:
   temperature: 0
   response_format: json_object
+  reply_tokens:
+    base: 100
+    per_input_byte: 2
 task: |-
   Describe the group.
 grounding: |-

@@ -54,7 +54,8 @@ func NewSummariser(config Config) *Summariser {
 
 // Write asks the model to condense one stretch of history.
 func (s *Summariser) Write(ctx context.Context, m compaction.Material) (compaction.Summary, error) {
-	ceiling := s.config.MaxOutputTokens
+	material := renderMaterial(m)
+	ceiling := s.config.ceilingFor(compactionPrompt.ModelContract.ReplyTokens, len(material))
 	body, err := json.Marshal(chatRequest{
 		MaxTokens:      ceiling,
 		Model:          s.config.Model,
@@ -62,7 +63,7 @@ func (s *Summariser) Write(ctx context.Context, m compaction.Material) (compacti
 		ResponseFormat: &responseFormat{Type: compactionPrompt.ModelContract.ResponseFormat},
 		Messages: []chatMessage{
 			{Role: "system", Content: compactionSystemPrompt()},
-			{Role: "user", Content: renderMaterial(m)},
+			{Role: "user", Content: material},
 		},
 	})
 	if err != nil {

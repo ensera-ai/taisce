@@ -161,6 +161,9 @@ func goldenVocabulary(t *testing.T) domain.Ontology {
 const minimalFile = `model_contract:
   temperature: 0
   response_format: json_object
+  reply_tokens:
+    base: 100
+    per_input_byte: 2
 task: |-
   Read the message.
 relations: |-
@@ -195,4 +198,37 @@ func withoutSection(name string) string {
 		}
 	}
 	return strings.Join(kept, "\n")
+}
+
+// TestAPromptFileThatStatesNoCeilingDoesNotLoad holds every generation request to carrying a
+// ceiling, at the one place that cannot be forgotten: the file a prompt is read from.
+//
+// The three prompt files are compiled in and loaded when the package is, so one that states no
+// allowance stops the binary starting and fails every test in this package. Here each way of not
+// stating one is made to happen on its own, and the three files that ship are read back.
+func TestAPromptFileThatStatesNoCeilingDoesNotLoad(t *testing.T) {
+	stated := "  reply_tokens:\n    base: 100\n    per_input_byte: 2\n"
+	for name, without := range map[string]string{
+		"no allowance at all":   "",
+		"no base":               "  reply_tokens:\n    per_input_byte: 2\n",
+		"nothing for the input": "  reply_tokens:\n    base: 100\n",
+		"a base of zero":        "  reply_tokens:\n    base: 0\n    per_input_byte: 2\n",
+		"a negative rate":       "  reply_tokens:\n    base: 100\n    per_input_byte: -1\n",
+	} {
+		if _, err := loadPrompt([]byte(strings.Replace(minimalFile, stated, without, 1))); err == nil || !strings.Contains(err.Error(), "reply_tokens") {
+			t.Errorf("an extraction prompt with %s loaded: %v", name, err)
+		}
+		if _, err := loadReportPrompt([]byte(strings.Replace(minimalReportFile, stated, without, 1))); err == nil || !strings.Contains(err.Error(), "reply_tokens") {
+			t.Errorf("a report prompt with %s loaded: %v", name, err)
+		}
+	}
+	for name, allowance := range map[string]replyAllowance{
+		"extraction": extractionPrompt.ModelContract.ReplyTokens,
+		"report":     reportPrompt.ModelContract.ReplyTokens,
+		"compaction": compactionPrompt.ModelContract.ReplyTokens,
+	} {
+		if err := allowance.stated(); err != nil {
+			t.Errorf("the %s prompt that ships states no ceiling: %v", name, err)
+		}
+	}
 }
