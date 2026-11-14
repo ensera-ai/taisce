@@ -19,11 +19,12 @@ import (
 // whether tables exist, and they did — and then served requests against a schema missing whatever
 // its own release had added, failing each one in its own way for as long as the migration took.
 //
-// The check is one-sided on purpose. A schema older than the binary is unambiguous: the binary
-// cannot work without what it was built for, so it waits. A schema *newer* than the binary is a pod
-// from the previous release still serving after the migration, and whether that is safe depends on
-// what a migration is allowed to change between releases — a promise that has not been made. So
-// this refuses the first and says nothing about the second.
+// A schema older than the binary is unambiguous: the binary cannot work without what it was built
+// for, so it waits. That side is this test's. A schema *newer* than the binary is a pod of an
+// earlier release still serving after the migration: the previous release is promised that, and
+// stays ready; anything older stands down. That side is held by
+// TestABinaryTwoReleasesOldIsNotReadyAndThePreviousOneIs, and here only as far as the previous
+// release being ready once the migration lands.
 func TestABinaryIsNotReadyOnASchemaOlderThanItWasBuiltFor(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
@@ -78,9 +79,16 @@ func TestABinaryIsNotReadyOnASchemaOlderThanItWasBuiltFor(t *testing.T) {
 	if err := pg.CheckSchemaBuiltFor(ctx, pool, memory, built); err != nil {
 		t.Fatalf("after the migration the binary it was built for is still not ready: %v", err)
 	}
-	// A schema newer than the binary is not this check's to refuse.
-	if err := pg.CheckSchemaBuiltFor(ctx, pool, memory, built-1); err != nil {
-		t.Fatalf("a binary from the release before is refused on a newer schema, which no decision has asked for: %v", err)
+	// A binary of the release before is ready on it too. That release is the number in the file
+	// and not this tree's version less one: straight after a release the two are the same binary,
+	// and the version below was never released. What happens under the number is the other test's,
+	// TestABinaryTwoReleasesOldIsNotReadyAndThePreviousOneIs.
+	previous, err := OldestServed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pg.CheckSchemaBuiltFor(ctx, pool, memory, previous); err != nil {
+		t.Fatalf("a binary of the previous release is refused on this schema, so an ordinary upgrade would have nothing serving: %v", err)
 	}
 }
 
