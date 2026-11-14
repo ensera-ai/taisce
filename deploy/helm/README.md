@@ -360,7 +360,7 @@ at the same time. Nothing orders the two, and nothing needs to:
   something the one before had already stopped using.
 
 That holds from one release to the next. **Upgrade one release at a time.** An upgrade that skips a
-release is not promised to roll cleanly. From the release after 0.7, pods more than one release
+release is not promised to roll cleanly. From 0.8, pods more than one release
 behind report not ready as soon as the migration commits, so they stop taking traffic instead of
 failing requests until they are replaced; for that moment nothing may be ready until the new pods
 are. Pods of 0.7 and earlier do not carry that check and may fail requests during such a roll. To
@@ -371,6 +371,57 @@ schema, so `helm rollback` by one release does not need a restore. The schema it
 backwards, and the promise is about the schema: rows the newer release wrote while it ran are the
 one thing the older one was never tested against. [The migrations page](../../docs/postgresql/migrations.md#what-an-upgrade-promises) has
 the rule and what it does not cover.
+
+## Upgrading from 0.7
+
+Nothing in 0.8 refuses to render or changes who can reach the release. Three things are worth
+doing first, and the first is the only one that cannot be done afterwards.
+
+| Before upgrading | Why | What happens if you do not |
+|---|---|---|
+| Count the entities whose kind is not one of the six, if you want to know what the upgrade changes: the query is below | An entity's kind is now one of `person`, `organisation`, `place`, `time`, `value`, `thing`, whoever writes it. The migration makes every other kind a `thing` and does not keep what it said | Nothing fails. What was rewritten cannot be learned afterwards, short of a backup |
+| Set `inference.maxOutputTokens` if your model reasons before it answers | Every generation call now states a ceiling in proportion to what the model was given, and a reply that reaches it is refused whole. The default was measured on a model that does not spend its reply on reasoning | Turns whose reply is cut are not formed, and the instance counts them |
+| Come from 0.7. From 0.6 or earlier, upgrade to 0.7 first, or scale `api`, `worker` and `manage` to zero for the upgrade | The promise is one release wide, and pods of 0.7 and earlier do not stand down by themselves | Pods of the older release may fail requests until the roll replaces them |
+
+```sh
+kubectl exec <release>-taisce-db-1 -c postgres -- psql -U postgres -d taisce -c \
+  "SELECT entity_type, count(*) FROM memory.entity
+    WHERE entity_type <> ALL (ARRAY['person','organisation','place','time','value','thing'])
+    GROUP BY 1 ORDER BY 2 DESC"
+```
+
+And one thing to do after it:
+
+- **Copy the erasure record key out of the cluster.** Each erasure now writes a line to the API's
+  log, so that a restore cannot take the record of it away. The chart generates the key once, as the
+  Secret `<release>-taisce-erasure-record`, and keeps it across upgrades. Without a copy of it
+  somewhere else, and logs that outlive the backups, nothing can be replayed.
+  [Backups](#backups-say-where-they-go-or-say-there-are-none) has the command and what it depends on.
+
+What behaves differently afterwards, with nothing to do beforehand:
+
+- **A recall's `type` is always one of the six.** A caller that switched on another value never
+  sees it again.
+- **Extraction keeps a deadline, a schedule and an obligation** as facts that hold now, where it
+  refused them. Facts already formed keep the interpretation they were formed under; a
+  [rebuild](../../docs/20-generation-rebuild.md) re-reads stored conversations under the new one.
+- **`POST /v1/records/list` takes an optional `entity_id`**, which pages the current facts naming
+  one entity. A request without it is unchanged.
+- **A sealed range of the ledger can be moved to a file** with `taisce audit archive`. Nothing
+  leaves the ledger unless that is run.
+- **From this release on, a pod more than one release behind reports not ready** as soon as a
+  migration commits, instead of serving on a schema nobody checked it against.
+
+The schema moves forward by five migrations when the bootstrap Job of the new revision runs. Pods of
+0.7 keep serving on it until the roll replaces them: that is checked, by running 0.7's own tests on
+the new schema. Writes to the entity table wait while the kinds are rewritten, for as long as one
+pass over that table takes.
+
+A `docker compose` deployment has one more step. Set `TAISCE_ERASURE_RECORD_KEY` before pulling the
+new `compose.yaml` (`openssl rand -base64 36`), and keep a copy of it and of the service's logs
+somewhere that is not that machine. Without a key the service says so at start and erasures leave no
+trace. The reasoning-model ceiling there is `TAISCE_INFERENCE_MAX_OUTPUT_TOKENS`, and the count is
+the same query through `docker compose exec postgres psql`.
 
 ## Upgrading from 0.6
 
