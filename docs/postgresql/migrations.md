@@ -340,6 +340,12 @@ The number is a file, `internal/migrate/oldest-served`, because it moves with ev
 file does not name that release's schema, so the first change after a release cannot be merged
 without moving it.
 
+Straight after a release the number is this tree's own version: nothing has been migrated since, so
+the previous release was built for this schema. No real binary is then older than the schema and
+still served, and the middle row of the table would go unasserted until the next migration. The test
+therefore also writes a number one below the schema's version and checks the binary at it is ready
+and the one below it is not.
+
 ### What it does not cover
 
 - **Rows only the new release writes.** The previous release's tests write the previous release's

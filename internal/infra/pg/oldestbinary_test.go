@@ -33,7 +33,10 @@ func TestABinaryTwoReleasesOldIsNotReadyAndThePreviousOneIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if previous >= this {
+	// Equal is the ordinary state straight after a release: nothing has been migrated since, so the
+	// previous release was built for this schema. Only a previous release newer than this tree is a
+	// contradiction.
+	if previous > this {
 		t.Fatalf("the previous release was built for version %d and this tree for %d; one of them is wrong", previous, this)
 	}
 	// Whoever migrated wrote the number down.
@@ -55,18 +58,34 @@ func TestABinaryTwoReleasesOldIsNotReadyAndThePreviousOneIs(t *testing.T) {
 		t.Fatalf("a binary newer than the schema does not wait for it: %v", err)
 	}
 
+	// The side an upgrade depends on: a binary older than the schema, and no older than the number,
+	// stays ready. Straight after a release no real binary is in that position — the previous
+	// release's schema is this one — so the test writes the number itself. Otherwise this would be
+	// asserted only on commits that carry a migration the last release did not.
+	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.schema_serves SET oldest_binary = $1`), this-1); err != nil {
+		t.Fatal(err)
+	}
+	if err := pg.CheckSchemaBuiltFor(ctx, pool, schema, this-1); err != nil {
+		t.Fatalf("a binary one version older than the schema, at the number the schema serves, is not ready: %v", err)
+	}
+	if err := pg.CheckSchemaBuiltFor(ctx, pool, schema, this-2); !errors.Is(err, pg.ErrBinaryBehind) {
+		t.Fatalf("a binary below the number the schema serves is ready: %v", err)
+	}
+
 	// The number only rises. A namespace a newer release has migrated, reached again by this
-	// runner, keeps what the newer one wrote.
-	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.schema_serves SET oldest_binary = $1`), this); err != nil {
+	// runner, keeps what the newer one wrote. One above this tree and not this tree's own version,
+	// which straight after a release is what this runner would write anyway. A newer release would
+	// have added its migrations too; the number is all this runner's write depends on.
+	if _, err := pool.Exec(ctx, schema.SQL(`UPDATE {schema}.schema_serves SET oldest_binary = $1`), this+1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := migrate.Apply(ctx, pool, schema); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, schema.SQL(`SELECT oldest_binary FROM {schema}.schema_serves`)).Scan(&recorded); err != nil || recorded != this {
-		t.Fatalf("migrating again lowered the oldest binary served from %d to %d (%v)", this, recorded, err)
+	if err := pool.QueryRow(ctx, schema.SQL(`SELECT oldest_binary FROM {schema}.schema_serves`)).Scan(&recorded); err != nil || recorded != this+1 {
+		t.Fatalf("migrating again lowered the oldest binary served from %d to %d (%v)", this+1, recorded, err)
 	}
-	if err := pg.CheckSchemaBuiltFor(ctx, pool, schema, previous); !errors.Is(err, pg.ErrBinaryBehind) {
-		t.Fatalf("after a newer release migrated, what was the previous release is ready: %v", err)
+	if err := pg.CheckSchemaBuiltFor(ctx, pool, schema, this); !errors.Is(err, pg.ErrBinaryBehind) {
+		t.Fatalf("after a newer release migrated, a binary older than the number it wrote is ready: %v", err)
 	}
 }
